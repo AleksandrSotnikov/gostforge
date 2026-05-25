@@ -157,6 +157,10 @@ checks:
   B.01: {enabled: true}
   B.02: {enabled: true}
   B.03: {enabled: true, params: {allow_dot_after_number: false}}
+  B.04: {enabled: true}
+  B.05: {enabled: true}
+  B.06: {enabled: true, params: {cell_font_size_pt: 12, cell_line_spacing: 1.0}}
+  B.07: {enabled: true, params: {allow_first_column_empty: false}}
   B.08: {enabled: true}
   B.09: {enabled: true}
   R.04:

@@ -423,3 +423,11 @@ def test_b08_reference_in_nested_section() -> None:
 def test_b02_registered() -> None:
     """Заглушка B.02 зарегистрирована в реестре."""
     assert "B.02" in registered_checks()
+
+
+# --- B.04 (заглушка) -----------------------------------------------------
+
+
+def test_b04_registered() -> None:
+    """Заглушка B.04 зарегистрирована в реестре."""
+    assert "B.04" in registered_checks()

@@ -77,6 +77,21 @@ def check_table_caption_above(
     return []
 
 
+@register("B.04")
+def check_table_continuation_header(
+    document: Document,  # noqa: ARG001
+    profile: Profile,  # noqa: ARG001
+) -> list[Violation]:
+    """При переносе таблицы на новую страницу должен быть заголовок «Продолжение таблицы N» (заглушка Фазы 2).
+
+    На Фазе 2 — заглушка: парсер не сохраняет разбивку на страницы, без
+    рендеринга это нельзя проверить. Когда появится модель страниц
+    (PageBreak/PageLayout), здесь будет проверка наличия заголовка
+    «Продолжение таблицы N» на каждой странице, куда переносится таблица.
+    """
+    return []
+
+
 @register("B.01")
 def check_table_has_caption(
     document: Document, profile: Profile  # noqa: ARG001
@@ -332,6 +347,7 @@ def check_table_referenced_in_text(
 __all__ = [
     "check_table_caption_above",
     "check_table_caption_format",
+    "check_table_continuation_header",
     "check_table_has_caption",
     "check_table_numbering_continuous",
     "check_table_referenced_in_text",
