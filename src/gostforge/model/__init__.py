@@ -22,15 +22,17 @@ SCHEMA_VERSION = "0.2.0"
 class TextRun:
     """Фрагмент текста с inline-разметкой.
 
-    `font` и `size_pt` могут быть `None`, если значения наследуются от стиля
-    абзаца. Заполняются парсером, когда run явно переопределяет шрифт/кегль.
+    Все атрибуты форматирования (`bold`, `italic`, `superscript`, `subscript`,
+    `font`, `size_pt`) могут быть `None`, что означает «наследуется от
+    стиля абзаца». Парсер выставляет только те значения, которые run задаёт
+    явно. Проверки трактуют `None` как «нет нарушения».
     """
 
     text: str
-    bold: bool = False
-    italic: bool = False
-    superscript: bool = False
-    subscript: bool = False
+    bold: bool | None = None
+    italic: bool | None = None
+    superscript: bool | None = None
+    subscript: bool | None = None
     font: str | None = None
     size_pt: float | None = None
 

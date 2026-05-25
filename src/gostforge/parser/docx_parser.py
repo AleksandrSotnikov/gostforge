@@ -264,8 +264,8 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
         content.append(
             TextRun(
                 text=text,
-                bold=bool(run.bold) if run.bold is not None else False,
-                italic=bool(run.italic) if run.italic is not None else False,
+                bold=bool(run.bold) if run.bold is not None else None,
+                italic=bool(run.italic) if run.italic is not None else None,
                 font=font_name,
                 size_pt=size_pt,
             )
