@@ -206,3 +206,94 @@ def test_export_writes_figure_placeholder_with_caption(tmp_path: Path) -> None:
     # Плейсхолдер рисунка + подпись
     assert any("[Рисунок: fig-1]" in t for t in texts)
     assert any("Рисунок 1" in t for t in texts)
+
+
+def test_export_writes_footer_with_page_field(tmp_path: Path) -> None:
+    """Footer с {page}-плейсхолдером превращается в <w:fldSimple w:instr=PAGE/>."""
+    from gostforge.model import ContentTemplate, HeaderConfig, PageNumberingConfig
+    from gostforge.profile import load_profile
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            page_numbering=PageNumberingConfig(visible=True),
+            footer=HeaderConfig(default=ContentTemplate(center=[TextRun(text="{page}")])),
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    # Round-trip через парсер: footer с PAGE-полем должен быть восстановлен.
+    from gostforge.parser import parse_docx
+    reparsed = parse_docx(out)
+    section = reparsed.page_sections[0]
+    assert section.page_numbering.visible is True
+    assert section.footer is not None
+    center = section.footer.default.center
+    assert center is not None
+    assert any(isinstance(r, TextRun) and "{page}" in r.text for r in center)
+
+
+def test_export_writes_pgnumtype_start(tmp_path: Path) -> None:
+    """start_mode=start_at, start_value=3 → <w:pgNumType w:start=3/>."""
+    from gostforge.model import PageNumberingConfig
+    from gostforge.profile import load_profile
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            page_numbering=PageNumberingConfig(
+                visible=True, start_mode="start_at", start_value=3
+            ),
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    from gostforge.parser import parse_docx
+    reparsed = parse_docx(out)
+    section = reparsed.page_sections[0]
+    assert section.page_numbering.start_mode == "start_at"
+    assert section.page_numbering.start_value == 3
+
+
+def test_export_roundtrip_preserves_f04_and_f06(tmp_path: Path) -> None:
+    """Полный round-trip: parse → export → parse не теряет F.04/F.06 информацию."""
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent))
+    from conftest import make_docx
+    from gostforge.parser import parse_docx
+    from gostforge.profile import load_profile
+    from gostforge.validator import validate
+
+    src = tmp_path / "in.docx"
+    make_docx(
+        src,
+        margins_mm={"top": 20, "right": 15, "bottom": 20, "left": 30},
+        body_font="Times New Roman",
+        body_size=14,
+        headings=[
+            (1, "ВВЕДЕНИЕ"),
+            (1, "ЗАКЛЮЧЕНИЕ"),
+            (1, "СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ"),
+        ],
+        paragraphs=["Текст работы."],
+        page_number=True,
+        page_number_start=3,
+    )
+    profile = load_profile("gost-7.32-2017")
+    doc = parse_docx(src)
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+    reparsed = parse_docx(out)
+    errors = [v for v in validate(reparsed, profile) if v.severity == "error"]
+    # F.04 (поле PAGE) и F.06 (start=3) теперь должны переноситься через export.
+    codes = {v.check_code for v in errors}
+    assert "F.04" not in codes
+    assert "F.06" not in codes

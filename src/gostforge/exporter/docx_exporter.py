@@ -28,16 +28,24 @@ from docx.text.paragraph import Paragraph as DocxParagraph  # type: ignore[impor
 
 from gostforge.model import (
     Block,
+    ContentTemplate,
     Document,
     Figure,
     InlineElement,
     LogicalSection,
+    PageSection,
     Paragraph,
     Table,
     TextRun,
 )
 from gostforge.profile import Profile
 
+# Локальные импорты lxml — нужны только для записи поля PAGE в footer.
+# Парсер уже использует ту же lxml-цепочку для чтения.
+from lxml import etree  # type: ignore[import-untyped]
+
+
+W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 _ALIGNMENT_MAP = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
@@ -45,6 +53,10 @@ _ALIGNMENT_MAP = {
     "center": WD_ALIGN_PARAGRAPH.CENTER,
     "justify": WD_ALIGN_PARAGRAPH.JUSTIFY,
 }
+
+# Плейсхолдер, который парсер ставит при обнаружении поля PAGE; при
+# экспорте мы материализуем его обратно в <w:fldSimple w:instr="PAGE"/>.
+_PAGE_PLACEHOLDER = "{page}"
 
 
 def _apply_page_geometry(doc: DocxDocument, profile: Profile) -> None:
@@ -187,6 +199,98 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
     _write_caption_paragraph(doc, figure.caption)
 
 
+def _write_template_into_footer_paragraph(
+    docx_paragraph: DocxParagraph, content: Sequence[InlineElement]
+) -> None:
+    """Записать содержимое одного слота footer/header, материализуя {page}.
+
+    Каждый TextRun(text="{page}") превращается в OOXML-поле PAGE:
+        <w:fldSimple w:instr="PAGE"/>
+    Остальной текст пишется как обычные run-ы.
+    """
+    p_xml = docx_paragraph._p
+    for element in content:
+        if not isinstance(element, TextRun):
+            continue
+        # Разбиваем текст элемента на чередующиеся куски «обычный текст» / «{page}».
+        text = element.text
+        if not text:
+            continue
+        chunks = text.split(_PAGE_PLACEHOLDER)
+        for i, chunk in enumerate(chunks):
+            if chunk:
+                docx_paragraph.add_run(chunk)
+            if i < len(chunks) - 1:
+                fld = etree.SubElement(p_xml, f"{{{W_NS}}}fldSimple")
+                fld.set(f"{{{W_NS}}}instr", "PAGE")
+                # Добавим внутрь fldSimple фиктивный run с пустым текстом —
+                # без него Word не рендерит поле в новых версиях.
+                run = etree.SubElement(fld, f"{{{W_NS}}}r")
+                rt = etree.SubElement(run, f"{{{W_NS}}}t")
+                rt.text = ""
+
+
+def _has_text(items: Sequence[InlineElement] | None) -> bool:
+    if not items:
+        return False
+    return any(
+        isinstance(el, TextRun) and el.text and el.text.strip() for el in items
+    )
+
+
+def _write_footer(doc: DocxDocument, footer_template: ContentTemplate) -> None:
+    """Записать footer из ContentTemplate в первую docx-секцию.
+
+    Распределение по слотам left/center/right на Фазе 1 делаем через
+    выравнивание единственного параграфа: если задан center — выравниваем
+    по центру; right — вправо; иначе left. Если заполнены несколько слотов,
+    добавляем отдельные параграфы под каждый.
+    """
+    section = doc.sections[0]
+    footer = section.footer
+    # Удалим параграфы-плейсхолдеры, которые python-docx создаёт по умолчанию
+    # (один пустой <w:p/>).
+    for p in list(footer.paragraphs):
+        p_xml = p._p
+        if p_xml.getparent() is not None and not p.text and not list(p_xml):
+            p_xml.getparent().remove(p_xml)
+
+    slots: list[tuple[str, Sequence[InlineElement] | None]] = [
+        ("left", footer_template.left),
+        ("center", footer_template.center),
+        ("right", footer_template.right),
+    ]
+
+    for slot, content in slots:
+        if not _has_text(content):
+            continue
+        assert content is not None  # ради mypy
+        para = footer.add_paragraph()
+        if slot == "center":
+            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif slot == "right":
+            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        else:
+            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _write_template_into_footer_paragraph(para, content)
+
+
+def _apply_pgnumtype_start(doc: DocxDocument, page_section: PageSection) -> None:
+    """Если в модели задано start_at, прописать <w:pgNumType w:start="N"/> в sectPr."""
+    numbering = page_section.page_numbering
+    if numbering.start_mode != "start_at" or numbering.start_value is None:
+        return
+    sect = doc.sections[0]
+    sect_pr = getattr(sect, "_sectPr", None)
+    if sect_pr is None:
+        return
+    # Удаляем существующий pgNumType, чтобы не было дублей.
+    for existing in sect_pr.findall(f"{{{W_NS}}}pgNumType"):
+        sect_pr.remove(existing)
+    pg = etree.SubElement(sect_pr, f"{{{W_NS}}}pgNumType")
+    pg.set(f"{{{W_NS}}}start", str(numbering.start_value))
+
+
 def _write_items(doc: DocxDocument, items: Sequence[LogicalSection | Block]) -> None:
     """Рекурсивно записать смешанный список логических разделов и блоков."""
     for item in items:
@@ -207,12 +311,23 @@ def export_docx(document: Document, profile: Profile, output_path: str | Path) -
     Минимальная реализация: геометрия страницы, стиль Normal, параграфы и
     заголовки. PageSection обрабатываются последовательно, но все кладутся
     в одну физическую секцию docx (sectPr per-PageSection — Фаза 2).
+
+    Если у первой PageSection задан footer (например, после parse_docx
+    плейсхолдер {page}) — он материализуется в OOXML-поле PAGE через lxml.
     """
     output_path = Path(output_path)
     doc = docx.Document()
 
     _apply_page_geometry(doc, profile)
     _apply_normal_style(doc, profile)
+
+    # Footer и стартовая страница — берём из первой PageSection (на Фазе 1
+    # все PageSection кладутся в одну физическую секцию docx).
+    if document.page_sections:
+        first = document.page_sections[0]
+        _apply_pgnumtype_start(doc, first)
+        if first.footer is not None:
+            _write_footer(doc, first.footer.default)
 
     for page_section in document.page_sections:
         _write_items(doc, page_section.content)
