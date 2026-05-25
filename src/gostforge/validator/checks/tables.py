@@ -437,11 +437,85 @@ def _iter_table_cells(table: Table) -> list[list[InlineElement]]:
     return cells
 
 
+def _cell_is_empty(cell: list[InlineElement]) -> bool:
+    """True, если в ячейке нет ни одного TextRun с непустым текстом."""
+    for element in cell:
+        if isinstance(element, TextRun) and element.text and element.text.strip():
+            return False
+    return True
+
+
+@register("B.07")
+def check_table_empty_cells_dash(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Пустые ячейки таблицы должны быть заполнены прочерком.
+
+    Параметры:
+    - `allow_first_column_empty` (bool, default False): если True, пустые
+      ячейки в первой колонке (col 0) допускаются (нумерация строк и т.п.).
+
+    Обходим headers и rows. Если найдена ячейка с полностью пустым текстом
+    (все TextRun-ы после strip пусты) — один Violation на таблицу с
+    указанием первой найденной координаты («row 2, col 3»).
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("B.07")
+    allow_first_col = False
+    if config and config.params.get("allow_first_column_empty") is not None:
+        allow_first_col = bool(config.params["allow_first_column_empty"])
+
+    for page_section, table in _all_tables(document):
+        # row=0 — это «строка заголовков» (headers); далее rows нумеруются с 1.
+        empty_coord: tuple[int, int] | None = None
+        for col_idx, header_cell in enumerate(table.headers):
+            if allow_first_col and col_idx == 0:
+                continue
+            if _cell_is_empty(header_cell):
+                empty_coord = (0, col_idx)
+                break
+        if empty_coord is None:
+            for row_idx, row in enumerate(table.rows, start=1):
+                for col_idx, cell in enumerate(row):
+                    if allow_first_col and col_idx == 0:
+                        continue
+                    if _cell_is_empty(cell):
+                        empty_coord = (row_idx, col_idx)
+                        break
+                if empty_coord is not None:
+                    break
+
+        if empty_coord is None:
+            continue
+
+        row_idx, col_idx = empty_coord
+        violations.append(
+            Violation(
+                check_code="B.07",
+                severity="info",
+                message=(
+                    f"В таблице «{table.id}» пустая ячейка "
+                    f"(row {row_idx}, col {col_idx}) — рекомендуется поставить прочерк"
+                ),
+                location=f"page_sections.{page_section.id}.table[{table.id}]",
+                suggestion="Заполнить пустую ячейку прочерком «—»",
+                details={
+                    "table_id": table.id,
+                    "row": str(row_idx),
+                    "col": str(col_idx),
+                },
+            )
+        )
+
+    return violations
+
+
 __all__ = [
     "check_table_caption_above",
     "check_table_caption_format",
     "check_table_cell_font_size",
     "check_table_continuation_header",
+    "check_table_empty_cells_dash",
     "check_table_has_caption",
     "check_table_header_repeats",
     "check_table_numbering_continuous",

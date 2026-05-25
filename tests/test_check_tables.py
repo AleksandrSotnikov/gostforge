@@ -507,3 +507,80 @@ def test_b06_param_override() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "B.06"]
     assert len(found) == 1
     assert found[0].details["found_pt"] == "12.0"
+
+
+# --- B.07 (пустые ячейки заполнены прочерком) ---------------------------
+
+
+def test_b07_registered() -> None:
+    """Проверка B.07 зарегистрирована в реестре."""
+    assert "B.07" in registered_checks()
+
+
+def test_b07_no_empty_cells_no_violation() -> None:
+    """Все ячейки заполнены — нарушения нет."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H1")], [TextRun(text="H2")]],
+        rows=[
+            [[TextRun(text="1")], [TextRun(text="2")]],
+            [[TextRun(text="3")], [TextRun(text="—")]],
+        ],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.07"]
+    assert found == []
+
+
+def test_b07_empty_cell_violation() -> None:
+    """Пустая ячейка в данных — нарушение."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H1")], [TextRun(text="H2")]],
+        rows=[
+            [[TextRun(text="1")], [TextRun(text="2")]],
+            [[TextRun(text="3")], [TextRun(text="  ")]],  # пустая
+        ],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.07"]
+    assert len(found) == 1
+    assert found[0].details["row"] == "2"
+    assert found[0].details["col"] == "1"
+
+
+def test_b07_allow_first_column_empty() -> None:
+    """allow_first_column_empty=True пропускает пустые ячейки col 0."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="")], [TextRun(text="H2")]],  # col 0 пуст
+        rows=[
+            [[TextRun(text="")], [TextRun(text="2")]],  # col 0 пуст
+        ],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["B.07"].params["allow_first_column_empty"] = True
+    found = [v for v in validate(doc, profile) if v.check_code == "B.07"]
+    assert found == []
+
+
+def test_b07_empty_header_cell_violation() -> None:
+    """Пустая ячейка в шапке (row 0) — тоже нарушение."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H1")], []],  # col 1 шапки пуст
+        rows=[[[TextRun(text="1")], [TextRun(text="2")]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.07"]
+    assert len(found) == 1
+    assert found[0].details["row"] == "0"
+    assert found[0].details["col"] == "1"
