@@ -59,6 +59,24 @@ def _has_text(elements: Sequence[InlineElement]) -> bool:
     )
 
 
+@register("B.02")
+def check_table_caption_above(
+    document: Document,  # noqa: ARG001
+    profile: Profile,  # noqa: ARG001
+) -> list[Violation]:
+    """Подпись таблицы должна располагаться над таблицей (заглушка Фазы 2).
+
+    На Фазе 2 модель не сохраняет caption_position у Table: парсер делает
+    склейку и кладёт подпись сверху, если она была найдена выше таблицы.
+    Если caption присутствует — он уже «над таблицей». Если caption пуст —
+    это случай B.01, дублировать не нужно.
+
+    Когда парсер начнёт сохранять caption_position явно, здесь появится
+    логика: caption_position != "above" → Violation.
+    """
+    return []
+
+
 @register("B.01")
 def check_table_has_caption(
     document: Document, profile: Profile  # noqa: ARG001
@@ -312,6 +330,7 @@ def check_table_referenced_in_text(
 
 
 __all__ = [
+    "check_table_caption_above",
     "check_table_caption_format",
     "check_table_has_caption",
     "check_table_numbering_continuous",

@@ -415,3 +415,11 @@ def test_b08_reference_in_nested_section() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
     assert found == []
+
+
+# --- B.02 (заглушка) -----------------------------------------------------
+
+
+def test_b02_registered() -> None:
+    """Заглушка B.02 зарегистрирована в реестре."""
+    assert "B.02" in registered_checks()
