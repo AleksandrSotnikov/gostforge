@@ -172,6 +172,7 @@ checks:
       require_final_dot: true
       require_separator: true
       require_url_marker_for_web: true
+  R.05: {enabled: true}
   R.06: {enabled: true}
   R.08: {enabled: true}
   C.01: {enabled: true}

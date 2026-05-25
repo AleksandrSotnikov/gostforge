@@ -279,7 +279,59 @@ def check_reference_style_numeric(
     return violations
 
 
+# --- R.05 — каждый источник упомянут в тексте ---------------------------
+
+# Поиск ссылки на номер N в любом из форматов: [N], [N,, [N-, [N:.
+_ENTRY_REF_RE_TEMPLATE = r"\[\s*{n}\s*(?:[,\-–\]:])"
+
+
+def _entry_referenced(text: str, num: int) -> bool:
+    """True, если в тексте встречается ссылка на источник с номером N."""
+    pattern = re.compile(_ENTRY_REF_RE_TEMPLATE.format(n=num))
+    return bool(pattern.search(text))
+
+
+@register("R.05")
+def check_each_entry_referenced(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """Каждая запись bibliography должна быть упомянута в тексте.
+
+    Для каждой записи с index N (1-based порядок в bibliography) ищем в
+    тексте всех параграфов конструкции вида `[N]`, `[N,`, `[N-`, `[N:`.
+    Если ни одного — Violation severity=warning.
+    """
+    violations: list[Violation] = []
+    if not document.bibliography:
+        return violations
+
+    text = _document_text(document)
+
+    for index, entry in enumerate(document.bibliography, start=1):
+        if _entry_referenced(text, index):
+            continue
+        violations.append(
+            Violation(
+                check_code="R.05",
+                severity="warning",
+                message=f"Источник [{index}] «{entry.id}» не упомянут в тексте",
+                location=f"bibliography[{entry.id}]",
+                suggestion=(
+                    f"Добавить в текст ссылку вида [{index}] или удалить "
+                    f"источник из списка литературы, если он не используется"
+                ),
+                details={
+                    "entry_id": entry.id,
+                    "index": str(index),
+                },
+            )
+        )
+
+    return violations
+
+
 __all__ = [
     "check_bibliography_format",
+    "check_each_entry_referenced",
     "check_reference_style_numeric",
 ]
