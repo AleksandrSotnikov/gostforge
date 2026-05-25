@@ -4,11 +4,31 @@
 
 from __future__ import annotations
 
-from gostforge.model import BibliographyEntry, Document
+from gostforge.model import (
+    BibliographyEntry,
+    Document,
+    PageSection,
+    Paragraph,
+    TextRun,
+)
 from gostforge.profile import Profile, load_profile
 from gostforge.profile.schema import CheckConfig
 from gostforge.validator import validate
 from gostforge.validator.engine import registered_checks
+
+
+def _doc_with_paragraphs(paragraphs: list[Paragraph]) -> Document:
+    """Документ из одного PageSection с заданными параграфами."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            content=list(paragraphs),  # type: ignore[arg-type]
+        )
+    )
+    return doc
 
 
 def _entry(
@@ -165,3 +185,50 @@ def test_r04_empty_bibliography_no_violations() -> None:
     profile = load_profile("gost-7.32-2017")
     found = _r04(Document(), profile)
     assert found == []
+
+
+# --- R.01 — стиль ссылок [N] по профилю ---------------------------------
+
+
+def test_r01_registered() -> None:
+    """Проверка R.01 зарегистрирована в реестре."""
+    assert "R.01" in registered_checks()
+
+
+def test_r01_numeric_style_no_violation() -> None:
+    """Текст со ссылками только в формате [N] — нарушения нет."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Согласно [1] и [2, 3], результаты совпадают.")],
+    )
+    doc = _doc_with_paragraphs([para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "R.01"]
+    assert found == []
+
+
+def test_r01_author_year_parens_violation() -> None:
+    """«(Иванов, 2024)» — нарушение R.01."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Как показано в работе (Иванов, 2024), это так.")],
+    )
+    doc = _doc_with_paragraphs([para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "R.01"]
+    assert len(found) == 1
+    assert found[0].details["style"] == "author_year_parens"
+    assert "Иванов" in found[0].details["found"]
+
+
+def test_r01_author_year_brackets_violation() -> None:
+    """«[Иванов 2024]» — нарушение R.01."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Согласно [Иванов 2024], результаты такие.")],
+    )
+    doc = _doc_with_paragraphs([para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "R.01"]
+    assert len(found) == 1
+    assert found[0].details["style"] == "author_year_brackets"

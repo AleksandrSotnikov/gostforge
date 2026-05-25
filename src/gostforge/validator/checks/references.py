@@ -5,9 +5,17 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from typing import Any
 
-from gostforge.model import BibliographyEntry, Document
+from gostforge.model import (
+    BibliographyEntry,
+    Block,
+    Document,
+    LogicalSection,
+    Paragraph,
+    TextRun,
+)
 from gostforge.profile import Profile
 
 from ..engine import Violation, register
@@ -163,4 +171,115 @@ def check_bibliography_format(document: Document, profile: Profile) -> list[Viol
     return violations
 
 
-__all__ = ["check_bibliography_format"]
+# --- Утилиты для работы с текстом параграфов ----------------------------
+
+
+def _iter_paragraphs(items: Sequence[LogicalSection | Block]) -> list[Paragraph]:
+    """Рекурсивно собрать все Paragraph (через LogicalSection.children)."""
+    result: list[Paragraph] = []
+    for item in items:
+        if isinstance(item, Paragraph):
+            result.append(item)
+        elif isinstance(item, LogicalSection):
+            result.extend(_iter_paragraphs(item.children))
+    return result
+
+
+def _all_paragraphs(document: Document) -> list[Paragraph]:
+    """Все Paragraph документа (плоско, со всех PageSection)."""
+    paragraphs: list[Paragraph] = []
+    for ps in document.page_sections:
+        paragraphs.extend(_iter_paragraphs(ps.content))
+    return paragraphs
+
+
+def _paragraph_text(paragraph: Paragraph) -> str:
+    """Склеить весь текст параграфа из TextRun-ов."""
+    return "".join(el.text for el in paragraph.content if isinstance(el, TextRun))
+
+
+def _document_text(document: Document) -> str:
+    """Склеить весь текст всех параграфов документа."""
+    return "\n".join(_paragraph_text(p) for p in _all_paragraphs(document))
+
+
+# --- R.01 — стиль ссылок [N] по профилю ---------------------------------
+
+# Паттерн American style: «(Иванов, 2024)» — фамилия с заглавной буквы +
+# запятая + год из 4 цифр в круглых скобках.
+_AUTHOR_YEAR_RE = re.compile(r"\([А-ЯЁ][а-яё]+,\s*\d{4}\)")
+
+# Паттерн «Иванов 2024» в квадратных скобках — без номера: «[Иванов 2024]».
+_AUTHOR_YEAR_BRACKETS_RE = re.compile(r"\[[А-ЯЁ][а-яё]+\s+\d{4}\]")
+
+
+@register("R.01")
+def check_reference_style_numeric(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """Все библиографические ссылки в тексте должны быть в формате [N] / [N, M] / [N-M].
+
+    Запрещены:
+    - American style «(Иванов, 2024)» — фамилия + год в круглых скобках;
+    - «author-year» в квадратных скобках «[Иванов 2024]».
+
+    Каждый найденный паттерн порождает отдельный Violation.
+    """
+    violations: list[Violation] = []
+
+    for paragraph in _all_paragraphs(document):
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+
+        for match in _AUTHOR_YEAR_RE.finditer(text):
+            violations.append(
+                Violation(
+                    check_code="R.01",
+                    severity="error",
+                    message=(
+                        f"Ссылка «{match.group(0)}» в стиле «(Автор, год)» — "
+                        "по ГОСТ Р 7.0.100-2018 нужен стиль [N]"
+                    ),
+                    location=f"paragraph[{paragraph.id}]",
+                    suggestion=(
+                        "Заменить ссылку на формат [N] с номером записи "
+                        "из списка литературы"
+                    ),
+                    details={
+                        "paragraph_id": paragraph.id,
+                        "found": match.group(0),
+                        "style": "author_year_parens",
+                    },
+                )
+            )
+
+        for match in _AUTHOR_YEAR_BRACKETS_RE.finditer(text):
+            violations.append(
+                Violation(
+                    check_code="R.01",
+                    severity="error",
+                    message=(
+                        f"Ссылка «{match.group(0)}» в стиле «[Автор год]» — "
+                        "по ГОСТ Р 7.0.100-2018 нужен стиль [N]"
+                    ),
+                    location=f"paragraph[{paragraph.id}]",
+                    suggestion=(
+                        "Заменить ссылку на формат [N] с номером записи "
+                        "из списка литературы"
+                    ),
+                    details={
+                        "paragraph_id": paragraph.id,
+                        "found": match.group(0),
+                        "style": "author_year_brackets",
+                    },
+                )
+            )
+
+    return violations
+
+
+__all__ = [
+    "check_bibliography_format",
+    "check_reference_style_numeric",
+]

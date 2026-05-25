@@ -163,6 +163,7 @@ checks:
   B.07: {enabled: true, params: {allow_first_column_empty: false}}
   B.08: {enabled: true}
   B.09: {enabled: true}
+  R.01: {enabled: true}
   R.04:
     enabled: true
     params:
