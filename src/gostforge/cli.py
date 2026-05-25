@@ -329,7 +329,9 @@ def fix_cmd(
         click.echo(click.style("\n--dry-run: файл не записан.", fg="yellow"))
         return
 
-    export_docx(document, prof, output)
+    # Передаём source_docx=path, чтобы рисунки из исходного .docx
+    # переносились в выходной как реальные изображения (а не placeholder).
+    export_docx(document, prof, output, source_docx=path)
     click.echo(click.style(f"\nИсправленный документ сохранён: {output}", fg="green"))  # noqa: RUF001
 
 
