@@ -233,6 +233,113 @@ def _can_redo() -> bool:
     return cursor + 1 < len(history)
 
 
+# --- Auto-save (Фаза 2.5) ---------------------------------------------------
+
+
+# Минимальный интервал между авто-сохранениями. Меньше — лишняя нагрузка
+# на диск; больше — выше риск потерять прогресс.
+_AUTOSAVE_INTERVAL_SEC = 30.0
+
+
+def _autosave_dir() -> Path:
+    """Каталог для автосохранений (~/.gostforge/autosave/).
+
+    Создаёт каталог при необходимости. Совместим с Windows
+    (``Path.home()`` отдаёт правильный путь).
+    """
+    path = Path.home() / ".gostforge" / "autosave"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _autosave_path() -> Path:
+    """Путь к файлу автосохранения текущей сессии.
+
+    Для MVP — одна работа за раз, имя файла фиксированное. Если в
+    будущем появится мультисессия — можно перейти на session_id из
+    Streamlit.
+    """
+    return _autosave_dir() / "last-session.json"
+
+
+def _autosave_now() -> None:
+    """Сохранить текущий state в autosave-файл. Не дороже одного раза в 30с.
+
+    Ошибки IO логируются и глотаются — UI продолжает работать даже
+    если диск переполнен или каталог недоступен.
+    """
+    import time
+
+    last = float(st.session_state.get("builder_autosave_ts", 0.0))
+    now = time.time()
+    if now - last < _AUTOSAVE_INTERVAL_SEC:
+        return
+    try:
+        state = _get_state()
+        payload = json.dumps(state, ensure_ascii=False, indent=2).encode("utf-8")
+        _autosave_path().write_bytes(payload)
+        st.session_state["builder_autosave_ts"] = now
+    except Exception as exc:  # pragma: no cover - не валим UI на диске
+        import logging
+
+        logging.getLogger(__name__).warning("autosave failed: %s", exc)
+
+
+def _try_load_autosave_state() -> dict[str, Any] | None:
+    """Прочитать autosave-файл, если он существует и свежий (<24 часов).
+
+    Возвращает state-dict или None. Невалидный JSON, отсутствующий
+    файл, устаревший файл — всё трактуется как «нет автосохранения».
+    """
+    import time
+
+    path = _autosave_path()
+    if not path.exists():
+        return None
+    try:
+        mtime = path.stat().st_mtime
+        if time.time() - mtime > 24 * 3600:
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:  # pragma: no cover - graceful degradation
+        return None
+    if not isinstance(data, dict) or "sections" not in data:
+        return None
+    return data
+
+
+def _render_autosave_banner() -> None:
+    """Показать баннер «обнаружено автосохранение, восстановить?» при старте UI.
+
+    Срабатывает только если:
+      * есть свежий autosave,
+      * текущий state — дефолтный (т.е. пользователь не начал работу),
+      * пользователь ещё не отвергал баннер в этой сессии.
+    """
+    if st.session_state.get("builder_autosave_dismissed"):
+        return
+    current = _get_state()
+    # Дефолтный state — ровно тот, что выдаёт _default_state().
+    if current != _default_state():
+        return
+    candidate = _try_load_autosave_state()
+    if candidate is None:
+        return
+    st.info(
+        "Обнаружено автосохранение предыдущей сессии. "
+        "Восстановить, чтобы продолжить работу?"
+    )
+    cols = st.columns([1, 1, 6])
+    if cols[0].button("Восстановить", key="builder_autosave_restore"):
+        _normalize_state_paragraphs(candidate)
+        st.session_state["builder_state"] = candidate
+        st.session_state["builder_autosave_dismissed"] = True
+        st.rerun()
+    if cols[1].button("Игнорировать", key="builder_autosave_dismiss"):
+        st.session_state["builder_autosave_dismissed"] = True
+        st.rerun()
+
+
 def _auto_snapshot_if_changed() -> None:
     """Записать snapshot, если state отличается от текущего в истории.
 
@@ -1696,7 +1803,10 @@ def render_interactive_builder() -> None:
     # Phase 2.5: фиксируем snapshot до рендера sidebar, чтобы кнопки
     # undo/redo там же опирались на актуальный cursor.
     _auto_snapshot_if_changed()
+    # Авто-сохранение на диск не чаще 1 раза в 30 секунд.
+    _autosave_now()
     _render_sidebar_metadata()
+    _render_autosave_banner()
 
     st.title("gostforge — конструктор работ")
     st.caption(
