@@ -285,6 +285,14 @@ def test_r06_registered() -> None:
     assert "R.06" in registered_checks()
 
 
+# --- R.07 — заглушка ----------------------------------------------------
+
+
+def test_r07_registered() -> None:
+    """Заглушка R.07 зарегистрирована в реестре."""
+    assert "R.07" in registered_checks()
+
+
 def test_r05_range_reference_counts() -> None:
     """Ссылка [1-3] упоминает источники 1, 2 и 3."""
     para = Paragraph(id="p-1", content=[TextRun(text="См. [1-3].")])

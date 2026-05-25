@@ -466,7 +466,7 @@ def check_table_empty_cells_dash(
         allow_first_col = bool(config.params["allow_first_column_empty"])
 
     for page_section, table in _all_tables(document):
-        # row=0 — это «строка заголовков» (headers); далее rows нумеруются с 1.
+        # row=0 — это «строка заголовков» (headers); далее rows нумеруются от 1.
         empty_coord: tuple[int, int] | None = None
         for col_idx, header_cell in enumerate(table.headers):
             if allow_first_col and col_idx == 0:

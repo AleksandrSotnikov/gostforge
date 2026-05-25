@@ -349,8 +349,29 @@ def check_references_resolve_alias(
     return []
 
 
+# --- R.07 — указаны страницы для цитат (заглушка Фазы 2) ----------------
+
+
+@register("R.07")
+def check_citations_have_pages(
+    document: Document,  # noqa: ARG001
+    profile: Profile,  # noqa: ARG001
+) -> list[Violation]:
+    """Прямые цитаты должны сопровождаться указанием страниц (заглушка Фазы 2).
+
+    Эвристика: ссылка вида `[N]` рядом с конструкциями «по мнению»,
+    «как указывает», «согласно» — это цитата без страниц; правильный
+    формат — `[N, с. M]` или `[N: M]`.
+
+    Полноценная реализация требует синтаксического анализа предложения
+    (определить, является ли ссылка прямой цитатой). На Фазе 2 — заглушка.
+    """
+    return []
+
+
 __all__ = [
     "check_bibliography_format",
+    "check_citations_have_pages",
     "check_each_entry_referenced",
     "check_reference_style_numeric",
     "check_references_resolve_alias",
