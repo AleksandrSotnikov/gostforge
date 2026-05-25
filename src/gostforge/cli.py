@@ -604,12 +604,27 @@ def stats(path: Path) -> None:
     help="Куда сохранить .docx с inline-пометками.",
 )
 @click.option("--profile", "-p", default="gost-7.32-2017", help="ID профиля.")
-def annotate(path: Path, output: Path, profile: str) -> None:
-    """Создать .docx с inline-пометками о нарушениях.
+@click.option(
+    "--style",
+    type=click.Choice(["inline", "comments"]),
+    default="comments",
+    show_default=True,
+    help=(
+        "Стиль аннотации: настоящие комментарии Word (comments) или "
+        "inline-маркеры в тексте (inline)."
+    ),
+)
+def annotate(path: Path, output: Path, profile: str, style: str) -> None:
+    """Создать .docx с пометками о нарушениях.
 
-    Для каждого Violation в начало проблемного параграфа вставляется
-    маркер вида ``[F.01: <текст ошибки>]`` курсивом, красным цветом.
-    Пометки уровня документа уходят в первый параграф.
+    По умолчанию (``--style comments``) вставляются настоящие OOXML-комментарии
+    Word: в документе создаётся часть ``word/comments.xml`` и в проблемных
+    параграфах ставятся ``<w:commentRangeStart/End>`` + reference-run.
+    Word и LibreOffice отображают это как боковые выноски.
+
+    При ``--style inline`` используется старый режим: в начало проблемного
+    параграфа вставляется маркер вида ``[F.01: <текст ошибки>]`` курсивом,
+    красным цветом. Пометки уровня документа уходят в первый параграф.
     """
     from gostforge.annotator import annotate_docx
     try:
@@ -617,7 +632,7 @@ def annotate(path: Path, output: Path, profile: str) -> None:
     except FileNotFoundError as e:
         click.echo(f"Ошибка: {e}", err=True)
         sys.exit(2)
-    n = annotate_docx(path, output, prof)
+    n = annotate_docx(path, output, prof, style=style)  # type: ignore[arg-type]
     click.echo(f"Создано пометок: {n}")
     click.echo(f"Аннотированный документ сохранён: {output}")
 
