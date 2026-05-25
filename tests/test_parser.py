@@ -308,3 +308,91 @@ def test_parse_keeps_order_of_paragraphs_and_tables(tmp_path: Path) -> None:
 
 def _para_text(p: Paragraph) -> str:
     return "".join(e.text for e in p.content if isinstance(e, TextRun))
+
+
+# --- список литературы -------------------------------------------------------
+
+
+def test_parse_extracts_bibliography(tmp_path: Path) -> None:
+    """Раздел «Список использованных источников» собирается в Document.bibliography."""
+    entries = [
+        "Иванов И. И. Основы / И. И. Иванов. — Москва : Наука, 2020. — 320 с.",
+        "Петров П. П. Анализ // Журнал. — 2021. — № 3. — С. 15-27.",
+        "ГОСТ 7.32-2017. Отчёт о НИР. — Москва : Стандартинформ, 2017. — 32 с.",
+    ]
+    path = make_docx(
+        tmp_path / "bib.docx",
+        headings=[(1, "Введение")],
+        paragraphs=["Текст введения."],
+        bibliography=entries,
+    )
+    doc = parse_docx(path)
+    assert len(doc.bibliography) == 3
+    raws = [e.fields["raw"] for e in doc.bibliography]
+    assert raws == entries
+    ids = [e.id for e in doc.bibliography]
+    assert ids == ["ref-1", "ref-2", "ref-3"]
+
+
+def test_parse_detects_bibliography_types(tmp_path: Path) -> None:
+    """Тип записи определяется эвристикой: book / web / standard."""
+    entries = [
+        # book — обычная монография без особенных маркеров.
+        "Иванов И. И. Основы / И. И. Иванов. — Москва : Наука, 2020. — 320 с.",
+        # web — содержит https://.
+        "Сидоров С. С. Ресурс. — 2022. — URL: https://example.org (дата обращения: 01.05.2023).",
+        # standard — начинается с ГОСТ.
+        "ГОСТ 7.32-2017. Отчёт о НИР. — Москва : Стандартинформ, 2017. — 32 с.",
+    ]
+    path = make_docx(
+        tmp_path / "bib_types.docx",
+        headings=[(1, "Введение")],
+        paragraphs=["Текст введения."],
+        bibliography=entries,
+    )
+    doc = parse_docx(path)
+    types = [e.type for e in doc.bibliography]
+    assert types == ["book", "web", "standard"]
+
+
+def test_parse_bibliography_paragraphs_kept_in_section(tmp_path: Path) -> None:
+    """Параграфы раздела «Список источников» НЕ дублируются в content страницы.
+
+    В Document.bibliography они должны быть, и в LogicalSection.children — тоже.
+    Но в `page_section.content` отдельных Paragraph-ов с этим текстом быть
+    не должно — они лежат внутри LogicalSection.
+    """
+    entries = [
+        "Иванов И. И. Основы / И. И. Иванов. — Москва : Наука, 2020. — 320 с.",
+        "Петров П. П. Анализ // Журнал. — 2021. — № 3. — С. 15-27.",
+    ]
+    path = make_docx(
+        tmp_path / "bib_no_dup.docx",
+        headings=[(1, "Введение")],
+        paragraphs=["Текст введения."],
+        bibliography=entries,
+    )
+    doc = parse_docx(path)
+    assert len(doc.bibliography) == 2
+
+    page_content = doc.page_sections[0].content
+    # На верхнем уровне content не должно быть Paragraph с библиографическим
+    # текстом — они должны лежать внутри LogicalSection «Список ...».
+    top_paragraphs = [b for b in page_content if isinstance(b, Paragraph)]
+    for p in top_paragraphs:
+        text = _para_text(p)
+        assert "Иванов И. И. Основы" not in text
+        assert "Петров П. П. Анализ" not in text
+
+    # А в children самого раздела «Список ...» — есть.
+    bib_sections = [
+        item
+        for item in page_content
+        if isinstance(item, LogicalSection)
+        and "источник" in "".join(e.text for e in item.heading if isinstance(e, TextRun)).lower()
+    ]
+    assert len(bib_sections) == 1
+    bib_paragraphs = [c for c in bib_sections[0].children if isinstance(c, Paragraph)]
+    bib_texts = [_para_text(p) for p in bib_paragraphs]
+    assert any("Иванов И. И. Основы" in t for t in bib_texts)
+    assert any("Петров П. П. Анализ" in t for t in bib_texts)

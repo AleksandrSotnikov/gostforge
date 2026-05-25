@@ -11,13 +11,14 @@
 - Фаза 3: полный разбор колонтитулов, приложений
 """
 
-# ruff: noqa: RUF002, RUF003
+# ruff: noqa: RUF001, RUF002, RUF003
 
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 import docx  # type: ignore[import-not-found]
 from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-not-found]
@@ -26,6 +27,7 @@ from docx.text.paragraph import Paragraph as DocxParagraphCls  # type: ignore[im
 from lxml import etree  # type: ignore[import-untyped]
 
 from gostforge.model import (
+    BibliographyEntry,
     Block,
     ContentTemplate,
     Document,
@@ -72,6 +74,25 @@ _TABLE_CAPTION_TEXT_RE = re.compile(r"^Таблица\s+\d")
 # Множество имён Word-стилей подписи (нормализуется в lowercase).
 _CAPTION_STYLE_NAMES = {"caption", "image caption", "figure caption", "table caption"}
 
+# Заголовки, признаваемые началом раздела со списком литературы (нормализация
+# к нижнему регистру и сжатию пробелов выполняется отдельно).
+_BIBLIOGRAPHY_HEADINGS: set[str] = {
+    "список использованных источников",
+    "список литературы",
+    "библиографический список",
+    "список источников",
+}
+
+# Эвристики определения типа библиографической записи.
+_BIB_URL_RE = re.compile(r"https?://", re.IGNORECASE)
+_BIB_STANDARD_RE = re.compile(r"\bГОСТ\b")
+_BIB_ARTICLE_RE = re.compile(r"(?:^|\s)//\s|\bЖурнал\b|журн\.|\bNo\.|№")
+_BIB_THESIS_RE = re.compile(r"\bдис\.|\bдиссертация\b|\bавтореф\.", re.IGNORECASE)
+_BIB_CONFERENCE_RE = re.compile(r"\bконференция\b|\bматериалы\b|\bсб\.\s*ст\.", re.IGNORECASE)
+_BIB_LAW_RE = re.compile(
+    r"\bзакон\b|\bфедер\.\s*закон\b|\bпостановление\b", re.IGNORECASE
+)
+
 
 def parse_docx(path: str | Path) -> Document:
     """Прочитать .docx и вернуть модель документа.
@@ -88,8 +109,13 @@ def parse_docx(path: str | Path) -> Document:
     metadata = _extract_metadata(docx_doc, fallback_title=path.stem)
     page_section = _extract_page_section(docx_doc)
     _populate_content(docx_doc, page_section)
+    bibliography = _extract_bibliography([page_section])
 
-    return Document(metadata=metadata, page_sections=[page_section])
+    return Document(
+        metadata=metadata,
+        page_sections=[page_section],
+        bibliography=bibliography,
+    )
 
 
 # --- метаданные --------------------------------------------------------------
@@ -604,3 +630,75 @@ def _style_font_size_pt(p: DocxParagraph) -> float | None:
             return float(size.pt)
         style = getattr(style, "base_style", None)
     return None
+
+
+# --- список литературы --------------------------------------------------------
+
+
+def _extract_bibliography(page_sections: list[PageSection]) -> list[BibliographyEntry]:
+    """Найти раздел со списком литературы и собрать записи в плоский список.
+
+    Алгоритм:
+    1. Перебираем все LogicalSection уровня 1 во всех PageSection.
+    2. Сравниваем нормализованный текст заголовка со списком известных
+       названий раздела (`_BIBLIOGRAPHY_HEADINGS`).
+    3. Каждый прямой дочерний Paragraph такой секции, текст которого
+       непустой после strip, превращаем в `BibliographyEntry` с id вида
+       `ref-{idx}`, где idx — сквозной счётчик по всем найденным записям.
+    4. Тип записи определяется эвристически по содержимому текста.
+    5. `fields["raw"]` — полный текст параграфа (минимум для Фазы 1).
+
+    Пустые параграфы пропускаются. Параграфы из раздела остаются на месте
+    в `LogicalSection.children` — модель сознательно дублирует данные
+    в `Document.bibliography`, чтобы валидаторы могли работать как по
+    плоскому списку, так и по содержанию страницы.
+    """
+    entries: list[BibliographyEntry] = []
+    idx = 0
+    for ps in page_sections:
+        for section in _iter_logical_sections(ps.content):
+            if section.level != 1:
+                continue
+            heading_text = _normalize_heading(section.heading)
+            if heading_text not in _BIBLIOGRAPHY_HEADINGS:
+                continue
+            for child in section.children:
+                if not isinstance(child, Paragraph):
+                    continue
+                raw = _paragraph_plain_text(child).strip()
+                if not raw:
+                    continue
+                idx += 1
+                entries.append(
+                    BibliographyEntry(
+                        id=f"ref-{idx}",
+                        type=_detect_bibliography_type(raw),
+                        fields={"raw": raw},
+                    )
+                )
+    return entries
+
+
+def _normalize_heading(content: Sequence[InlineElement]) -> str:
+    """Привести inline-заголовок к строке без регистра и лишних пробелов."""
+    text = "".join(el.text for el in content if isinstance(el, TextRun))
+    return " ".join(text.lower().split())
+
+
+def _detect_bibliography_type(
+    raw: str,
+) -> Literal["book", "article", "web", "standard", "thesis", "conference", "law"]:
+    """Эвристически определить тип библиографической записи по её тексту."""
+    if _BIB_URL_RE.search(raw):
+        return "web"
+    if _BIB_STANDARD_RE.search(raw) or raw.startswith("ГОСТ "):
+        return "standard"
+    if _BIB_THESIS_RE.search(raw):
+        return "thesis"
+    if _BIB_CONFERENCE_RE.search(raw):
+        return "conference"
+    if _BIB_LAW_RE.search(raw):
+        return "law"
+    if _BIB_ARTICLE_RE.search(raw):
+        return "article"
+    return "book"

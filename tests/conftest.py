@@ -6,7 +6,7 @@
 в репозитории.
 """
 
-# ruff: noqa: RUF002
+# ruff: noqa: RUF001, RUF002
 
 from __future__ import annotations
 
@@ -39,6 +39,7 @@ def make_docx(
     author: str | None = None,
     tables: list[dict[str, object]] | None = None,
     figures: list[dict[str, object]] | None = None,
+    bibliography: list[str] | None = None,
 ) -> Path:
     """Сгенерировать .docx по заданным параметрам и вернуть путь.
 
@@ -64,6 +65,10 @@ def make_docx(
         Имитируется через вставку пустого <w:drawing/> в run, чтобы парсер
         распознал параграф как рисунок. Caption (если задан) — отдельный
         параграф со стилем Caption под рисунком.
+      bibliography: список строк. Если задан, в конец документа добавляется
+        заголовок уровня 1 «Список использованных источников», а каждая
+        строка превращается в отдельный обычный параграф (Фаза 1 — без
+        нумерованного списка).
     """
     document = docx.Document()
 
@@ -106,6 +111,12 @@ def make_docx(
     # --- рисунки (caption снизу, если задан) ---
     for figure_spec in figures or []:
         _append_figure(document, figure_spec)
+
+    # --- список литературы (heading 1 + по параграфу на запись) ---
+    if bibliography is not None:
+        document.add_heading("Список использованных источников", level=1)
+        for entry in bibliography:
+            document.add_paragraph(entry)
 
     # --- номер страницы в footer (поле PAGE) ---
     if page_number:
@@ -360,5 +371,53 @@ def figure_without_caption_docx(tmp_path: Path) -> Path:
         margins_mm=dict(GOST_MARGINS),
         paragraphs=["Текст перед рисунком."],
         figures=[{}],
+        page_number=True,
+    )
+
+
+# --- список литературы -------------------------------------------------------
+
+
+BIBLIOGRAPHY_CORRECT: list[str] = [
+    "Иванов И. И. Основы программирования : учебник / И. И. Иванов. — Москва : Наука, 2020. — 320 с.",
+    "Петров П. П. Анализ данных // Журнал прикладной информатики. — 2021. — № 3. — С. 15-27.",
+    "ГОСТ 7.32-2017. Отчёт о научно-исследовательской работе. — Москва : Стандартинформ, 2017. — 32 с.",
+    "Сидоров С. С. Электронный ресурс [Электронный ресурс]. — 2022. — URL: https://example.org/page (дата обращения: 01.05.2023).",
+]
+
+BIBLIOGRAPHY_BROKEN: list[str] = [
+    # Без года издания.
+    "Иванов И. И. Без года : монография / И. И. Иванов. — Москва : Наука. — 100 с.",
+    # Без точки в конце.
+    "Петров П. П. Без точки в конце / П. П. Петров. — Москва : Наука, 2020. — 50 с",
+    # Слишком короткая запись.
+    "Иванов 2020.",
+    # web-запись без URL-маркера и без «дата обращения».
+    "Сидоров С. С. Веб-ресурс без маркера : https://example.org/x, 2022. — С. 1.",
+]
+
+
+@pytest.fixture
+def bibliography_correct_docx(tmp_path: Path) -> Path:
+    """Документ с корректным разделом «Список использованных источников»."""
+    return make_docx(
+        tmp_path / "bibliography_correct.docx",
+        margins_mm=dict(GOST_MARGINS),
+        headings=[(1, "Введение")],
+        paragraphs=["Текст введения."],
+        bibliography=list(BIBLIOGRAPHY_CORRECT),
+        page_number=True,
+    )
+
+
+@pytest.fixture
+def bibliography_broken_docx(tmp_path: Path) -> Path:
+    """Документ с разными нарушениями формата библиографических записей."""
+    return make_docx(
+        tmp_path / "bibliography_broken.docx",
+        margins_mm=dict(GOST_MARGINS),
+        headings=[(1, "Введение")],
+        paragraphs=["Текст введения."],
+        bibliography=list(BIBLIOGRAPHY_BROKEN),
         page_number=True,
     )
