@@ -559,6 +559,143 @@ def ui(host: str, port: int) -> None:
     subprocess.run(cmd, check=False)
 
 
+def _normalize_message(text: str) -> str:
+    """Нормализовать текст сообщения для устойчивого сравнения нарушений.
+
+    Сжимает пробелы, обрезает пробелы по краям и приводит к нижнему регистру.
+    Это уменьшает ложные срабатывания «нарушение пропало / появилось» из-за
+    малозначимых отличий в форматировании сообщений.
+    """
+    return " ".join(text.split()).strip().lower()
+
+
+def _violation_fingerprint(v: Violation) -> tuple[str, str, str]:
+    """Отпечаток нарушения для сравнения двух документов.
+
+    Тройка `(check_code, location, normalize(message))` — компромисс между
+    стабильностью (одна и та же ошибка в двух прогонах даёт один и тот же
+    отпечаток) и уникальностью (две разные ошибки в одном месте отличаются
+    нормализованным сообщением).
+    """
+    return (v.check_code, v.location, _normalize_message(v.message))
+
+
+def _print_violations_brief(violations: list[Violation], indent: str = "  ") -> None:
+    """Кратко вывести список violations с цветовой пометкой по серьёзности."""
+    for v in violations:
+        _, style, short = _SEVERITY_STYLE.get(v.severity, ("", {}, v.severity.upper()))
+        tag = click.style(f"[{short}]", **style) if style else f"[{short}]"
+        code = click.style(v.check_code, bold=True)
+        click.echo(f"{indent}{tag} {code}  {v.message}")
+        if v.location:
+            click.echo(indent + "       " + click.style(v.location, fg="bright_black"))
+
+
+@main.command()
+@click.argument("file_a", type=click.Path(exists=True, path_type=Path))
+@click.argument("file_b", type=click.Path(exists=True, path_type=Path))
+@click.option("--profile", "-p", default="gost-7.32-2017", help="ID профиля для проверки")
+@click.option("--quiet", "-q", is_flag=True, help="Не показывать детали по нарушениям")
+def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
+    """Сравнить два .docx по списку нарушений.
+
+    Выводит:
+    - какие нарушения появились в B (не было в A)
+    - какие нарушения исчезли в A (нет в B)
+    - сводку: было N нарушений → стало M
+
+    Полезно для CI (стало ли нарушений меньше после правки), проверки
+    эффекта `gostforge fix`, анализа версий «черновик → финал».
+
+    Exit code: 0 если число error-нарушений в B не больше, чем в A;
+    1 если в B появились новые error-нарушения (регрессия).
+    """
+    try:
+        prof = load_profile(profile)
+    except FileNotFoundError as e:
+        click.echo(f"Ошибка: {e}", err=True)
+        sys.exit(2)
+
+    document_a = parse_docx(file_a)
+    document_b = parse_docx(file_b)
+    violations_a = validate(document_a, prof)
+    violations_b = validate(document_b, prof)
+
+    fingerprints_a = {_violation_fingerprint(v): v for v in violations_a}
+    fingerprints_b = {_violation_fingerprint(v): v for v in violations_b}
+
+    fixed_keys = set(fingerprints_a) - set(fingerprints_b)
+    new_keys = set(fingerprints_b) - set(fingerprints_a)
+
+    fixed = [fingerprints_a[k] for k in fixed_keys]
+    introduced = [fingerprints_b[k] for k in new_keys]
+
+    errors_a = sum(1 for v in violations_a if v.severity == "error")
+    errors_b = sum(1 for v in violations_b if v.severity == "error")
+
+    click.echo(
+        click.style("Профиль: ", bold=True) + profile + f" (v{prof.version})"
+    )
+    click.echo(
+        click.style("A: ", bold=True)
+        + f"{file_a.name} — {len(violations_a)} нарушений ({errors_a} ошибок)"
+    )
+    click.echo(
+        click.style("B: ", bold=True)
+        + f"{file_b.name} — {len(violations_b)} нарушений ({errors_b} ошибок)"
+    )
+
+    if not fixed and not introduced:
+        click.echo(click.style("\n[OK] Изменений в нарушениях нет.", fg="green", bold=True))
+        sys.exit(0)
+
+    if fixed:
+        click.echo(
+            "\n"
+            + click.style(f"Исчезло нарушений: {len(fixed)}", fg="green", bold=True)
+        )
+        if not quiet:
+            _print_violations_brief(fixed)
+
+    if introduced:
+        click.echo(
+            "\n"
+            + click.style(f"Появилось нарушений: {len(introduced)}", fg="red", bold=True)
+        )
+        if not quiet:
+            _print_violations_brief(introduced)
+
+    delta = errors_b - errors_a
+    if delta > 0:
+        click.echo(
+            "\n"
+            + click.style(
+                f"Регрессия: число error-нарушений выросло ({errors_a} → {errors_b}, +{delta}).",
+                fg="red",
+                bold=True,
+            )
+        )
+        sys.exit(1)
+    elif delta < 0:
+        click.echo(
+            "\n"
+            + click.style(
+                f"Прогресс: число error-нарушений уменьшилось ({errors_a} → {errors_b}, {delta}).",
+                fg="green",
+                bold=True,
+            )
+        )
+    else:
+        click.echo(
+            "\n"
+            + click.style(
+                f"Число error-нарушений не изменилось ({errors_a}).",
+                fg="yellow",
+            )
+        )
+    sys.exit(0)
+
+
 @main.command()
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
 def stats(path: Path) -> None:
