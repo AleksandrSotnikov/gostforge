@@ -13,6 +13,7 @@ from gostforge.model import (
     InlineElement,
     LogicalSection,
     PageSection,
+    Paragraph,
     Table,
     TextRun,
 )
@@ -135,6 +136,35 @@ def check_table_caption_format(
 _TABLE_NUMBER_RE = re.compile(r"^Таблица\s+(\d+)")
 
 
+def _iter_paragraphs(items: Sequence[LogicalSection | Block]) -> list[Paragraph]:
+    """Рекурсивно собрать все Paragraph (через LogicalSection.children).
+
+    Note: Table.caption — это `list[InlineElement]`, не Paragraph, поэтому
+    автоматически исключается (для B.08 это важно: ссылки в caption не
+    должны считаться текстовыми ссылками на таблицу).
+    """
+    result: list[Paragraph] = []
+    for item in items:
+        if isinstance(item, Paragraph):
+            result.append(item)
+        elif isinstance(item, LogicalSection):
+            result.extend(_iter_paragraphs(item.children))
+    return result
+
+
+def _all_paragraphs(document: Document) -> list[Paragraph]:
+    """Все Paragraph документа (плоско, со всех PageSection)."""
+    paragraphs: list[Paragraph] = []
+    for ps in document.page_sections:
+        paragraphs.extend(_iter_paragraphs(ps.content))
+    return paragraphs
+
+
+def _paragraph_text(paragraph: Paragraph) -> str:
+    """Склеить весь текст параграфа из TextRun-ов."""
+    return "".join(el.text for el in paragraph.content if isinstance(el, TextRun))
+
+
 @register("B.09")
 def check_table_numbering_continuous(
     document: Document, profile: Profile  # noqa: ARG001
@@ -220,8 +250,70 @@ def check_table_numbering_continuous(
     return violations
 
 
+# Регэкспы для поиска ссылок на таблицу N в тексте параграфа (не в caption).
+# Шаблоны типа «табл. 1», «таблица 1», «таблице 1», «таблицу 1».
+def _table_reference_patterns(num: int) -> list[re.Pattern[str]]:
+    """Сформировать regex'ы для поиска ссылок на таблицу с номером N."""
+    return [
+        re.compile(rf"таблиц[аеу]\s+{num}\b", re.IGNORECASE),
+        re.compile(rf"табл\.\s*{num}\b", re.IGNORECASE),
+    ]
+
+
+@register("B.08")
+def check_table_referenced_in_text(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """На каждую таблицу должна быть ссылка в тексте.
+
+    Извлекает номер N из caption таблицы и ищет в склеенном тексте всех
+    Paragraph (не Table.caption!) упоминание вида `таблица N`, `табл. N`,
+    `таблице N`, `таблицу N` (case-insensitive). Если ни одной ссылки —
+    Violation. Пустые подписи пропускаются (B.01).
+    """
+    violations: list[Violation] = []
+
+    # Склеиваем текст только из Paragraph — подписи таблиц в Table.caption
+    # сюда не попадают, поэтому ссылки в самой подписи не учитываются.
+    all_text = "\n".join(_paragraph_text(p) for p in _all_paragraphs(document))
+
+    for page_section, table in _all_tables(document):
+        text = _caption_text(table.caption)
+        if not text:
+            continue
+        match = _TABLE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            num = int(match.group(1))
+        except ValueError:
+            continue
+
+        if any(p.search(all_text) for p in _table_reference_patterns(num)):
+            continue
+
+        violations.append(
+            Violation(
+                check_code="B.08",
+                severity="error",
+                message=(
+                    f"В тексте отсутствует ссылка на таблицу {num} «{table.id}»"
+                ),
+                location=f"page_sections.{page_section.id}.table[{table.id}]",
+                suggestion=(
+                    f"Добавить в текст ссылку вида «см. таблицу {num}» или "
+                    f"«в таблице {num}»"
+                ),
+                details={"table_id": table.id, "number": str(num)},
+            )
+        )
+
+    return violations
+
+
 __all__ = [
     "check_table_caption_format",
     "check_table_has_caption",
     "check_table_numbering_continuous",
+    "check_table_referenced_in_text",
 ]

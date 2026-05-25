@@ -1,6 +1,6 @@
 """Тесты B.01 — у каждой таблицы должна быть подпись."""
 
-# ruff: noqa: RUF001, RUF002
+# ruff: noqa: RUF001, RUF002, RUF003
 
 from gostforge.model import (
     Document,
@@ -310,4 +310,108 @@ def test_b09_no_tables_no_violation() -> None:
     doc = _doc_with_content([])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "B.09"]
+    assert found == []
+
+
+# --- B.08 (на каждую таблицу есть ссылка в тексте) ----------------------
+
+
+def test_b08_registered() -> None:
+    assert "B.08" in registered_checks()
+
+
+def test_b08_reference_in_text_no_violation() -> None:
+    """В тексте есть «в таблице 1» — нарушения нет."""
+    table = Table(id="t-1", caption=[TextRun(text="Таблица 1 — Результаты")])
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Результаты показаны в таблице 1.")],
+    )
+    doc = _doc_with_content([para, table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
+    assert found == []
+
+
+def test_b08_no_reference_violation() -> None:
+    """Таблица есть, ссылки в тексте нет — нарушение."""
+    table = Table(id="t-1", caption=[TextRun(text="Таблица 1 — Результаты")])
+    para = Paragraph(id="p-1", content=[TextRun(text="Просто текст.")])
+    doc = _doc_with_content([para, table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
+    assert len(found) == 1
+    assert found[0].details["table_id"] == "t-1"
+    assert found[0].details["number"] == "1"
+
+
+def test_b08_reference_abbreviated_form() -> None:
+    """«табл. 1» — тоже ссылка."""
+    table = Table(id="t-1", caption=[TextRun(text="Таблица 1 — Результаты")])
+    para = Paragraph(id="p-1", content=[TextRun(text="См. табл. 1.")])
+    doc = _doc_with_content([para, table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
+    assert found == []
+
+
+def test_b08_caption_itself_does_not_count() -> None:
+    """Подпись таблицы «Таблица 1 — ...» сама по себе не считается ссылкой.
+
+    Иначе B.08 никогда бы не находил нарушений, потому что caption всегда
+    содержит «Таблица N».
+    """
+    table = Table(id="t-1", caption=[TextRun(text="Таблица 1 — Результаты")])
+    # Никаких Paragraph со ссылками — есть только caption у таблицы.
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
+    assert len(found) == 1
+    assert found[0].details["table_id"] == "t-1"
+
+
+def test_b08_multiple_tables_some_referenced() -> None:
+    """Несколько таблиц — нарушения только у тех, на которые нет ссылок."""
+    t1 = Table(id="t-1", caption=[TextRun(text="Таблица 1 — A")])
+    t2 = Table(id="t-2", caption=[TextRun(text="Таблица 2 — B")])
+    para = Paragraph(id="p-1", content=[TextRun(text="См. таблицу 1.")])
+    doc = _doc_with_content([para, t1, t2])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
+    assert len(found) == 1
+    assert found[0].details["table_id"] == "t-2"
+
+
+def test_b08_empty_caption_skipped() -> None:
+    """Пустые подписи — это случай B.01, для B.08 пропускаются."""
+    table = Table(id="t-1", caption=[])
+    para = Paragraph(id="p-1", content=[TextRun(text="Просто текст.")])
+    doc = _doc_with_content([para, table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
+    assert found == []
+
+
+def test_b08_case_insensitive() -> None:
+    """«В Таблице 1» (с большой буквы) — тоже ссылка."""
+    table = Table(id="t-1", caption=[TextRun(text="Таблица 1 — A")])
+    para = Paragraph(id="p-1", content=[TextRun(text="В Таблице 1 указаны данные.")])
+    doc = _doc_with_content([para, table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
+    assert found == []
+
+
+def test_b08_reference_in_nested_section() -> None:
+    """Ссылка во вложенной секции находится."""
+    t1 = Table(id="t-1", caption=[TextRun(text="Таблица 1 — A")])
+    inner = LogicalSection(
+        id="sec-2",
+        level=2,
+        heading=[TextRun(text="Sub")],
+        children=[Paragraph(id="p-1", content=[TextRun(text="См. таблицу 1.")])],
+    )
+    doc = _doc_with_content([t1, inner])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
     assert found == []
