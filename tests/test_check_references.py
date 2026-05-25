@@ -383,3 +383,75 @@ def test_r02_by_mention_violation() -> None:
     assert len(found) == 1
     assert found[0].details["order"] == "by_mention"
     assert found[0].details["prev_index"] == "1"
+
+
+# --- R.03 — обязательные поля для типа источника ------------------------
+
+
+def test_r03_registered() -> None:
+    assert "R.03" in registered_checks()
+
+
+def test_r03_all_required_fields_present_no_violation() -> None:
+    """Все обязательные поля заполнены — нарушений нет."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"author": "Иванов И. И.", "year": "2020", "place": "Москва"},
+                type_="book",
+            ),
+        ]
+    )
+    assert _violations(doc, profile, "R.03") == []
+
+
+def test_r03_missing_place_in_book_violation() -> None:
+    """У книги нет place — Violation с указанием отсутствующего поля."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"author": "Иванов И. И.", "year": "2020"},
+                type_="book",
+            ),
+        ]
+    )
+    found = _violations(doc, profile, "R.03")
+    assert len(found) == 1
+    assert found[0].details["missing_field"] == "place"
+    assert found[0].details["entry_type"] == "book"
+
+
+def test_r03_web_entry_missing_access_date_violation() -> None:
+    """У web-записи нет access_date — Violation."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"url": "https://example.org"},
+                type_="web",
+            ),
+        ]
+    )
+    found = _violations(doc, profile, "R.03")
+    missing = {v.details["missing_field"] for v in found}
+    assert "access_date" in missing
+
+
+def test_r03_unknown_type_skipped() -> None:
+    """Тип источника, не описанный в params, пропускается."""
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["R.03"] = CheckConfig(
+        enabled=True,
+        params={"required_by_type": {"book": ["author"]}},
+    )
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {}, type_="thesis"),
+        ]
+    )
+    assert _violations(doc, profile, "R.03") == []

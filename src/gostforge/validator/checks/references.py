@@ -509,6 +509,66 @@ def check_bibliography_order(document: Document, profile: Profile) -> list[Viola
     return []
 
 
+# --- R.03 — обязательные поля для типа источника ------------------------
+
+
+@register("R.03")
+def check_required_fields_by_type(document: Document, profile: Profile) -> list[Violation]:
+    """Для каждого type должны быть заполнены обязательные поля.
+
+    Параметр `checks.R.03.params.required_by_type: dict[str, list[str]]`
+    задаёт для каждого типа источника список обязательных полей. Например::
+
+        {"book": ["author", "year", "place"],
+         "article": ["author", "year"],
+         "web": ["url", "access_date"]}
+
+    Если type записи не описан в params — запись пропускается.
+    Каждое отсутствующее поле даёт отдельный Violation.
+    """
+    violations: list[Violation] = []
+    params = _check_params(profile, "R.03")
+    raw_required = params.get("required_by_type")
+    if not isinstance(raw_required, dict):
+        return []
+    # Приведём dict к ожидаемой структуре: {str: list[str]}.
+    required_by_type: dict[str, list[str]] = {}
+    for type_name, fields in raw_required.items():
+        if not isinstance(type_name, str) or not isinstance(fields, list):
+            continue
+        required_by_type[type_name] = [f for f in fields if isinstance(f, str)]
+
+    for entry in document.bibliography:
+        required = required_by_type.get(entry.type)
+        if required is None:
+            continue
+        for field_name in required:
+            value = entry.fields.get(field_name)
+            if value:
+                continue
+            violations.append(
+                Violation(
+                    check_code="R.03",
+                    severity="error",
+                    message=(
+                        f"Запись {entry.id} (тип {entry.type}): отсутствует поле "
+                        f"`{field_name}`"
+                    ),
+                    location=f"bibliography[{entry.id}]",
+                    suggestion=(
+                        f"Дополнить запись данными по полю `{field_name}` "
+                        f"в соответствии с ГОСТ Р 7.0.100-2018"
+                    ),
+                    details={
+                        "entry_id": entry.id,
+                        "entry_type": entry.type,
+                        "missing_field": field_name,
+                    },
+                )
+            )
+    return violations
+
+
 __all__ = [
     "check_bibliography_format",
     "check_bibliography_order",
@@ -516,4 +576,5 @@ __all__ = [
     "check_each_entry_referenced",
     "check_reference_style_numeric",
     "check_references_resolve_alias",
+    "check_required_fields_by_type",
 ]
