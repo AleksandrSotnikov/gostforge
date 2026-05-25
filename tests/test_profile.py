@@ -43,3 +43,18 @@ def test_inheritance_merges_check_params() -> None:
     child = load_profile("example-department")
     assert child.checks["T.02"].params["body_size"] == 12
     assert child.checks["T.02"].params["caption_size"] == 11
+
+
+def test_gost_r_2_105_profile_loads() -> None:
+    """Профиль ЕСКД наследует базовый и переопределяет геометрию и разделы."""
+    p = load_profile("gost-r-2.105-2019")
+    assert p.id == "gost-r-2.105-2019"
+    assert p.extends == "gost-7.32-2017"
+    # Переопределённые поля
+    assert p.styles.page.margins_mm == {"top": 20.0, "right": 10.0, "bottom": 20.0, "left": 20.0}
+    assert p.checks["F.06"].params["start_value"] == 2
+    assert "Содержание" in p.checks["S.01"].params["required_headings"]
+    # Унаследованные от базового
+    assert p.styles.body.font == "Times New Roman"
+    assert p.styles.body.size_pt == 14
+    assert "F.01" in p.checks
