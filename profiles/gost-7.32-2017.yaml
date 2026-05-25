@@ -135,7 +135,14 @@ checks:
   B.03: {enabled: true}
   B.08: {enabled: true}
   B.09: {enabled: true}
-  R.04: {enabled: true}
+  R.04:
+    enabled: true
+    params:
+      min_length: 15
+      require_year: true
+      require_final_dot: true
+      require_separator: true
+      require_url_marker_for_web: true
   R.06: {enabled: true}
   R.08: {enabled: true}
   C.01: {enabled: true}
