@@ -13,6 +13,7 @@ from gostforge.model import (
     Document,
     InlineElement,
     LogicalSection,
+    Paragraph,
     TextRun,
 )
 from gostforge.profile import Profile
@@ -424,6 +425,77 @@ def check_heading_hierarchy(
     return violations
 
 
+@register("H.06")
+def check_heading_not_hanging(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Заголовок не должен «висеть» внизу страницы без содержимого.
+
+    Полноценная проверка требует свойства `keep_with_next` (`<w:keepNext/>`)
+    у параграфа-заголовка — оно склеивает заголовок со следующим блоком и
+    предотвращает «висячий» заголовок. На Фазе 2 парсер этого свойства не
+    сохраняет, поэтому реализуется ослабленная эвристика:
+
+    Если у LogicalSection нет children — заголовок не имеет за собой никакого
+    содержимого, что в Word интерпретируется как висячий. Severity=warning.
+
+    Также сообщаем, если первый дочерний блок — пустой Paragraph (есть
+    содержимое, но фактически пустое).
+    """
+    violations: list[Violation] = []
+    for section in _all_logical_sections(document):
+        text = _heading_text(section.heading).strip()
+        if not text:
+            # Без заголовка проверять нечего.
+            continue
+
+        if not section.children:
+            violations.append(
+                Violation(
+                    check_code="H.06",
+                    severity="warning",
+                    message=(
+                        f"Заголовок «{text}» не имеет следующего за ним "
+                        f"содержимого и может «висеть» внизу страницы"
+                    ),
+                    location=f"page_sections.*.logical_section[{section.id}]",
+                    suggestion=(
+                        "Добавьте текст под заголовком или установите свойство "
+                        "«не отрывать от следующего» (keep with next)"
+                    ),
+                    details={"section_id": section.id},
+                )
+            )
+            continue
+
+        # Проверим, что первый дочерний блок — не пустой Paragraph.
+        first = section.children[0]
+        if isinstance(first, Paragraph):
+            inline_text = "".join(
+                el.text for el in first.content if isinstance(el, TextRun)
+            ).strip()
+            if not inline_text:
+                violations.append(
+                    Violation(
+                        check_code="H.06",
+                        severity="warning",
+                        message=(
+                            f"После заголовка «{text}» идёт пустой абзац — "
+                            f"заголовок может «висеть» внизу страницы"
+                        ),
+                        location=f"page_sections.*.logical_section[{section.id}]",
+                        suggestion=(
+                            "Удалите пустой абзац или добавьте под заголовком "
+                            "осмысленный текст"
+                        ),
+                        details={"section_id": section.id},
+                    )
+                )
+
+    return violations
+
+
 def _violation(
     code: str,
     message: str,
@@ -448,6 +520,7 @@ __all__ = [
     "check_heading_2_format",
     "check_heading_hierarchy",
     "check_heading_no_terminal_punctuation",
+    "check_heading_not_hanging",
     "check_heading_number_no_trailing_dot",
     "check_heading_numbering_continuous",
     "iter_logical_sections",

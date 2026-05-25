@@ -144,6 +144,7 @@ checks:
   H.08: {enabled: true}
   H.04: {enabled: true}
   H.05: {enabled: true}
+  H.06: {enabled: true}
   I.01: {enabled: true}
   I.02: {enabled: true}
   I.03: {enabled: true, params: {allow_dot_after_number: false}}
