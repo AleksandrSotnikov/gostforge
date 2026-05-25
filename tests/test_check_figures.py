@@ -538,3 +538,20 @@ def test_i07_reference_before_and_after_no_violation() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
     assert found == []
+
+
+# --- I.10 (пустая строка между подписью и текстом — заглушка) ----------
+
+
+def test_i10_registered() -> None:
+    assert "I.10" in registered_checks()
+
+
+def test_i10_returns_empty_phase2_stub() -> None:
+    """I.10 — заглушка (парсер не сохраняет phantom-параграфы)."""
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    para = Paragraph(id="p-1", content=[TextRun(text="Текст после рисунка.")])
+    doc = _doc_with_content([figure, para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.10"]
+    assert found == []

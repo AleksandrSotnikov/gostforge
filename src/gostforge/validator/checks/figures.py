@@ -374,7 +374,7 @@ def _document_blocks_linear(document: Document) -> list[Block]:
 
 @register("I.07")
 def check_figure_reference_precedes(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document, profile: Profile
 ) -> list[Violation]:
     """Ссылка на рисунок должна появляться в тексте ДО самого рисунка.
 
@@ -493,7 +493,25 @@ def check_figure_referenced_in_text(
     return violations
 
 
+@register("I.10")
+def check_figure_blank_line_after_caption(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Между подписью рисунка и последующим текстом должна быть пустая строка
+    (заглушка).
+
+    TODO (Фаза 2): парсер не сохраняет «phantom»-параграфы (пустые абзацы)
+    как отдельные блоки модели — он схлопывает их в пробельные интервалы.
+    Поэтому проверить наличие пустой строки между Figure и следующим
+    непустым блоком на уровне модели нетривиально и требует расширения
+    парсера (опционально хранить пустые Paragraph-ы).
+    """
+    return []
+
+
 __all__ = [
+    "check_figure_blank_line_after_caption",
     "check_figure_caption_below",
     "check_figure_caption_format",
     "check_figure_caption_style",
