@@ -558,3 +558,76 @@ def test_s03_custom_expected_via_params() -> None:
     assert "Введение" in found[0].message
 
 
+# --- S.04 -------------------------------------------------------------------
+
+
+def test_s04_registered() -> None:
+    assert "S.04" in registered_checks()
+
+
+def test_s04_all_elements_present_no_violation() -> None:
+    intro_text = (
+        "Актуальность темы обусловлена. Цель работы — исследовать вопрос. "
+        "Задачи: рассмотреть факторы. Объект — система. Предмет — методология."
+    )
+    intro = LogicalSection(
+        id="sec-intro",
+        level=1,
+        heading=[TextRun(text="Введение")],
+        children=[Paragraph(id="p-1", content=[TextRun(text=intro_text)])],
+    )
+    doc = _doc([intro])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.04"]
+    assert found == []
+
+
+def test_s04_missing_elements_violation() -> None:
+    """Если во введении не хватает ключевых элементов — Violation на каждый."""
+    intro = LogicalSection(
+        id="sec-intro",
+        level=1,
+        heading=[TextRun(text="Введение")],
+        children=[
+            Paragraph(
+                id="p-1",
+                content=[TextRun(text="Текст без ключевых слов.")],
+            )
+        ],
+    )
+    doc = _doc([intro])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.04"]
+    # Всего 5 ключевых элементов отсутствуют.
+    assert len(found) == 5
+    assert all(v.severity == "warning" for v in found)
+
+
+def test_s04_no_introduction_skipped() -> None:
+    """Если «Введения» нет — S.04 не срабатывает (это уже S.01)."""
+    doc = _doc(
+        [
+            _heading("Глава 1"),
+            _heading("Заключение"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.04"]
+    assert found == []
+
+
+def test_s04_custom_required_elements_via_params() -> None:
+    intro = LogicalSection(
+        id="sec-intro",
+        level=1,
+        heading=[TextRun(text="Введение")],
+        children=[Paragraph(id="p-1", content=[TextRun(text="Только цель указана.")])],
+    )
+    doc = _doc([intro])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["S.04"].params["required_elements"] = ["цель", "гипотеза"]
+    found = [v for v in validate(doc, profile) if v.check_code == "S.04"]
+    assert len(found) == 1
+    assert "гипотеза" in found[0].message
+
+

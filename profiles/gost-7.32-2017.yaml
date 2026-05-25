@@ -127,6 +127,10 @@ checks:
   S.01: {enabled: true}
   S.02: {enabled: true}
   S.03: {enabled: true}
+  S.04:
+    enabled: true
+    params:
+      required_elements: [актуальность, цель, задач, объект, предмет]
   S.06: {enabled: true, params: {required_for_level: 1}}
   S.07: {enabled: true}
   H.01: {enabled: true}
