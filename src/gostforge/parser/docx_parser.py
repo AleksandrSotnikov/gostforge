@@ -57,7 +57,11 @@ if TYPE_CHECKING:
 # Пространство имён OOXML wordprocessingml
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
-NSMAP = {"w": W_NS, "m": M_NS}
+# Пространство имён DrawingML и Office Relationships — нужны, чтобы достать
+# rId из <a:blip r:embed="rIdN"/> внутри <w:drawing>.
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+NSMAP = {"w": W_NS, "m": M_NS, "a": A_NS, "r": R_NS}
 
 # Шаблон номера формулы в скобках в конце текста параграфа: «(3)» или «(3.1)».
 _FORMULA_NUMBER_RE = re.compile(r"\((\d+(?:\.\d+)?)\)\s*$")
@@ -727,14 +731,11 @@ def _extract_drawing_rid(drawing_elem: Any) -> str:
     внешних ссылок). Возвращает идентификатор вида 'embedded:rIdN'.
     Если не нашли — пустую строку (тогда экспортёр напишет placeholder).
     """
-    # Namespace для DrawingML и Relationships
-    a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
-    r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-    for blip in drawing_elem.iter(f"{{{a_ns}}}blip"):
-        embed = blip.get(f"{{{r_ns}}}embed")
+    for blip in drawing_elem.iter(f"{{{A_NS}}}blip"):
+        embed = blip.get(f"{{{R_NS}}}embed")
         if embed:
             return f"embedded:{embed}"
-        link = blip.get(f"{{{r_ns}}}link")
+        link = blip.get(f"{{{R_NS}}}link")
         if link:
             return f"linked:{link}"
     return ""

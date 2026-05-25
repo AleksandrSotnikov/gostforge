@@ -17,8 +17,11 @@ PAGE/STYLEREF, реальные изображения, OMML-формулы) —
 
 from __future__ import annotations
 
+import io
+import logging
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import docx  # type: ignore[import-not-found]
 from docx.document import Document as DocxDocument  # type: ignore[import-not-found]
@@ -49,6 +52,15 @@ from lxml import etree  # type: ignore[import-untyped]
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+
+logger = logging.getLogger(__name__)
+
+# Контекст для одной операции экспорта: открытый исходный документ, из
+# которого парсился `document`. Используется только в _write_figure для
+# вставки реальных изображений (`embedded:rIdN`). Threading-небезопасно —
+# для CLI и тестов достаточно; при необходимости можно перенести в
+# ContextVar.
+_current_source_docx: Any | None = None
 
 _ALIGNMENT_MAP = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
@@ -222,12 +234,26 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
 def _write_figure(doc: DocxDocument, figure: Figure) -> None:
     """Записать рисунок и его подпись.
 
-    Если `figure.image_path` указывает на существующий файл — вставляем
-    реальное изображение через python-docx `add_picture`. Иначе пишем
-    placeholder-параграф `[Рисунок: <id>]`.
+    Стратегия выбора источника изображения:
+
+    1. ``image_path = "embedded:rIdN"`` — рисунок пришёл из парсера и
+       ссылается на media-blob исходного .docx. Если в текущем контексте
+       экспорта (`_current_source_docx`) открыт source_docx — копируем
+       blob и вставляем как настоящее изображение.
+    2. ``image_path`` указывает на существующий файл — `add_picture(path)`.
+    3. Иначе (пусто, не-файл, ошибка вставки) — placeholder-параграф
+       вида `[Рисунок: <id>]`.
     """
     path = figure.image_path
-    if path and Path(path).is_file():
+
+    # Случай 1: embedded:rIdN с открытым source_docx.
+    if path.startswith("embedded:") and _current_source_docx is not None:
+        rid = path[len("embedded:"):]
+        if _try_write_embedded_picture(doc, _current_source_docx, rid, figure):
+            return
+
+    # Случай 2: реальный файл на диске.
+    if path and not path.startswith("embedded:") and Path(path).is_file():
         paragraph = doc.add_paragraph()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = paragraph.add_run()
@@ -235,29 +261,17 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
             run.add_picture(path)
         except Exception:  # noqa: BLE001 — fallback на placeholder при любой ошибке
             paragraph.add_run(f"[Рисунок: {figure.id}]").italic = True
-    else:
-        placeholder = doc.add_paragraph()
-        placeholder.add_run(f"[Рисунок: {figure.id}]").italic = True
+        _write_caption_paragraph(doc, figure.caption)
+        return
+
+    # Случай 3: placeholder.
+    placeholder = doc.add_paragraph()
+    placeholder.add_run(f"[Рисунок: {figure.id}]").italic = True
     _write_caption_paragraph(doc, figure.caption)
 
 
 def _write_formula(doc: DocxDocument, formula: Formula) -> None:
-    """Записать формулу как OOXML-OMath блок.
-
-    Формат:
-        <w:p>
-          <m:oMathPara>
-            <m:oMath>
-              <m:r><m:t>latex_text</m:t></m:r>
-            </m:oMath>
-          </m:oMathPara>
-          <w:r><w:t>\t({number})</w:t></w:r>  ← если есть номер
-        </w:p>
-
-    На Фазе 2 latex сохраняется как простой текст (не парсится в
-    математические объекты). Это обеспечивает round-trip с парсером,
-    который сохраняет видимый текст формулы.
-    """
+    """Записать формулу как OOXML-OMath блок."""
     paragraph = doc.add_paragraph()
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p_xml = paragraph._p
@@ -270,9 +284,40 @@ def _write_formula(doc: DocxDocument, formula: Formula) -> None:
         m_t.text = formula.latex
 
     if formula.number is not None:
-        # Табуляция + (N) — типичный визуальный формат нумерованной формулы.
         run = paragraph.add_run(f"\t({formula.number})")
         run.italic = False
+
+
+def _try_write_embedded_picture(
+    doc: DocxDocument, source_docx_obj: Any, rid: str, figure: Figure
+) -> bool:
+    """Попытка достать media-blob из source_docx и вставить как картинку."""
+    try:
+        image_part = source_docx_obj.part.related_parts.get(rid)
+    except Exception:  # noqa: BLE001
+        logger.debug("Не удалось получить related_parts для rId=%s", rid)
+        return False
+    if image_part is None:
+        return False
+    try:
+        blob = image_part.blob
+    except Exception:  # noqa: BLE001
+        return False
+
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.add_run()
+    try:
+        run.add_picture(io.BytesIO(blob))
+    except Exception:  # noqa: BLE001
+        p_xml = paragraph._p
+        parent = p_xml.getparent()
+        if parent is not None:
+            parent.remove(p_xml)
+        return False
+
+    _write_caption_paragraph(doc, figure.caption)
+    return True
 
 
 def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
@@ -421,7 +466,13 @@ def _write_items(doc: DocxDocument, items: Sequence[LogicalSection | Block]) -> 
             _write_formula(doc, item)
 
 
-def export_docx(document: Document, profile: Profile, output_path: str | Path) -> None:
+def export_docx(
+    document: Document,
+    profile: Profile,
+    output_path: str | Path,
+    *,
+    source_docx: str | Path | None = None,
+) -> None:
     """Собрать .docx из модели по профилю.
 
     Минимальная реализация: геометрия страницы, стиль Normal, параграфы и
@@ -430,35 +481,59 @@ def export_docx(document: Document, profile: Profile, output_path: str | Path) -
 
     Если у первой PageSection задан footer (например, после parse_docx
     плейсхолдер {page}) — он материализуется в OOXML-поле PAGE через lxml.
+
+    Параметры:
+      source_docx — путь к исходному .docx, из которого парсился document.
+        Если задан и у Figure.image_path == ``embedded:rIdN``, экспортёр
+        достанет соответствующий media-blob из source_docx и вставит как
+        реальное изображение. Иначе на месте картинки будет placeholder.
     """
+    global _current_source_docx
     output_path = Path(output_path)
     doc = docx.Document()
 
-    _apply_page_geometry(doc, profile)
-    _apply_normal_style(doc, profile)
+    # Открываем source_docx (если задан) и кладём его в модуль-level
+    # контекст — _write_figure читает оттуда. Try/finally гарантирует
+    # сброс контекста даже при исключении в середине экспорта.
+    _current_source_docx = None
+    if source_docx is not None:
+        try:
+            _current_source_docx = docx.Document(str(source_docx))
+        except Exception:
+            # Повреждённый или нечитаемый docx → пропускаем источник, картинки уйдут в placeholder.
+            logger.warning(
+                "Не удалось открыть source_docx=%s; картинки будут placeholder-ами",
+                source_docx,
+            )
+            _current_source_docx = None
 
-    # Footer и стартовая страница — берём из первой PageSection (на Фазе 1
-    # все PageSection кладутся в одну физическую секцию docx).
-    # Метаданные документа в docProps/core.xml.
-    core = doc.core_properties
-    if document.metadata.title:
-        core.title = document.metadata.title
-    if document.metadata.author:
-        core.author = document.metadata.author
+    try:
+        _apply_page_geometry(doc, profile)
+        _apply_normal_style(doc, profile)
 
-    if document.page_sections:
-        first = document.page_sections[0]
-        _apply_page_size(doc, first)
-        _apply_pgnumtype(doc, first)
-        if first.footer is not None:
-            _write_footer(doc, first.footer.default)
-        if first.header is not None:
-            _write_header(doc, first.header.default)
+        # Метаданные документа в docProps/core.xml.
+        core = doc.core_properties
+        if document.metadata.title:
+            core.title = document.metadata.title
+        if document.metadata.author:
+            core.author = document.metadata.author
 
-    for page_section in document.page_sections:
-        _write_items(doc, page_section.content)
+        if document.page_sections:
+            first = document.page_sections[0]
+            _apply_page_size(doc, first)
+            _apply_pgnumtype(doc, first)
+            if first.footer is not None:
+                _write_footer(doc, first.footer.default)
+            if first.header is not None:
+                _write_header(doc, first.header.default)
 
-    doc.save(str(output_path))
+        for page_section in document.page_sections:
+            _write_items(doc, page_section.content)
+
+        doc.save(str(output_path))
+    finally:
+        _current_source_docx = None
+
     # Post-processing на уровне zip: запись настроек, которые python-docx
     # не умеет менять напрямую (например, w:autoHyphenation в settings.xml).
     _postprocess_zip(Path(output_path), document)
@@ -482,7 +557,6 @@ def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
     ) as zout:
         names = zin.namelist()
         if settings_path not in names:
-            # python-docx не создал settings.xml — создаём минимальный.
             settings_xml = (
                 b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                 b'<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
@@ -513,19 +587,12 @@ def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
                 zout.writestr(name, zin.read(name))
         if not wrote_settings:
             zout.writestr(settings_path, new_xml)
-            # Также нужно добавить relationship и content-type, иначе Word
-            # не увидит settings.xml. Это нетривиально для post-processing;
-            # на Фазе 2 ограничимся случаем, когда settings.xml уже есть
-            # (python-docx обычно создаёт его). Логируем как warning.
 
     shutil.move(str(tmp_path), str(docx_path))
 
 
 def _write_header(doc: DocxDocument, header_template: ContentTemplate) -> None:
-    """Записать содержимое header первой секции (зеркально _write_footer).
-
-    Слоты left/center/right определяются выравниванием параграфа.
-    """
+    """Записать содержимое header первой секции (зеркально _write_footer)."""
     section = doc.sections[0]
     header = section.header
     for p in list(header.paragraphs):
@@ -551,4 +618,3 @@ def _write_header(doc: DocxDocument, header_template: ContentTemplate) -> None:
         else:
             para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
         _write_template_into_footer_paragraph(para, content)
-
