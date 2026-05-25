@@ -289,6 +289,14 @@ def _appendix_letter(heading: str) -> str | None:
     return match.group(1)
 
 
+def _first_paragraph_of_section(section: LogicalSection) -> Paragraph | None:
+    """Найти первый Paragraph среди прямых детей раздела."""
+    for child in section.children:
+        if isinstance(child, Paragraph):
+            return child
+    return None
+
+
 # --- P.02 ------------------------------------------------------------------
 
 
@@ -367,7 +375,52 @@ def check_appendix_referenced(
     return violations
 
 
+# --- P.03 ------------------------------------------------------------------
+
+
+@register("P.03")
+def check_appendix_page_break(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Каждое приложение должно начинаться с новой страницы.
+
+    Это «локальная» версия S.06 для разделов-приложений: проверяем
+    у первого Paragraph внутри section.children, что
+    `page_break_before` НЕ равен False.
+
+    Семантика повторяет S.06 — `None` не считаем нарушением, потому что
+    разрыв может быть задан через Word-стиль заголовка.
+    """
+    _ = profile
+    violations: list[Violation] = []
+    appendices = _appendix_sections(document)
+    for section in appendices:
+        first_para = _first_paragraph_of_section(section)
+        if first_para is None:
+            continue
+        if first_para.page_break_before is False:
+            heading = _heading_text(section.heading).strip()
+            violations.append(
+                Violation(
+                    check_code="P.03",
+                    severity="error",
+                    message=(
+                        f"Приложение «{heading}» не начинается с новой страницы"
+                    ),
+                    location=f"page_sections.*.logical_section[{section.id}]",
+                    suggestion=(
+                        "Включить разрыв страницы перед заголовком приложения "
+                        "(Word: «Разрыв страницы перед» в свойствах абзаца)"
+                    ),
+                    details={"section_id": section.id},
+                )
+            )
+    return violations
+
+
 __all__ = [
     "check_appendix_letter_marking",
+    "check_appendix_page_break",
     "check_appendix_referenced",
 ]

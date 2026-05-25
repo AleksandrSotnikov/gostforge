@@ -204,3 +204,68 @@ def test_p02_alternative_reference_forms() -> None:
     assert found == []
 
 
+# --- P.03 -----------------------------------------------------------------
+
+
+def test_p03_registered() -> None:
+    assert "P.03" in registered_checks()
+
+
+def test_p03_page_break_true_no_violation() -> None:
+    """Первый Paragraph приложения с page_break_before=True — нет нарушения."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Содержимое приложения.")],
+        page_break_before=True,
+    )
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А")],
+        children=[para],
+    )
+    doc = _doc_with_content([app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.03"]
+    assert found == []
+
+
+def test_p03_page_break_false_violation() -> None:
+    """Первый Paragraph приложения с page_break_before=False — нарушение."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Содержимое приложения.")],
+        page_break_before=False,
+    )
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А")],
+        children=[para],
+    )
+    doc = _doc_with_content([app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.03"]
+    assert len(found) == 1
+    assert found[0].details["section_id"] == "app-a"
+
+
+def test_p03_page_break_none_no_violation() -> None:
+    """page_break_before=None (наследуется) — без нарушения."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Содержимое приложения.")],
+        page_break_before=None,
+    )
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А")],
+        children=[para],
+    )
+    doc = _doc_with_content([app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.03"]
+    assert found == []
+
+
