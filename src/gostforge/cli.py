@@ -471,6 +471,60 @@ def checks_list() -> None:
         click.echo(code)
 
 
+@main.group()
+def plugins() -> None:
+    """Управление пользовательскими плагинами проверок."""
+
+
+@plugins.command("list")
+def plugins_list() -> None:
+    """Показать загруженные плагины и предоставленные ими проверки."""
+    from gostforge.plugins import (
+        discover_plugin_files,
+        load_plugins,
+        plugins_dir,
+    )
+    from gostforge.validator.engine import _registry
+
+    directory = plugins_dir()
+    click.echo(f"Директория плагинов: {directory}")
+    if not directory.exists():
+        click.echo("  (не существует — создайте директорию для добавления плагинов)")
+        return
+
+    # Снимем снапшот текущего реестра, чтобы понять, какие проверки
+    # добавились именно сейчас при загрузке плагинов.
+    before = set(_registry)
+    files = discover_plugin_files()
+    load_plugins()
+    after = set(_registry)
+    added_codes = sorted(after - before)
+
+    if not files:
+        click.echo("  (плагинов не найдено)")
+        return
+
+    click.echo(f"\nНайдено файлов: {len(files)}")
+    for f in files:
+        click.echo(f"  - {f.name}")
+
+    if added_codes:
+        click.echo(f"\nДобавлены проверки: {', '.join(added_codes)}")
+
+
+@plugins.command("dir")
+def plugins_dir_cmd() -> None:
+    """Показать путь к директории плагинов (или создать её)."""
+    from gostforge.plugins import plugins_dir
+
+    d = plugins_dir()
+    if not d.exists():
+        d.mkdir(parents=True, exist_ok=True)
+        click.echo(f"Создана: {d}")
+    else:
+        click.echo(f"{d}")
+
+
 @main.command()
 @click.option("--port", default=8501, help="Порт (по умолчанию 8501).")
 @click.option("--host", default="localhost", help="Адрес для bind (по умолчанию localhost).")
