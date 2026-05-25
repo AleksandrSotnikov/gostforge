@@ -105,6 +105,22 @@ def test_i01_nested_logical_sections() -> None:
     assert found[0].details["figure_id"] == "fig-deep"
 
 
+# --- I.02 (подпись под рисунком — заглушка) -----------------------------
+
+
+def test_i02_registered() -> None:
+    assert "I.02" in registered_checks()
+
+
+def test_i02_returns_empty_phase2_stub() -> None:
+    """I.02 — заглушка (парсер всегда даёт caption снизу, нет caption_position)."""
+    figure = Figure(id="fig-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.02"]
+    assert found == []
+
+
 # --- I.03 -------------------------------------------------------------------
 
 

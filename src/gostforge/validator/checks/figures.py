@@ -90,6 +90,23 @@ def _caption_text(elements: Sequence[InlineElement]) -> str:
     return "".join(el.text for el in elements if isinstance(el, TextRun)).strip()
 
 
+@register("I.02")
+def check_figure_caption_below(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Подпись рисунка должна располагаться под ним (заглушка).
+
+    TODO (Фаза 2): текущий парсер склеивает подпись только снизу — у
+    `Figure.caption` нет признака `caption_position` (`above`/`below`),
+    поэтому мы не можем отличить случай «подпись над рисунком» от
+    «подпись под рисунком». На уровне модели данная проверка фактически
+    дублирует I.01 (наличие подписи). Полноценная реализация требует
+    `Figure.caption_position` и расширения парсера.
+    """
+    return []
+
+
 @register("I.03")
 def check_figure_caption_format(
     document: Document, profile: Profile
@@ -310,6 +327,7 @@ def check_figure_referenced_in_text(
 
 
 __all__ = [
+    "check_figure_caption_below",
     "check_figure_caption_format",
     "check_figure_has_caption",
     "check_figure_numbering_continuous",
