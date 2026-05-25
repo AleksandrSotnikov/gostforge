@@ -35,6 +35,7 @@ from gostforge.model import (
     Figure,
     HeaderConfig,
     InlineElement,
+    ListBlock,
     LogicalSection,
     PageGeometry,
     PageSection,
@@ -396,6 +397,35 @@ class _Counters:
         self.paragraph = 0
         self.figure = 0
         self.table = 0
+        self.list = 0
+
+
+# Имена Word-стилей, обозначающих элемент списка (case-insensitive).
+_LIST_STYLE_PREFIXES = ("list paragraph", "list number", "list bullet", "list")
+
+
+def _paragraph_list_kind(dp: DocxParagraph) -> str | None:
+    """Определить, является ли параграф элементом списка.
+
+    Возвращает 'ordered' | 'bulleted' | None. Эвристика:
+    - <w:numPr> в <w:pPr> → есть привязка к списку Word. Тип определяется
+      по стилю абзаца (List Number → ordered, List Bullet → bulleted),
+      иначе по умолчанию ordered (Word обычно так).
+    - Стиль абзаца начинается с 'List Number' → ordered.
+    - Стиль абзаца начинается с 'List Bullet' → bulleted.
+    - Иначе None — обычный параграф.
+    """
+    p_xml = dp._p
+    num_pr = p_xml.find(f"{{{W_NS}}}pPr/{{{W_NS}}}numPr")
+    style_name = (dp.style.name if dp.style is not None else "").lower()
+    if style_name.startswith("list number"):
+        return "ordered"
+    if style_name.startswith("list bullet"):
+        return "bulleted"
+    if num_pr is not None:
+        # Привязка к списку без указания типа в стиле — считаем ordered.
+        return "ordered"
+    return None
 
 
 def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None:
@@ -416,12 +446,31 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
     counters = _Counters()
     body = docx_doc.element.body
 
+    # Буфер для группировки последовательных list-параграфов в один ListBlock.
+    list_buffer: list[tuple[str, list[InlineElement]]] = []  # (kind, content)
+
+    def flush_list_buffer() -> None:
+        """Если в буфере накопились list-параграфы — сделать из них ListBlock."""
+        if not list_buffer:
+            return
+        # Тип ordered определяется по большинству элементов буфера
+        ordered = sum(1 for k, _ in list_buffer if k == "ordered") >= len(list_buffer) / 2
+        counters.list += 1
+        list_block = ListBlock(
+            id=f"list-{counters.list}",
+            ordered=ordered,
+            items=[content for _, content in list_buffer],
+        )
+        _append_block(list_block, page_section, current_section)
+        list_buffer.clear()
+
     for child in body.iterchildren():
         tag = etree.QName(child.tag).localname
         if tag == "p":
             dp = DocxParagraphCls(child, docx_doc)
             heading_level = _heading_level(dp)
             if heading_level is not None:
+                flush_list_buffer()
                 counters.heading += 1
                 section = LogicalSection(
                     id=f"sec-{counters.heading}",
@@ -432,13 +481,32 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
                 current_section = section
                 continue
 
+            # Распознаём элемент списка ещё до построения Paragraph
+            list_kind = _paragraph_list_kind(dp)
+            if list_kind is not None:
+                # Собираем inline-контент параграфа как InlineElement-список
+                runs: list[InlineElement] = [
+                    TextRun(text=run.text) for run in dp.runs if run.text
+                ]
+                if not runs and dp.text:
+                    runs = [TextRun(text=dp.text)]
+                if runs:
+                    list_buffer.append((list_kind, runs))
+                continue
+
+            # Обычный параграф или figure — сначала закрываем накопленный список
+            flush_list_buffer()
             block = _block_from_paragraph(dp, counters)
             _append_block(block, page_section, current_section)
         elif tag == "tbl":
+            flush_list_buffer()
             counters.table += 1
             table = _build_table(DocxTableCls(child, docx_doc), idx=counters.table)
             _append_block(table, page_section, current_section)
         # sectPr и прочие — игнорируем.
+
+    # Не забыть закрыть финальный список (если документ закончился им)
+    flush_list_buffer()
 
     # Склейка подписей: для content страницы и для каждой LogicalSection.
     _glue_captions(page_section.content)

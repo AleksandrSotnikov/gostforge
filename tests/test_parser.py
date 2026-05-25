@@ -426,3 +426,70 @@ def test_parser_extracts_header_with_page_field(tmp_path: Path) -> None:
     assert center is not None
     assert any(getattr(r, "text", "") == "{page}" for r in center)
     assert page_section.page_numbering.visible is True
+
+
+def test_parser_recognizes_numbered_list(tmp_path: Path) -> None:
+    """Параграфы со стилем 'List Number' группируются в один ListBlock(ordered=True)."""
+    import docx as python_docx
+
+    from gostforge.model import ListBlock
+    from gostforge.parser import parse_docx
+
+    doc = python_docx.Document()
+    doc.add_paragraph("Первый элемент", style="List Number")
+    doc.add_paragraph("Второй элемент", style="List Number")
+    doc.add_paragraph("Третий элемент", style="List Number")
+    out = tmp_path / "list.docx"
+    doc.save(str(out))
+
+    parsed = parse_docx(out)
+    blocks = parsed.page_sections[0].content
+    list_blocks = [b for b in blocks if isinstance(b, ListBlock)]
+    assert len(list_blocks) == 1
+    assert list_blocks[0].ordered is True
+    assert len(list_blocks[0].items) == 3
+
+
+def test_parser_recognizes_bulleted_list(tmp_path: Path) -> None:
+    """Параграфы со стилем 'List Bullet' дают ListBlock(ordered=False)."""
+    import docx as python_docx
+
+    from gostforge.model import ListBlock
+    from gostforge.parser import parse_docx
+
+    doc = python_docx.Document()
+    doc.add_paragraph("Пункт A", style="List Bullet")
+    doc.add_paragraph("Пункт B", style="List Bullet")
+    out = tmp_path / "bullet.docx"
+    doc.save(str(out))
+
+    parsed = parse_docx(out)
+    blocks = parsed.page_sections[0].content
+    list_blocks = [b for b in blocks if isinstance(b, ListBlock)]
+    assert len(list_blocks) == 1
+    assert list_blocks[0].ordered is False
+    assert len(list_blocks[0].items) == 2
+
+
+def test_parser_splits_lists_by_intervening_paragraph(tmp_path: Path) -> None:
+    """Между двумя списками обычный параграф — должны получить 2 ListBlock."""
+    import docx as python_docx
+
+    from gostforge.model import ListBlock
+    from gostforge.parser import parse_docx
+
+    doc = python_docx.Document()
+    doc.add_paragraph("Один", style="List Number")
+    doc.add_paragraph("Два", style="List Number")
+    doc.add_paragraph("Обычный текст")
+    doc.add_paragraph("Три", style="List Number")
+    doc.add_paragraph("Четыре", style="List Number")
+    out = tmp_path / "split.docx"
+    doc.save(str(out))
+
+    parsed = parse_docx(out)
+    blocks = parsed.page_sections[0].content
+    list_blocks = [b for b in blocks if isinstance(b, ListBlock)]
+    assert len(list_blocks) == 2
+    assert len(list_blocks[0].items) == 2
+    assert len(list_blocks[1].items) == 2
