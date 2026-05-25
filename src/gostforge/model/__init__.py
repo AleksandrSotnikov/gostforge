@@ -67,7 +67,7 @@ class Block:
     type: BlockType
 
 
-Alignment = Literal["left", "right", "center", "justify"]
+ParagraphAlignment = Literal["left", "right", "center", "justify"]
 
 
 @dataclass
@@ -77,7 +77,7 @@ class Paragraph(Block):
     # Имя Word-стиля (Normal, Heading 1, Caption, ...). Используется
     # парсером и проверками для классификации абзаца.
     style_name: str | None = None
-    alignment: Alignment | None = None
+    alignment: ParagraphAlignment | None = None
     line_spacing: float | None = None
     first_line_indent_cm: float | None = None
 
