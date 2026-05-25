@@ -126,6 +126,7 @@ checks:
   S.06: {enabled: true, params: {required_for_level: 1}}
   H.01: {enabled: true}
   H.03: {enabled: true}
+  H.08: {enabled: true}
   H.04: {enabled: true}
   H.05: {enabled: true}
   I.01: {enabled: true}

@@ -1,3 +1,5 @@
+# ruff: noqa: RUF002
+
 """Тесты T.01 (шрифт) и T.02 (кегль)."""
 
 from gostforge.model import (

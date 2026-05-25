@@ -1,3 +1,5 @@
+# ruff: noqa: RUF002
+
 """Тесты H.01 и H.03 — формат заголовков."""
 
 from gostforge.model import (
@@ -145,3 +147,72 @@ def test_h03_traverses_nested_sections() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "H.03"]
     assert len(found) == 1
     assert "1.1" in found[0].details["number"]
+
+
+# --- H.08 (заголовок не оканчивается точкой) ------------------------------
+
+
+def test_h08_registered() -> None:
+    assert "H.08" in registered_checks()
+
+
+def test_h08_correct_heading_no_violation() -> None:
+    doc = _doc([_heading("Введение"), _heading("Заключение")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.08"]
+    assert found == []
+
+
+def test_h08_heading_ends_with_dot_violation() -> None:
+    doc = _doc([_heading("Введение.")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.08"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "точкой" in found[0].message
+
+
+def test_h08_heading_ends_with_three_dots_violation() -> None:
+    """Три ASCII-точки в конце — тоже нарушение."""
+    doc = _doc([_heading("Анализ предметной области...")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.08"]
+    assert len(found) == 1
+
+
+def test_h08_heading_ends_with_ellipsis_unicode_violation() -> None:
+    """Unicode-многоточие (U+2026) — тоже нарушение."""
+    doc = _doc([_heading("Анализ предметной области…")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.08"]
+    assert len(found) == 1
+
+
+def test_h08_heading_ends_with_question_mark_no_violation() -> None:
+    """Вопросительный знак в конце — допустимо по ГОСТ Р 2.105-2019."""
+    doc = _doc([_heading("Что такое нормоконтроль?")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.08"]
+    assert found == []
+
+
+def test_h08_heading_ends_with_colon_no_violation() -> None:
+    doc = _doc([_heading("Список таблиц:")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.08"]
+    assert found == []
+
+
+def test_h08_traverses_nested_sections() -> None:
+    inner = _heading("Подраздел.", level=2)
+    outer = LogicalSection(
+        id="outer",
+        level=1,
+        heading=[TextRun(text="1 Основная часть")],
+        children=[inner],
+    )
+    doc = _doc([outer])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.08"]
+    assert len(found) == 1
+    assert "Подраздел." in found[0].message

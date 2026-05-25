@@ -1,3 +1,5 @@
+# ruff: noqa: RUF001, RUF002, RUF003
+
 """H.* — проверки заголовков логических разделов."""
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from gostforge.model import (
 from gostforge.profile import Profile
 
 from ..engine import Violation, register
-
 
 _SIZE_TOLERANCE_PT = 0.1
 
@@ -147,7 +148,7 @@ def check_heading_1_format(document: Document, profile: Profile) -> list[Violati
 
 @register("H.03")
 def check_heading_number_no_trailing_dot(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document, profile: Profile
 ) -> list[Violation]:
     """После номера раздела в заголовке точки быть не должно.
 
@@ -174,6 +175,38 @@ def check_heading_number_no_trailing_dot(
     return violations
 
 
+@register("H.08")
+def check_heading_no_terminal_punctuation(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Заголовок не должен оканчиваться точкой (или многоточием).
+
+    По ГОСТ Р 2.105-2019 заголовок не должен оканчиваться знаком
+    препинания, кроме `:` или `?`. На Фазе 1 проверяем только точку и
+    многоточие (`.`, `...`, `…`). Severity=warning.
+    """
+    violations: list[Violation] = []
+    for section in _all_logical_sections(document):
+        text = _heading_text(section.heading).rstrip()
+        if not text:
+            continue
+        # Многоточие в виде Unicode-символа или трёх точек.
+        if text.endswith("…") or text.endswith("...") or text.endswith("."):
+            violations.append(
+                Violation(
+                    check_code="H.08",
+                    severity="warning",
+                    message=(
+                        f"Заголовок «{text}» оканчивается точкой/многоточием — "
+                        f"по ГОСТ Р 2.105-2019 не допускается"
+                    ),
+                    location=f"page_sections.*.logical_section[{section.id}].heading",
+                    suggestion="Убрать точку в конце заголовка",
+                )
+            )
+    return violations
+
+
 def _violation(
     code: str,
     message: str,
@@ -195,6 +228,7 @@ def _violation(
 __all__ = [
     "all_logical_sections",
     "check_heading_1_format",
+    "check_heading_no_terminal_punctuation",
     "check_heading_number_no_trailing_dot",
     "iter_logical_sections",
 ]

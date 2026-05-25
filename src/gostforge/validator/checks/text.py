@@ -1,3 +1,5 @@
+# ruff: noqa: RUF001, RUF002, RUF003
+
 """T.* — проверки основного текста (шрифт, кегль, интервалы)."""
 
 from __future__ import annotations
@@ -16,7 +18,6 @@ from gostforge.model import (
 from gostforge.profile import Profile
 
 from ..engine import Violation, register
-
 
 # Стили абзацев, которые не считаются «основным текстом». Для них применяются
 # отдельные правила (размер подписи, размер сноски), а не body.
@@ -368,7 +369,7 @@ def _paragraph_text(paragraph: Paragraph) -> str:
 
 @register("T.08")
 def check_no_double_spaces(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document, profile: Profile
 ) -> list[Violation]:
     """В абзаце не должно быть двух и более пробелов подряд внутри run-а.
 
@@ -403,7 +404,7 @@ def check_no_double_spaces(
 
 @register("T.09")
 def check_no_trailing_spaces(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document, profile: Profile
 ) -> list[Violation]:
     """В конце абзаца не должно быть хвостовых пробельных символов.
 
@@ -501,7 +502,7 @@ _HYPHEN_BETWEEN_SPACES_RE = re.compile(r" - ")
 
 @register("T.11")
 def check_em_dash_instead_of_hyphen(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document, profile: Profile
 ) -> list[Violation]:
     """В русском тексте на месте тире должно стоять « — » (U+2014), не « - ».
 
@@ -552,12 +553,12 @@ def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violati
 
 __all__ = [
     "check_alignment",
+    "check_em_dash_instead_of_hyphen",
     "check_first_line_indent",
     "check_font",
     "check_font_size",
     "check_line_spacing",
     "check_no_consecutive_empty_paragraphs",
-    "check_em_dash_instead_of_hyphen",
     "check_no_double_spaces",
     "check_no_trailing_spaces",
     "check_typographic_quotes",
