@@ -77,7 +77,15 @@ gostforge profiles create my-department --extends gost-7.32-2017
 - [Система профилей](docs/profiles.md)
 - [Колонтитулы и секции](docs/page-sections.md)
 - [Roadmap](docs/roadmap.md)
+- [Работа с Claude Code](docs/claude-code-workflow.md) — как продолжать разработку
 - [Вклад в проект](CONTRIBUTING.md)
+
+## Для разработчиков, использующих Claude Code
+
+В корне проекта лежит `CLAUDE.md` — он автоматически подхватывается агентом и
+содержит ключевой контекст (стек, правила, конвенции). Подробная пошаговая
+инструкция и готовые промпты для каждой задачи roadmap — в
+[docs/claude-code-workflow.md](docs/claude-code-workflow.md).
 
 ## Стандарты-основа
 
