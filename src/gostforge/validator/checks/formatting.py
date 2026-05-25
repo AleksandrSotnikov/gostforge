@@ -2,10 +2,41 @@
 
 from __future__ import annotations
 
-from gostforge.model import Document
+from gostforge.model import ContentTemplate, Document, TextRun
 from gostforge.profile import Profile
 
 from ..engine import Violation, register
+
+
+# Плейсхолдер, который парсер ставит в footer/header, когда находит
+# поле PAGE в OOXML (instrText="PAGE" или fldSimple).
+_PAGE_PLACEHOLDER = "{page}"
+
+
+def _template_has_placeholder(template: ContentTemplate | None, placeholder: str) -> bool:
+    """Есть ли заданный плейсхолдер в каком-либо из слотов шаблона (left/center/right)."""
+    if template is None:
+        return False
+    for slot in (template.left, template.center, template.right):
+        if slot is None:
+            continue
+        for el in slot:
+            if isinstance(el, TextRun) and placeholder in el.text:
+                return True
+    return False
+
+
+def _placeholder_at(template: ContentTemplate | None, slot: str, placeholder: str) -> bool:
+    """Лежит ли плейсхолдер именно в указанном слоте."""
+    if template is None:
+        return False
+    content = getattr(template, slot, None)
+    if content is None:
+        return False
+    for el in content:
+        if isinstance(el, TextRun) and placeholder in el.text:
+            return True
+    return False
 
 
 @register("F.01")
@@ -43,8 +74,80 @@ def check_margins(document: Document, profile: Profile) -> list[Violation]:
     return violations
 
 
+@register("F.04")
+def check_page_number_position(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка положения номера страницы.
+
+    Параметр профиля `checks.F.04.params.position`: одно из значений
+    `bottom_center` (по умолчанию), `bottom_right`, `bottom_left`,
+    `top_center`, `top_right`, `top_left`.
+
+    Парсер кладёт плейсхолдер `{page}` в соответствующий слот footer/header
+    при обнаружении поля PAGE в OOXML.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("F.04")
+    position = "bottom_center"
+    if config and config.params.get("position"):
+        position = str(config.params["position"])
+
+    try:
+        vertical, slot = position.split("_", 1)
+    except ValueError:
+        # Конфигурация профиля невалидна — это ошибка не документа, а профиля.
+        # Тихо выходим, чтобы не валить весь прогон. Будет покрыто валидацией
+        # профиля отдельно.
+        return violations
+
+    if vertical not in {"top", "bottom"} or slot not in {"left", "center", "right"}:
+        return violations
+
+    for section in document.page_sections:
+        if not section.page_numbering.visible:
+            continue
+
+        target = section.footer if vertical == "bottom" else section.header
+
+        if not _template_has_placeholder(target.default if target else None, _PAGE_PLACEHOLDER):
+            violations.append(
+                Violation(
+                    check_code="F.04",
+                    severity="error",
+                    message=(
+                        f"В секции «{section.name}» включена нумерация страниц, "
+                        f"но поле PAGE в {vertical}-колонтитуле не найдено"
+                    ),
+                    location=f"page_sections.{section.id}.{vertical}.default",
+                    suggestion=(
+                        f"Добавить поле PAGE в {slot}-слот нижнего колонтитула"
+                        if vertical == "bottom"
+                        else f"Добавить поле PAGE в {slot}-слот верхнего колонтитула"
+                    ),
+                    details={"expected_position": position},
+                )
+            )
+            continue
+
+        # Поле есть, но проверим, в правильном ли слоте
+        if not _placeholder_at(target.default if target else None, slot, _PAGE_PLACEHOLDER):
+            violations.append(
+                Violation(
+                    check_code="F.04",
+                    severity="error",
+                    message=(
+                        f"Номер страницы в секции «{section.name}» расположен не в "
+                        f"ожидаемом положении ({position})"
+                    ),
+                    location=f"page_sections.{section.id}.{vertical}.default.{slot}",
+                    suggestion=f"Переместить поле PAGE в {slot}-слот {vertical}-колонтитула",
+                    details={"expected_position": position},
+                )
+            )
+
+    return violations
+
+
 # TODO: F.02 — формат бумаги
 # TODO: F.03 — ориентация
-# TODO: F.04 — положение номера страницы
 # TODO: F.05 — формат номера
 # TODO: F.06 — стартовая страница нумерации
