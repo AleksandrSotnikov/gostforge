@@ -35,23 +35,32 @@ def _heading_runs(content: Sequence[InlineElement]) -> list[TextRun]:
     return [el for el in content if isinstance(el, TextRun)]
 
 
-def _iter_logical_sections(
+def iter_logical_sections(
     items: Sequence[LogicalSection | Block],
 ) -> list[LogicalSection]:
-    """Рекурсивно собрать все LogicalSection (всех уровней)."""
+    """Рекурсивно собрать все LogicalSection (всех уровней).
+
+    Публичный хелпер — используется не только H.*, но и S.* проверками.
+    """
     result: list[LogicalSection] = []
     for item in items:
         if isinstance(item, LogicalSection):
             result.append(item)
-            result.extend(_iter_logical_sections(item.children))
+            result.extend(iter_logical_sections(item.children))
     return result
 
 
-def _all_logical_sections(document: Document) -> list[LogicalSection]:
+def all_logical_sections(document: Document) -> list[LogicalSection]:
+    """Все LogicalSection документа (плоско, со всех PageSection)."""
     sections: list[LogicalSection] = []
     for ps in document.page_sections:
-        sections.extend(_iter_logical_sections(ps.content))
+        sections.extend(iter_logical_sections(ps.content))
     return sections
+
+
+# Алиасы для обратной совместимости внутри модуля.
+_iter_logical_sections = iter_logical_sections
+_all_logical_sections = all_logical_sections
 
 
 @register("H.01")
@@ -184,6 +193,8 @@ def _violation(
 
 
 __all__ = [
+    "all_logical_sections",
     "check_heading_1_format",
     "check_heading_number_no_trailing_dot",
+    "iter_logical_sections",
 ]

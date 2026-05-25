@@ -86,3 +86,94 @@ def test_f04_uses_profile_position_param() -> None:
     profile.checks["F.04"].params["position"] = "bottom_right"
     found = [v for v in validate(doc, profile) if v.check_code == "F.04"]
     assert len(found) == 1
+
+
+# --- F.06 -------------------------------------------------------------------
+
+
+def _section_with_numbering(
+    *,
+    visible: bool,
+    start_mode: str,
+    start_value: int | None,
+) -> PageSection:
+    """PageSection с заданной конфигурацией нумерации."""
+    return PageSection(
+        id="main",
+        name="Основная часть",
+        type="main",
+        page_numbering=PageNumberingConfig(
+            visible=visible,
+            start_mode=start_mode,  # type: ignore[arg-type]
+            start_value=start_value,
+        ),
+    )
+
+
+def test_f06_registered() -> None:
+    assert "F.06" in registered_checks()
+
+
+def test_f06_correct_start_value_no_violation() -> None:
+    """start_at=3 совпадает с ожидаемым profile.params.start_value=3."""
+    doc = _doc(
+        _section_with_numbering(visible=True, start_mode="start_at", start_value=3)
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
+    assert found == []
+
+
+def test_f06_wrong_start_value_violation() -> None:
+    """start_at=5 при ожидании 3 — нарушение."""
+    doc = _doc(
+        _section_with_numbering(visible=True, start_mode="start_at", start_value=5)
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
+    assert len(found) == 1
+    assert "5" in found[0].message
+    assert found[0].details.get("expected") == "3"
+    assert found[0].details.get("actual") == "5"
+
+
+def test_f06_continue_mode_skipped() -> None:
+    """start_mode=continue — мягкая семантика, проверка не применяется."""
+    doc = _doc(
+        _section_with_numbering(visible=True, start_mode="continue", start_value=None)
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
+    assert found == []
+
+
+def test_f06_invisible_numbering_skipped() -> None:
+    """На титульном листе нумерация выключена — F.06 не применяется."""
+    doc = _doc(
+        _section_with_numbering(visible=False, start_mode="start_at", start_value=99)
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
+    assert found == []
+
+
+def test_f06_param_unset_skips_check() -> None:
+    """Без params.start_value в профиле проверка пропускается."""
+    doc = _doc(
+        _section_with_numbering(visible=True, start_mode="start_at", start_value=42)
+    )
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["F.06"].params.pop("start_value", None)
+    found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
+    assert found == []
+
+
+def test_f06_profile_param_overrides_default() -> None:
+    """Можно переопределить ожидаемое значение через params."""
+    doc = _doc(
+        _section_with_numbering(visible=True, start_mode="start_at", start_value=2)
+    )
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["F.06"].params["start_value"] = 2
+    found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
+    assert found == []

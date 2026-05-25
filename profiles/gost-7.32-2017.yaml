@@ -109,7 +109,7 @@ checks:
   F.02: {enabled: true}
   F.04: {enabled: true, params: {position: bottom_center}}
   F.05: {enabled: true}
-  F.06: {enabled: true}
+  F.06: {enabled: true, params: {start_value: 3}}
   T.01: {enabled: true, params: {font: "Times New Roman"}}
   T.02: {enabled: true, params: {body_size: 14, caption_size: 12, footnote_size: 10}}
   T.03: {enabled: true, params: {line_spacing: 1.5}}
@@ -120,7 +120,7 @@ checks:
   T.08: {enabled: true}
   S.01: {enabled: true}
   S.02: {enabled: true}
-  S.06: {enabled: true}
+  S.06: {enabled: true, params: {required_for_level: 1}}
   H.01: {enabled: true}
   H.03: {enabled: true}
   H.04: {enabled: true}

@@ -9,11 +9,13 @@ from gostforge.model import (
     Document,
     InlineElement,
     LogicalSection,
+    Paragraph,
     TextRun,
 )
 from gostforge.profile import Profile
 
 from ..engine import Violation, register
+from .headings import iter_logical_sections
 
 
 # Дефолтный список обязательных разделов для ГОСТ 7.32-2017. Может быть
@@ -90,4 +92,72 @@ def check_required_sections(document: Document, profile: Profile) -> list[Violat
     return violations
 
 
-__all__ = ["check_required_sections"]
+def _first_paragraph(section: LogicalSection) -> Paragraph | None:
+    """Найти первый Paragraph среди прямых детей раздела."""
+    for child in section.children:
+        if isinstance(child, Paragraph):
+            return child
+    return None
+
+
+@register("S.06")
+def check_section_page_break(document: Document, profile: Profile) -> list[Violation]:
+    """Раздел указанного уровня должен начинаться с новой страницы.
+
+    Параметр профиля `checks.S.06.params.required_for_level` (по умолчанию 1)
+    задаёт, для каких уровней разделов требуется разрыв страницы.
+
+    Семантика Фазы 1 — «мягкая»: нарушением считается только случай,
+    когда у первого Paragraph раздела `page_break_before` явно равен
+    False. Если значение None (унаследовано/не задано парсером явно) —
+    не считаем нарушением, чтобы не плодить ложные срабатывания
+    (разрыв может быть задан через Word-стиль заголовка).
+
+    Самый первый LogicalSection документа пропускается — он по умолчанию
+    начинается с первой страницы.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("S.06")
+    required_level = 1
+    if config and config.params.get("required_for_level") is not None:
+        try:
+            required_level = int(config.params["required_for_level"])
+        except (TypeError, ValueError):
+            required_level = 1
+
+    sections: list[LogicalSection] = []
+    for ps in document.page_sections:
+        sections.extend(iter_logical_sections(ps.content))
+
+    level_sections = [s for s in sections if s.level == required_level]
+    # Первый раздел нужного уровня — на первой странице, разрыв не нужен.
+    for section in level_sections[1:]:
+        first_para = _first_paragraph(section)
+        if first_para is None:
+            continue
+        if first_para.page_break_before is False:
+            heading = _heading_text(section.heading)
+            violations.append(
+                Violation(
+                    check_code="S.06",
+                    severity="error",
+                    message=(
+                        f"Раздел «{heading}» (уровень {required_level}) не начинается "
+                        f"с новой страницы"
+                    ),
+                    location=f"page_sections.*.logical_section[{section.id}]",
+                    suggestion=(
+                        "Включить разрыв страницы перед заголовком "
+                        "(Word: «Разрыв страницы перед» в свойствах абзаца)"
+                    ),
+                    details={"section_id": section.id, "level": str(required_level)},
+                )
+            )
+
+    return violations
+
+
+__all__ = [
+    "check_required_sections",
+    "check_section_page_break",
+]

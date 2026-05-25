@@ -147,7 +147,58 @@ def check_page_number_position(document: Document, profile: Profile) -> list[Vio
     return violations
 
 
+@register("F.06")
+def check_page_numbering_start(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка стартового значения нумерации страниц.
+
+    Параметр профиля `checks.F.06.params.start_value` задаёт ожидаемое
+    значение `<w:pgNumType w:start="N"/>` в первой секции (например, 3 —
+    нумерация продолжается с титула, но видна только начиная с третьей
+    страницы).
+
+    Семантика «мягкая»: проверяем только те PageSection, где
+    `page_numbering.visible=True` и `start_mode="start_at"`. Если в
+    секции `start_mode="continue"` — считаем, что нумерация продолжается
+    с предыдущей секции и явное значение не требуется. Если параметр
+    профиля не задан — проверка пропускается.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("F.06")
+    expected_raw = config.params.get("start_value") if config else None
+    if expected_raw is None:
+        return violations
+    try:
+        expected = int(expected_raw)
+    except (TypeError, ValueError):
+        # Невалидное значение в профиле — лучше не сыпать ложными нарушениями.
+        return violations
+
+    for section in document.page_sections:
+        numbering = section.page_numbering
+        if not numbering.visible:
+            continue
+        if numbering.start_mode != "start_at":
+            # Мягкая семантика Фазы 1: continue/restart — пропускаем.
+            continue
+        actual = numbering.start_value
+        if actual is None or actual == expected:
+            continue
+        violations.append(
+            Violation(
+                check_code="F.06",
+                severity="error",
+                message=(
+                    f"В секции «{section.name}» нумерация начинается со страницы "
+                    f"{actual}, ожидается {expected}"
+                ),
+                location=f"page_sections.{section.id}.page_numbering.start_value",
+                suggestion=f"Установить стартовое значение нумерации = {expected}",
+                details={"expected": str(expected), "actual": str(actual)},
+            )
+        )
+    return violations
+
+
 # TODO: F.02 — формат бумаги
 # TODO: F.03 — ориентация
 # TODO: F.05 — формат номера
-# TODO: F.06 — стартовая страница нумерации
