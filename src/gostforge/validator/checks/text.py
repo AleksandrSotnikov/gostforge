@@ -496,6 +496,42 @@ def _count_inch_markers(text: str) -> int:
     return len(re.findall(r'\d"', text))
 
 
+_HYPHEN_BETWEEN_SPACES_RE = re.compile(r" - ")
+
+
+@register("T.11")
+def check_em_dash_instead_of_hyphen(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """В русском тексте на месте тире должно стоять « — » (U+2014), не « - ».
+
+    Эвристика Фазы 1: ищем шаблон « - » (пробел–дефис–пробел) в склеенном
+    тексте абзаца. Этот случай почти всегда означает, что хотели поставить
+    длинное тире. Один Violation на параграф. Игнорирует колонтитулы.
+    """
+    violations: list[Violation] = []
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) == "header_footer":
+            continue
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        if _HYPHEN_BETWEEN_SPACES_RE.search(text):
+            violations.append(
+                Violation(
+                    check_code="T.11",
+                    severity="warning",
+                    message=(
+                        f"В абзаце «{_preview(paragraph.content)}» использован "
+                        f"дефис вместо длинного тире (—)"
+                    ),
+                    location=f"page_sections.*.paragraph[{paragraph.id}]",
+                    suggestion="Заменить « - » на « — » (длинное тире, U+2014)",
+                )
+            )
+    return violations
+
+
 def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violation:
     location = (
         f"page_sections.*.paragraph[{location_id}]"
@@ -521,6 +557,7 @@ __all__ = [
     "check_font_size",
     "check_line_spacing",
     "check_no_consecutive_empty_paragraphs",
+    "check_em_dash_instead_of_hyphen",
     "check_no_double_spaces",
     "check_no_trailing_spaces",
     "check_typographic_quotes",

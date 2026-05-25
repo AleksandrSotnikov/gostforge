@@ -665,3 +665,77 @@ def test_t10_allow_inch_marker_ignores_digit_quotes() -> None:
     profile.checks["T.10"].params["allow_inch_marker"] = True
     found = [v for v in validate(doc, profile) if v.check_code == "T.10"]
     assert found == []
+
+
+# --- T.11 (длинное тире вместо дефиса) -------------------------------------
+
+
+def test_t11_registered() -> None:
+    assert "T.11" in registered_checks()
+
+
+def test_t11_em_dash_no_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Москва — столица России.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.11"]
+    assert found == []
+
+
+def test_t11_hyphen_between_spaces_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Москва - столица России.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.11"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "длинного тире" in found[0].message
+
+
+def test_t11_hyphen_inside_compound_word_not_violation() -> None:
+    """Сложные слова с дефисом — это нормально, не нарушение."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Что-то ясно: ИТ-специалист сделал интернет-магазин.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.11"]
+    assert found == []
+
+
+def test_t11_hyphen_split_across_runs_still_caught() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[
+            TextRun(text="Москва "),
+            TextRun(text="- "),
+            TextRun(text="столица"),
+        ],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.11"]
+    assert len(found) == 1
+
+
+def test_t11_skips_headers_and_footers() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Колонтитул - с дефисом")],
+        style_name="Header",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.11"]
+    assert found == []

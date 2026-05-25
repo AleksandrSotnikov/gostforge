@@ -120,6 +120,7 @@ checks:
   T.08: {enabled: true}
   T.09: {enabled: true}
   T.10: {enabled: true, params: {allow_inch_marker: false}}
+  T.11: {enabled: true}
   S.01: {enabled: true}
   S.02: {enabled: true}
   S.06: {enabled: true, params: {required_for_level: 1}}
