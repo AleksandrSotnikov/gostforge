@@ -401,6 +401,41 @@ def check_no_double_spaces(
     return violations
 
 
+@register("T.09")
+def check_no_trailing_spaces(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """В конце абзаца не должно быть хвостовых пробельных символов.
+
+    Хвостовой пробел — это пробел/таб в самом конце последнего непустого
+    TextRun абзаца. Пробелы между run-ами в середине параграфа не
+    считаются хвостовыми. Severity=info — это «косметика» для отчётов.
+    """
+    violations: list[Violation] = []
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) == "header_footer":
+            continue
+        last_run: TextRun | None = None
+        for el in paragraph.content:
+            if isinstance(el, TextRun) and el.text:
+                last_run = el
+        if last_run is None:
+            continue
+        if last_run.text != last_run.text.rstrip():
+            violations.append(
+                Violation(
+                    check_code="T.09",
+                    severity="info",
+                    message=(
+                        f"Хвостовой пробел в конце абзаца «{_preview(paragraph.content)}»"
+                    ),
+                    location=f"page_sections.*.paragraph[{paragraph.id}]",
+                    suggestion="Удалить пробельные символы в конце абзаца",
+                )
+            )
+    return violations
+
+
 def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violation:
     location = (
         f"page_sections.*.paragraph[{location_id}]"
@@ -427,4 +462,5 @@ __all__ = [
     "check_line_spacing",
     "check_no_consecutive_empty_paragraphs",
     "check_no_double_spaces",
+    "check_no_trailing_spaces",
 ]

@@ -118,6 +118,7 @@ checks:
   T.06: {enabled: true}
   T.07: {enabled: true, params: {max_consecutive_empty: 1}}
   T.08: {enabled: true}
+  T.09: {enabled: true}
   S.01: {enabled: true}
   S.02: {enabled: true}
   S.06: {enabled: true, params: {required_for_level: 1}}

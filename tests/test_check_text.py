@@ -509,3 +509,80 @@ def test_t08_skips_headers_and_footers() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.08"]
     assert found == []
+
+
+# --- T.09 (нет хвостовых пробелов) -----------------------------------------
+
+
+def test_t09_registered() -> None:
+    assert "T.09" in registered_checks()
+
+
+def test_t09_no_trailing_space_no_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Корректный абзац без хвоста.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.09"]
+    assert found == []
+
+
+def test_t09_trailing_space_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Хвостовой пробел в конце. ")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.09"]
+    assert len(found) == 1
+    assert found[0].severity == "info"
+
+
+def test_t09_trailing_tab_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Хвостовой таб.\t")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.09"]
+    assert len(found) == 1
+
+
+def test_t09_space_in_middle_not_violation() -> None:
+    """Пробел в середине абзаца — это нормально, не хвостовой."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[
+            TextRun(text="Начало "),
+            TextRun(text="середина "),
+            TextRun(text="конец."),
+        ],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.09"]
+    assert found == []
+
+
+def test_t09_trailing_space_in_last_nonempty_run() -> None:
+    """Пустой run после непустого не должен «скрыть» хвостовой пробел."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[
+            TextRun(text="Текст с хвостом. "),
+            TextRun(text=""),
+        ],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.09"]
+    assert len(found) == 1
