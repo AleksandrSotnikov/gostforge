@@ -371,6 +371,13 @@ def export_docx(document: Document, profile: Profile, output_path: str | Path) -
 
     # Footer и стартовая страница — берём из первой PageSection (на Фазе 1
     # все PageSection кладутся в одну физическую секцию docx).
+    # Метаданные документа в docProps/core.xml.
+    core = doc.core_properties
+    if document.metadata.title:
+        core.title = document.metadata.title
+    if document.metadata.author:
+        core.author = document.metadata.author
+
     if document.page_sections:
         first = document.page_sections[0]
         _apply_page_size(doc, first)

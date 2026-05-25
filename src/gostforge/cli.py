@@ -433,5 +433,77 @@ def stats(path: Path) -> None:
             click.echo(f"  {label:<32} {value}")
 
 
+@main.command()
+@click.argument("output", type=click.Path(path_type=Path))
+@click.option(
+    "--template",
+    "-t",
+    type=click.Choice(["coursework", "bachelor_thesis", "research_report"]),
+    default="coursework",
+    help="Шаблон работы.",
+)
+@click.option("--title", required=True, help="Название работы.")
+@click.option("--author", default="", help="Автор.")
+@click.option("--supervisor", default="", help="Руководитель.")
+@click.option("--organization", default="", help="Организация.")
+@click.option("--year", type=int, default=None, help="Год.")
+@click.option("--profile", "-p", default="gost-7.32-2017", help="Профиль ГОСТа.")
+def new(
+    output: Path,
+    template: str,
+    title: str,
+    author: str,
+    supervisor: str,
+    organization: str,
+    year: int | None,
+    profile: str,
+) -> None:
+    """Создать новую работу из шаблона.
+
+    Пример: gostforge new my-coursework.docx --template coursework
+        --title "Курсовая по нормоконтролю" --author "Иванов И. И." --year 2026
+    """
+    from gostforge.builder.templates import (
+        bachelor_thesis_template,
+        coursework_template,
+        research_report_template,
+    )
+
+    if template == "coursework":
+        builder = coursework_template(
+            title=title,
+            author=author,
+            supervisor=supervisor,
+            organization=organization,
+            year=year,
+        )
+    elif template == "bachelor_thesis":
+        builder = bachelor_thesis_template(
+            title=title,
+            author=author,
+            supervisor=supervisor,
+            organization=organization,
+            year=year,
+        )
+    else:  # research_report
+        builder = research_report_template(
+            title=title,
+            year=year,
+            organization=organization,
+        )
+
+    try:
+        builder.save(output, profile=profile)
+    except FileNotFoundError as e:
+        click.echo(f"Профиль не найден: {e}", err=True)
+        sys.exit(2)
+    except ValueError as e:
+        click.echo(f"Документ не прошёл валидацию: {e}", err=True)
+        sys.exit(3)
+
+    click.echo(f"Создан файл: {output}")
+    click.echo("Откройте его в Word / LibreOffice и заполните плейсхолдеры.")
+
+
 if __name__ == "__main__":
     main()

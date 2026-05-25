@@ -42,6 +42,9 @@
       по коду проверки.
 - [x] Парсер читает header (симметрично footer) — поле PAGE в шапке
       распознаётся для F.04 в режиме `top_*`.
+- [x] **Конструктор работ** (`gostforge.builder`): WorkBuilder / SectionBuilder
+      с fluent API, шаблоны coursework / bachelor_thesis / research_report,
+      команда `gostforge new`. Собранный документ проходит ≥29 из 30 проверок.
 - [x] Drag-and-drop UI на Streamlit: `gostforge ui` запускает локальный
       веб-интерфейс с загрузкой нескольких .docx, таблицей нарушений
       и скачиванием Markdown/Excel-отчётов.

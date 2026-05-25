@@ -122,17 +122,43 @@ gostforge fix work.docx -o /dev/null --dry-run
 длинное тире (T.11), точка после номера в заголовке (H.03), точка в
 конце заголовка (H.08).
 
+### Конструктор работ
+
+```bash
+# Создать болванку курсовой по шаблону
+gostforge new my-coursework.docx --template coursework \
+    --title "Курсовая по нормоконтролю" --author "Иванов И. И." --year 2026
+
+# Бакалаврская ВКР с двумя главами и реферат-вариант для отчёта НИР
+gostforge new thesis.docx --template bachelor_thesis --title "Моя ВКР" --year 2026
+gostforge new report.docx --template research_report --title "Отчёт НИР"
+```
+
+Программный fluent-API — см. [docs/builder.md](docs/builder.md):
+
+```python
+from gostforge.builder import work
+
+(
+    work("Курсовая", author="Иван Иванов", year=2026)
+    .section("Введение").paragraph("Актуальность ...")
+    .section("Заключение").paragraph("Выводы ...")
+    .section("Список использованных источников")
+        .reference("Иванов И. И. Программирование. — М. : Наука, 2023. — 320 с.")
+    .save("coursework.docx")
+)
+```
+
+Документ, собранный конструктором, проходит ≥29 из 30 проверок из коробки.
+
 Планируется в следующих фазах:
 
 ```bash
 # Аннотировать .docx комментариями Word в проблемных местах (Фаза 2)
 gostforge annotate work.docx --profile gost-7.32-2017 -o work_annotated.docx
-
-# Создать новый профиль на основе существующего (Фаза 2)
-gostforge profiles create my-department --extends gost-7.32-2017
 ```
 
-В Фазе 1 — CLI. GUI планируется в Фазе 2 (см. roadmap).
+В Фазе 1 — CLI. Визуальный редактор конструктора планируется в Фазе 2 (см. roadmap).
 
 ## Документация
 
