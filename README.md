@@ -42,8 +42,8 @@
   `gostforge fix`.
 - **Конструктор работ** (`gostforge.builder`): fluent-API + 3 шаблона +
   CLI `gostforge new`.
-- **Аннотатор** (`gostforge annotate`): inline-маркеры о нарушениях
-  прямо в `.docx`.
+- **Аннотатор** (`gostforge annotate`): настоящие OOXML-комментарии
+  Word (боковые выноски) либо inline-маркеры о нарушениях прямо в `.docx`.
 - **Плагины проверок** (`~/.gostforge/plugins/`): динамическая загрузка
   пользовательских проверок без модификации кода gostforge.
 - **CLI** (11 операций): `check`, `fix`, `annotate`, `new`, `stats`,
@@ -177,12 +177,24 @@ gostforge pdf work.docx -o work.pdf
 финальной версии работы после автофиксов. Exit codes: `3` — LibreOffice
 не найден; `4` — таймаут; `5` — LibreOffice вернул ошибку.
 
-Планируется в следующих фазах:
+### Аннотация документа
 
 ```bash
-# Аннотировать .docx комментариями Word в проблемных местах (Фаза 2)
-gostforge annotate work.docx --profile gost-7.32-2017 -o work_annotated.docx
+# Настоящие комментарии Word (по умолчанию) — боковые выноски в .docx,
+# на которые можно отвечать и которые можно резолвить в Word/LibreOffice.
+gostforge annotate work.docx -o annotated.docx
+
+# Старый режим: inline-маркеры вида [F.01: текст] красным курсивом
+# прямо в тексте параграфа.
+gostforge annotate work.docx -o annotated.docx --style inline
 ```
+
+В режиме `comments` в .docx-архив добавляется отдельная часть
+`word/comments.xml`, в `document.xml` ставятся пары
+`<w:commentRangeStart/End>` плюс reference-run, а в `[Content_Types].xml`
+и `word/_rels/document.xml.rels` дописываются нужные Override и
+Relationship. Реализация — прямые манипуляции с zip-архивом, без
+зависимости от внутреннего API python-docx.
 
 В Фазе 1 — CLI. Визуальный редактор конструктора планируется в Фазе 2 (см. roadmap).
 
