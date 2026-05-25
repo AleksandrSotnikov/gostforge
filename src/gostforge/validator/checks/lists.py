@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from gostforge.model import (
@@ -120,6 +121,101 @@ def check_unordered_list_marker(
     return violations
 
 
+# L.02: распознать формат нумерации первого пункта.
+# - «1)»  — цифра, закрывающая круглая скобка
+# - «1.»  — цифра и точка
+# - «1»   — цифра без префикса (значит формат задан стилем)
+# Если префикс не распознан вовсе — формат «unknown» (формат скрыт стилем).
+_NUM_FORMAT_PAREN = re.compile(r"^\s*\d+\s*\)\s*")
+_NUM_FORMAT_DOT = re.compile(r"^\s*\d+\s*\.\s*")
+_NUM_FORMAT_BARE = re.compile(r"^\s*\d+\s+")
+
+
+def _ordered_item_format(item: Sequence[InlineElement]) -> str | None:
+    """Определить формат нумерации первого пункта.
+
+    Возвращает одно из: 'paren' (1)), 'dot' (1.), 'bare' (1 ),
+    либо None — если префикс не распознан (формат скрыт Word-стилем).
+    """
+    text = _item_text(item)
+    if not text:
+        return None
+    # Порядок важен: «1)» и «1.» должны распознаваться раньше «1 ».
+    if _NUM_FORMAT_PAREN.match(text):
+        return "paren"
+    if _NUM_FORMAT_DOT.match(text):
+        return "dot"
+    if _NUM_FORMAT_BARE.match(text):
+        return "bare"
+    return None
+
+
+@register("L.02")
+def check_ordered_list_uniform_format(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """Стиль нумерации нумерованных списков должен быть единообразным.
+
+    Эвристика Фазы 1: для каждого ListBlock с ordered=True смотрим формат
+    первого пункта — «1)», «1.», «1 » (см. _ordered_item_format). Если в
+    документе встречаются разные форматы — Violation на каждый «отклоняющийся»
+    список. Списки, где формат не распознан (None — задан стилем Word),
+    в сравнении не участвуют.
+    """
+    violations: list[Violation] = []
+    ordered_lists = [
+        (ps, lb)
+        for ps, lb in _all_list_blocks(document)
+        if lb.ordered and lb.items
+    ]
+    if len(ordered_lists) < 2:
+        return violations
+
+    formats: list[tuple[PageSection, ListBlock, str]] = []
+    for ps, lb in ordered_lists:
+        fmt = _ordered_item_format(lb.items[0])
+        if fmt is None:
+            continue
+        formats.append((ps, lb, fmt))
+
+    distinct = {fmt for _ps, _lb, fmt in formats}
+    if len(distinct) <= 1:
+        return violations
+
+    # Берём «эталонный» формат как самый часто встречающийся, остальные
+    # помечаем как нарушения. При равенстве — стабильно первый по порядку.
+    counts: dict[str, int] = {}
+    for _ps, _lb, fmt in formats:
+        counts[fmt] = counts.get(fmt, 0) + 1
+    expected = max(counts, key=lambda f: (counts[f], -list(counts).index(f)))
+
+    for ps, lb, fmt in formats:
+        if fmt == expected:
+            continue
+        violations.append(
+            Violation(
+                check_code="L.02",
+                severity="warning",
+                message=(
+                    f"Формат нумерации «{fmt}» в списке «{lb.id}» отличается "
+                    f"от преобладающего «{expected}»"
+                ),
+                location=f"page_sections.{ps.id}.list[{lb.id}]",
+                suggestion=(
+                    "Привести нумерацию всех списков документа к одному "
+                    f"формату (например, «{expected}»)"
+                ),
+                details={
+                    "list_id": lb.id,
+                    "format": fmt,
+                    "expected": expected,
+                },
+            )
+        )
+    return violations
+
+
 __all__ = [
+    "check_ordered_list_uniform_format",
     "check_unordered_list_marker",
 ]

@@ -146,3 +146,106 @@ def test_l01_in_nested_section() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "L.01"]
     assert len(found) == 1
     assert found[0].details["list_id"] == "list-deep"
+
+
+# --- L.02 (единообразный стиль нумерации) -----------------------------------
+
+
+def test_l02_registered() -> None:
+    assert "L.02" in registered_checks()
+
+
+def test_l02_uniform_format_no_violation() -> None:
+    """Все нумерованные списки используют «1)» — нарушения нет."""
+    lb1 = ListBlock(
+        id="list-1",
+        ordered=True,
+        items=[[TextRun(text="1) первый")], [TextRun(text="2) второй")]],
+    )
+    lb2 = ListBlock(
+        id="list-2",
+        ordered=True,
+        items=[[TextRun(text="1) пункт")], [TextRun(text="2) ещё")]],
+    )
+    doc = _doc_with_content([lb1, lb2])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.02"]
+    assert found == []
+
+
+def test_l02_mixed_formats_violation() -> None:
+    """«1)» в одном списке и «1.» в другом — нарушение."""
+    lb1 = ListBlock(
+        id="list-1",
+        ordered=True,
+        items=[[TextRun(text="1) первый")], [TextRun(text="2) второй")]],
+    )
+    lb2 = ListBlock(
+        id="list-2",
+        ordered=True,
+        items=[[TextRun(text="1. пункт")], [TextRun(text="2. ещё")]],
+    )
+    doc = _doc_with_content([lb1, lb2])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.02"]
+    assert len(found) == 1
+    # Оба формата встречаются по одному разу — какой из них «преобладающий»,
+    # определяется детерминированно, но достаточно проверить, что один из
+    # двух списков помечен.
+    assert found[0].details["list_id"] in {"list-1", "list-2"}
+    assert found[0].details["format"] != found[0].details["expected"]
+
+
+def test_l02_single_list_no_violation() -> None:
+    """Один список — сравнивать не с чем, нарушения нет."""
+    lb = ListBlock(
+        id="list-1",
+        ordered=True,
+        items=[[TextRun(text="1) первый")], [TextRun(text="2) второй")]],
+    )
+    doc = _doc_with_content([lb])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.02"]
+    assert found == []
+
+
+def test_l02_format_set_by_style_skipped() -> None:
+    """Списки с нераспознанным префиксом (формат задан стилем) в сравнении не участвуют."""
+    lb1 = ListBlock(
+        id="list-1",
+        ordered=True,
+        items=[
+            [TextRun(text="первый пункт без префикса")],
+            [TextRun(text="второй пункт")],
+        ],
+    )
+    lb2 = ListBlock(
+        id="list-2",
+        ordered=True,
+        items=[
+            [TextRun(text="ещё один без префикса")],
+            [TextRun(text="второй")],
+        ],
+    )
+    doc = _doc_with_content([lb1, lb2])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.02"]
+    assert found == []
+
+
+def test_l02_unordered_lists_ignored() -> None:
+    """Ненумерованные списки L.02 не затрагивает."""
+    lb1 = ListBlock(
+        id="list-1",
+        ordered=True,
+        items=[[TextRun(text="1) пункт")]],
+    )
+    lb2 = ListBlock(
+        id="list-2",
+        ordered=False,
+        items=[[TextRun(text="- bullet")]],
+    )
+    doc = _doc_with_content([lb1, lb2])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.02"]
+    assert found == []

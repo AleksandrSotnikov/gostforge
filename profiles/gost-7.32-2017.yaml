@@ -175,3 +175,4 @@ checks:
   M.03: {enabled: true}
   M.04: {enabled: true}
   L.01: {enabled: true, params: {allowed_markers: ["•", "-", "–"]}}
+  L.02: {enabled: true}
