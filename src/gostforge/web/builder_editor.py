@@ -396,6 +396,9 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
     # Используем экспорт напрямую, чтобы не зависеть от валидации в .save():
     # документ может быть «черновиком» с пустыми блоками — это нормально.
     document = builder.build()
+    # Phase 2.5: подменяем proxy source_id у Citation на реальные
+    # BibliographyEntry.id, назначенные в build().
+    _resolve_citation_proxies(document, state)
     profile_id = state.get("profile_id") or document.profile_id
     profile = load_profile(profile_id)
     export_docx(document, profile, out_path)
@@ -578,6 +581,124 @@ def _normalize_state_paragraphs(state: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(block, dict):
                     _normalize_paragraph_state(block)
     return state
+
+
+# --- Сбор целей для inline-редактора (Фаза 2.5) ----------------------------
+
+
+def _collect_xref_targets(state: dict[str, Any]) -> list[tuple[str, str]]:
+    """Собрать варианты для select-а CrossRef target_id.
+
+    Возвращает список (value, label), где value — стабильный id вида
+    ``fig-N`` / ``tbl-N`` / ``formula-N`` (совпадающий с тем, что
+    генерирует WorkBuilder при сборке), а label — человекочитаемый
+    «Рисунок 1: подпись».
+
+    Нумерация по порядку обхода разделов и подразделов — она же
+    воспроизводится builder-ом.
+    """
+    fig_n = 0
+    tbl_n = 0
+    formula_n = 0
+    targets: list[tuple[str, str]] = []
+
+    def _walk(blocks: list[Any]) -> None:
+        nonlocal fig_n, tbl_n, formula_n
+        for block in blocks or []:
+            if not isinstance(block, dict):
+                continue
+            kind = block.get("kind")
+            if kind == "figure":
+                fig_n += 1
+                caption = block.get("caption") or "(без подписи)"
+                targets.append((f"fig-{fig_n}", f"Рисунок {fig_n}: {caption}"))
+            elif kind == "table":
+                tbl_n += 1
+                caption = block.get("caption") or "(без подписи)"
+                targets.append((f"tbl-{tbl_n}", f"Таблица {tbl_n}: {caption}"))
+            elif kind == "formula" and block.get("numbered", True):
+                formula_n += 1
+                latex = block.get("latex") or "(пусто)"
+                preview = latex[:30] + ("…" if len(latex) > 30 else "")
+                targets.append((f"formula-{formula_n}", f"Формула {formula_n}: {preview}"))
+
+    for section in state.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        if section.get("is_bibliography"):
+            continue
+        _walk(section.get("blocks") or [])
+        for sub in section.get("subsections") or []:
+            if isinstance(sub, dict):
+                _walk(sub.get("blocks") or [])
+    return targets
+
+
+def _collect_bibliography_options(state: dict[str, Any]) -> list[tuple[str, str]]:
+    """Собрать варианты для select-а Citation source_id.
+
+    Source_id хранится в state как proxy-строка ``bib-N`` (1-based индекс
+    в библиографии). При сборке документа :func:`_resolve_citation_proxies`
+    конвертирует это в реальный ``BibliographyEntry.id``, который
+    WorkBuilder назначил соответствующей записи.
+    """
+    options: list[tuple[str, str]] = []
+    for section in state.get("sections") or []:
+        if not isinstance(section, dict) or not section.get("is_bibliography"):
+            continue
+        for i, ref in enumerate(section.get("references") or [], start=1):
+            if isinstance(ref, str) and ref.strip():
+                snippet = ref.strip()
+                if len(snippet) > 60:
+                    snippet = snippet[:57] + "…"
+                options.append((f"bib-{i}", f"[{i}] {snippet}"))
+        break  # bibliography-раздел только один
+    return options
+
+
+def _resolve_citation_proxies(document: Any, state: dict[str, Any]) -> None:
+    """Заменить proxy source_id вида ``bib-N`` на реальные id из bibliography.
+
+    UI-конструктор хранит ссылки на источники как порядковые номера
+    (``bib-N``), потому что реальные id назначаются только в
+    ``WorkBuilder.build()`` и зависят от типа записи. После build()
+    эта функция проходит по всем параграфам, ищет Citation-элементы
+    с source_id вида ``bib-N`` и подставляет ``bibliography[N-1].id``.
+
+    Mutates ``document`` in-place. Невалидные индексы оставляются как
+    есть — экспортёр выдаст «[?]», что для проверки R.04 является
+    корректным сигналом ошибки.
+    """
+    if not document.bibliography:
+        return
+    max_n = len(document.bibliography)
+
+    def _patch_runs(runs: list[Any]) -> None:
+        for el in runs:
+            if not isinstance(el, Citation):
+                continue
+            sid = el.source_id
+            if not sid.startswith("bib-"):
+                continue
+            try:
+                n = int(sid[4:])
+            except ValueError:
+                continue
+            if 1 <= n <= max_n:
+                el.source_id = document.bibliography[n - 1].id
+
+    def _walk(items: list[Any]) -> None:
+        for item in items:
+            if isinstance(item, Paragraph):
+                _patch_runs(item.content)
+            elif isinstance(item, LogicalSection):
+                _walk(item.children)
+
+    for ps in document.page_sections:
+        _walk(ps.content)
+    # Параметр state зарезервирован под будущие проверки (например,
+    # сигнал об «осиротевших» цитатах).
+    del state
 
 
 def _apply_blocks(section_builder: SectionBuilder, blocks: list[dict[str, Any]]) -> None:
@@ -1009,6 +1130,223 @@ def _block_label(block: dict[str, Any]) -> str:
     return f"Блок: {kind}"
 
 
+def _render_paragraph_inline_editor(block: dict[str, Any], *, base: str) -> None:
+    """Inline-редактор параграфа: список run-ов + панель добавления (Фаза 2.5).
+
+    Каждый run отображается отдельной строкой со своим редактором —
+    text_area + чекбоксы B/I/U для TextRun, select + поля для xref /
+    formula / citation. Поддерживаются перемещение run-а вверх/вниз
+    и удаление.
+
+    Внизу — четыре кнопки добавления: + Текст, + Формула, + Ссылка,
+    + Цитата. Каждая добавляет stub-run и триггерит rerun.
+    """
+    # Гарантируем что block в формате runs (нормализация на месте).
+    _normalize_paragraph_state(block)
+    runs: list[dict[str, Any]] = block.setdefault("runs", [])
+    state = _get_state()
+
+    if not runs:
+        st.caption("Параграф пуст — добавьте элементы кнопками ниже.")
+
+    for r_idx in list(range(len(runs))):
+        if r_idx >= len(runs):
+            break
+        _render_inline_run_row(
+            runs[r_idx],
+            runs,
+            r_idx,
+            base=f"{base}_r{r_idx}",
+            state=state,
+        )
+
+    # --- Панель добавления нового run-а ---
+    cols = st.columns(4)
+    if cols[0].button("+ Текст", key=f"{base}_addtext"):
+        runs.append({"kind": "text", "text": ""})
+        st.rerun()
+    if cols[1].button("+ Формула", key=f"{base}_addformula"):
+        runs.append({"kind": "formula", "latex": ""})
+        st.rerun()
+    if cols[2].button("+ Ссылка", key=f"{base}_addxref"):
+        targets = _collect_xref_targets(state)
+        target_id = targets[0][0] if targets else ""
+        runs.append({"kind": "xref", "target_id": target_id, "prefix": ""})
+        st.rerun()
+    if cols[3].button("+ Цитата", key=f"{base}_addcitation"):
+        options = _collect_bibliography_options(state)
+        source = options[0][0] if options else ""
+        runs.append({"kind": "citation", "source_id": source})
+        st.rerun()
+
+
+def _render_inline_run_row(
+    run: dict[str, Any],
+    runs: list[dict[str, Any]],
+    r_idx: int,
+    *,
+    base: str,
+    state: dict[str, Any],
+) -> None:
+    """Одна строка inline-редактора: редактор run-а + кнопки управления."""
+    kind = run.get("kind", "text")
+    with st.container():
+        if kind == "text":
+            _render_text_run_editor(run, base=base)
+        elif kind == "formula":
+            _render_inline_formula_editor(run, base=base)
+        elif kind == "xref":
+            _render_xref_editor(run, base=base, state=state)
+        elif kind == "citation":
+            _render_citation_editor(run, base=base, state=state)
+        else:
+            st.warning(f"Неизвестный inline-элемент: {kind}")
+
+        # Кнопки управления: ↑ ↓ ×.
+        b_cols = st.columns([1, 1, 1, 12])
+        if r_idx > 0 and b_cols[0].button("↑", key=f"{base}_up", help="Переместить выше"):
+            runs[r_idx - 1], runs[r_idx] = runs[r_idx], runs[r_idx - 1]
+            st.rerun()
+        if r_idx < len(runs) - 1 and b_cols[1].button(
+            "↓", key=f"{base}_down", help="Переместить ниже"
+        ):
+            runs[r_idx + 1], runs[r_idx] = runs[r_idx], runs[r_idx + 1]
+            st.rerun()
+        if b_cols[2].button("×", key=f"{base}_del", help="Удалить элемент"):
+            runs.pop(r_idx)
+            st.rerun()
+
+
+def _render_text_run_editor(run: dict[str, Any], *, base: str) -> None:
+    """Редактор одного TextRun: text + B/I/U/sup/sub."""
+    run["text"] = st.text_area(
+        "Фрагмент текста",
+        value=str(run.get("text", "")),
+        key=f"{base}_text",
+        height=80,
+        label_visibility="collapsed",
+    )
+    cols = st.columns(5)
+    run["bold"] = cols[0].checkbox(
+        "B", value=bool(run.get("bold")), key=f"{base}_bold", help="Полужирный"
+    )
+    run["italic"] = cols[1].checkbox(
+        "I", value=bool(run.get("italic")), key=f"{base}_italic", help="Курсив"
+    )
+    run["underline"] = cols[2].checkbox(
+        "U", value=bool(run.get("underline")), key=f"{base}_underline", help="Подчёркивание"
+    )
+    run["superscript"] = cols[3].checkbox(
+        "x²", value=bool(run.get("superscript")), key=f"{base}_sup", help="Верхний индекс"
+    )
+    run["subscript"] = cols[4].checkbox(
+        "x₂", value=bool(run.get("subscript")), key=f"{base}_sub", help="Нижний индекс"
+    )
+    # False сериализуется в state как явное «не задано» — чистим, чтобы
+    # JSON-save не разбухал лишними false-полями.
+    for attr in ("bold", "italic", "underline", "superscript", "subscript"):
+        if run.get(attr) is False:
+            run.pop(attr, None)
+
+
+def _render_inline_formula_editor(run: dict[str, Any], *, base: str) -> None:
+    """Редактор inline-формулы: LaTeX-input + live preview через st.latex."""
+    st.markdown("**∫ Формула** (inline)")
+    run["latex"] = st.text_input(
+        "LaTeX",
+        value=str(run.get("latex", "")),
+        key=f"{base}_latex",
+        label_visibility="collapsed",
+    )
+    if run["latex"]:
+        try:
+            st.latex(run["latex"])
+        except Exception as exc:  # pragma: no cover — UI fallback
+            st.caption(f"Не удалось отрендерить превью: {exc}")
+
+
+def _render_xref_editor(run: dict[str, Any], *, base: str, state: dict[str, Any]) -> None:
+    """Редактор перекрёстной ссылки: select target + текст prefix."""
+    st.markdown("**→ Перекрёстная ссылка**")
+    targets = _collect_xref_targets(state)
+    if not targets:
+        st.warning(
+            "В работе пока нет рисунков, таблиц или нумерованных формул. "
+            "Добавьте их в разделах, потом возвращайтесь к ссылке."
+        )
+        run["target_id"] = st.text_input(
+            "ID цели (вручную)",
+            value=str(run.get("target_id", "")),
+            key=f"{base}_tgt",
+        )
+    else:
+        values = [t[0] for t in targets]
+        labels = [t[1] for t in targets]
+        current = str(run.get("target_id") or "")
+        try:
+            idx = values.index(current)
+        except ValueError:
+            idx = 0
+        sel = st.selectbox(
+            "Цель",
+            options=list(range(len(values))),
+            index=idx,
+            format_func=lambda i: labels[i],
+            key=f"{base}_tgtsel",
+        )
+        run["target_id"] = values[sel]
+    run["prefix"] = st.text_input(
+        "Префикс (например, « (см. »)",
+        value=str(run.get("prefix") or ""),
+        key=f"{base}_prefix",
+    )
+    if not run.get("prefix"):
+        run.pop("prefix", None)
+
+
+def _render_citation_editor(run: dict[str, Any], *, base: str, state: dict[str, Any]) -> None:
+    """Редактор библиографической цитаты: select bib-N + опц. pages."""
+    st.markdown("**[ ] Цитата на источник**")
+    options = _collect_bibliography_options(state)
+    if not options:
+        st.warning(
+            "В разделе «Список использованных источников» пока нет записей. "
+            "Добавьте их, потом возвращайтесь к цитате."
+        )
+        run["source_id"] = st.text_input(
+            "ID источника (вручную)",
+            value=str(run.get("source_id", "")),
+            key=f"{base}_src",
+        )
+    else:
+        values = [o[0] for o in options]
+        labels = [o[1] for o in options]
+        current = str(run.get("source_id") or "")
+        try:
+            idx = values.index(current)
+        except ValueError:
+            idx = 0
+        sel = st.selectbox(
+            "Источник",
+            options=list(range(len(values))),
+            index=idx,
+            format_func=lambda i: labels[i],
+            key=f"{base}_srcsel",
+        )
+        run["source_id"] = values[sel]
+    pages = st.text_input(
+        "Страницы (например, «12-15»)",
+        value=str(run.get("pages") or ""),
+        key=f"{base}_pages",
+    )
+    if pages:
+        run["pages"] = pages
+        run["template"] = "[{n}, с. {pages}]"
+    else:
+        run.pop("pages", None)
+        run.pop("template", None)
+
+
 def _render_single_block(
     block: dict[str, Any],
     blocks: list[dict[str, Any]],
@@ -1021,35 +1359,7 @@ def _render_single_block(
     base = f"{key_prefix}_b{b_idx}"
 
     if kind == "paragraph":
-        # Phase 2.5: до появления полноценного inline-редактора (шаг 6)
-        # параграф редактируется единым text_area; на сохранении text
-        # пересобирается в один TextRun-dict, а имеющиеся inline-элементы
-        # (xref/formula/citation, например, из загруженного docx)
-        # сохраняются в КОНЦЕ runs и показываются readonly. Это
-        # гарантирует, что мы не теряем данные между шагами 5 и 6.
-        non_text_runs = _extract_non_text_runs(block)
-        current_text = _paragraph_text_only(block)
-        new_text = st.text_area(
-            "Текст",
-            value=current_text,
-            key=f"{base}_text",
-            height=120,
-        )
-        new_runs: list[dict[str, Any]] = []
-        if new_text:
-            new_runs.append({"kind": "text", "text": new_text})
-        new_runs.extend(non_text_runs)
-        block["runs"] = new_runs
-        # Гарантированно убираем legacy-поле text — single source of truth.
-        block.pop("text", None)
-        if non_text_runs:
-            st.caption(
-                "В этом параграфе есть inline-элементы (формулы / ссылки / "
-                "цитаты), которые сейчас не редактируются здесь, но "
-                "сохраняются при пересборке .docx."
-            )
-            for nt in non_text_runs:
-                st.code(json.dumps(nt, ensure_ascii=False), language="json")
+        _render_paragraph_inline_editor(block, base=base)
     elif kind == "table":
         # Простейший табличный редактор: два text_area — заголовки и строки.
         # Это сознательно низкоуровнево: data_editor в Streamlit требует
