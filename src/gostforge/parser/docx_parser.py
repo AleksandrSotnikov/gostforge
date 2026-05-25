@@ -99,6 +99,79 @@ _BIB_LAW_RE = re.compile(
     r"\bзакон\b|\bфедер\.\s*закон\b|\bпостановление\b", re.IGNORECASE
 )
 
+# Регэкспы для извлечения структурных полей библиографической записи
+# по ГОСТ Р 7.0.100-2018. Поля заполняются опционально — отсутствие
+# совпадения не считается ошибкой парсера (валидаторы R.* проверят сами).
+_BIB_AUTHOR_RU_RE = re.compile(r"^[А-ЯЁ][а-яё]+\s[А-ЯЁ]\.\s?[А-ЯЁ]\.")
+_BIB_AUTHOR_EN_RE = re.compile(r"^[A-Z][a-z]+,?\s[A-Z]\.\s?[A-Z]\.")
+_BIB_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_BIB_URL_FULL_RE = re.compile(r"https?://\S+")
+_BIB_DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+")
+_BIB_ACCESS_DATE_RE = re.compile(
+    r"дата\s+обращения:\s*(\d{1,2}\.\d{1,2}\.\d{4})", re.IGNORECASE
+)
+# Эвристика места издания: «— Москва :», «— Санкт-Петербург :»,
+# «— Нижний Новгород :». Принимаем составные через дефис или пробел.
+_BIB_PLACE_RE = re.compile(r"—\s*([А-ЯЁ][а-яё]+(?:[ \-][А-ЯЁ][а-яё]+)?)\s*:")
+_BIB_CYRILLIC_START_RE = re.compile(r"^[А-ЯЁа-яё]")
+_BIB_LATIN_START_RE = re.compile(r"^[A-Za-z]")
+
+
+def _parse_bibliography_fields(text: str) -> dict[str, str]:
+    """Извлечь структурные поля из библиографической записи.
+
+    Возвращает словарь только с найденными полями (опциональные —
+    отсутствие паттерна означает, что поле просто не добавляется).
+
+    Извлекаемые поля по ГОСТ Р 7.0.100-2018:
+      - author: «Фамилия И. О.» в начале (русский или латинский вариант);
+      - year: четырёхзначный год (1900-2099);
+      - url: первая встреченная http(s)-ссылка;
+      - doi: идентификатор DOI вида 10.NNNN/...;
+      - access_date: «дата обращения: ДД.ММ.ГГГГ» (в любом регистре);
+      - place: место издания между «— » и «:» (для книг);
+      - language: «ru», если запись начинается с кириллицы; «en» — если с латиницы.
+    """
+    fields: dict[str, str] = {}
+
+    author_ru = _BIB_AUTHOR_RU_RE.match(text)
+    if author_ru is not None:
+        fields["author"] = author_ru.group(0).strip()
+    else:
+        author_en = _BIB_AUTHOR_EN_RE.match(text)
+        if author_en is not None:
+            fields["author"] = author_en.group(0).strip()
+
+    year_match = _BIB_YEAR_RE.search(text)
+    if year_match is not None:
+        fields["year"] = year_match.group(0)
+
+    url_match = _BIB_URL_FULL_RE.search(text)
+    if url_match is not None:
+        # Отрезаем закрывающие скобки / точку в конце URL — они обычно
+        # принадлежат окружающему тексту, а не самому адресу.
+        url = url_match.group(0).rstrip(").,;")
+        fields["url"] = url
+
+    doi_match = _BIB_DOI_RE.search(text)
+    if doi_match is not None:
+        fields["doi"] = doi_match.group(0).rstrip(").,;")
+
+    access_match = _BIB_ACCESS_DATE_RE.search(text)
+    if access_match is not None:
+        fields["access_date"] = access_match.group(1)
+
+    place_match = _BIB_PLACE_RE.search(text)
+    if place_match is not None:
+        fields["place"] = place_match.group(1).strip()
+
+    if _BIB_CYRILLIC_START_RE.match(text):
+        fields["language"] = "ru"
+    elif _BIB_LATIN_START_RE.match(text):
+        fields["language"] = "en"
+
+    return fields
+
 
 def parse_docx(path: str | Path) -> Document:
     """Прочитать .docx и вернуть модель документа.
@@ -987,6 +1060,9 @@ def _extract_bibliography(page_sections: list[PageSection]) -> list[Bibliography
        `ref-{idx}`, где idx — сквозной счётчик по всем найденным записям.
     4. Тип записи определяется эвристически по содержимому текста.
     5. `fields["raw"]` — полный текст параграфа (минимум для Фазы 1).
+    6. Через `_parse_bibliography_fields` извлекаются опциональные
+       структурные поля (author, year, url, doi, access_date, place,
+       language) — используются проверками R.02/R.03/R.08-R.13.
 
     Пустые параграфы пропускаются. Параграфы из раздела остаются на месте
     в `LogicalSection.children` — модель сознательно дублирует данные
@@ -1009,11 +1085,13 @@ def _extract_bibliography(page_sections: list[PageSection]) -> list[Bibliography
                 if not raw:
                     continue
                 idx += 1
+                fields = {"raw": raw}
+                fields.update(_parse_bibliography_fields(raw))
                 entries.append(
                     BibliographyEntry(
                         id=f"ref-{idx}",
                         type=_detect_bibliography_type(raw),
-                        fields={"raw": raw},
+                        fields=fields,
                     )
                 )
     return entries

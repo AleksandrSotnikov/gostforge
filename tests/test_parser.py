@@ -7,7 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from gostforge.model import Figure, LogicalSection, Paragraph, Table, TextRun
-from gostforge.parser.docx_parser import parse_docx
+from gostforge.parser.docx_parser import _parse_bibliography_fields, parse_docx
 
 from .conftest import make_docx
 
@@ -521,3 +521,76 @@ def test_parser_extracts_image_rid_from_drawing(tmp_path: Path) -> None:
     assert len(figures) == 1
     # image_path должен начинаться с 'embedded:rId' — это идентификатор отношения
     assert figures[0].image_path.startswith("embedded:rId"), figures[0].image_path
+
+
+# --- _parse_bibliography_fields -----------------------------------------
+
+
+def test_parse_bibliography_fields_book_extracts_author_year_place() -> None:
+    """Книга: извлекается author, year, place, language=ru."""
+    raw = (
+        "Иванов И. И. Основы программирования : учебник / И. И. Иванов. — "
+        "Москва : Наука, 2020. — 320 с."
+    )
+    fields = _parse_bibliography_fields(raw)
+    assert fields["author"] == "Иванов И. И."
+    assert fields["year"] == "2020"
+    assert fields["place"] == "Москва"
+    assert fields["language"] == "ru"
+    # У книги нет URL и DOI.
+    assert "url" not in fields
+    assert "doi" not in fields
+
+
+def test_parse_bibliography_fields_web_extracts_url_and_access_date() -> None:
+    """Веб-ресурс: извлекается url и access_date, year тоже."""
+    raw = (
+        "Сидоров С. С. Веб-ресурс [Электронный ресурс] / С. С. Сидоров. — 2022. — "
+        "URL: https://example.org/page (дата обращения: 01.05.2023)."
+    )
+    fields = _parse_bibliography_fields(raw)
+    assert fields["author"] == "Сидоров С. С."
+    assert fields["url"] == "https://example.org/page"
+    assert fields["access_date"] == "01.05.2023"
+    assert fields["year"] == "2022"
+    assert fields["language"] == "ru"
+
+
+def test_parse_bibliography_fields_article_with_doi() -> None:
+    """Статья англоязычная: извлекается doi и language=en."""
+    raw = "Smith J. R. Deep learning advances // Nature. — 2021. — Vol. 1. — DOI: 10.1038/s41586-021-03819-2."
+    fields = _parse_bibliography_fields(raw)
+    assert fields["author"] == "Smith J. R."
+    assert fields["year"] == "2021"
+    assert fields["doi"] == "10.1038/s41586-021-03819-2"
+    assert fields["language"] == "en"
+
+
+def test_parse_bibliography_fields_short_raw_no_fields() -> None:
+    """Запись без распознаваемых паттернов даёт пустой dict (язык не определяется)."""
+    raw = "123"
+    fields = _parse_bibliography_fields(raw)
+    assert fields == {}
+
+
+def test_parse_extracts_bibliography_populates_fields(tmp_path: Path) -> None:
+    """После парсинга .docx у каждой записи заполнен не только raw, но и поля."""
+    entries = [
+        "Иванов И. И. Основы / И. И. Иванов. — Москва : Наука, 2020. — 320 с.",
+        "Сидоров С. С. Ресурс. — 2022. — URL: https://example.org (дата обращения: 01.05.2023).",
+    ]
+    path = make_docx(
+        tmp_path / "bib_fields.docx",
+        headings=[(1, "Введение")],
+        paragraphs=["Текст."],
+        bibliography=entries,
+    )
+    doc = parse_docx(path)
+    assert len(doc.bibliography) == 2
+    book = doc.bibliography[0]
+    assert book.fields["author"] == "Иванов И. И."
+    assert book.fields["year"] == "2020"
+    assert book.fields["place"] == "Москва"
+    web = doc.bibliography[1]
+    assert web.fields["url"] == "https://example.org"
+    assert web.fields["access_date"] == "01.05.2023"
