@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Literal
 
 
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.2.0"
 
 
 # --- Inline content -----------------------------------------------------------
@@ -20,13 +20,19 @@ SCHEMA_VERSION = "0.1.0"
 
 @dataclass
 class TextRun:
-    """Фрагмент текста с inline-разметкой."""
+    """Фрагмент текста с inline-разметкой.
+
+    `font` и `size_pt` могут быть `None`, если значения наследуются от стиля
+    абзаца. Заполняются парсером, когда run явно переопределяет шрифт/кегль.
+    """
 
     text: str
     bold: bool = False
     italic: bool = False
     superscript: bool = False
     subscript: bool = False
+    font: str | None = None
+    size_pt: float | None = None
 
 
 @dataclass
@@ -61,10 +67,19 @@ class Block:
     type: BlockType
 
 
+Alignment = Literal["left", "right", "center", "justify"]
+
+
 @dataclass
 class Paragraph(Block):
     type: BlockType = BlockType.PARAGRAPH
     content: list[InlineElement] = field(default_factory=list)
+    # Имя Word-стиля (Normal, Heading 1, Caption, ...). Используется
+    # парсером и проверками для классификации абзаца.
+    style_name: str | None = None
+    alignment: Alignment | None = None
+    line_spacing: float | None = None
+    first_line_indent_cm: float | None = None
 
 
 @dataclass
