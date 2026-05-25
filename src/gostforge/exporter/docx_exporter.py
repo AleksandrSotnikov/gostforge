@@ -31,6 +31,7 @@ from gostforge.model import (
     ContentTemplate,
     Document,
     Figure,
+    Formula,
     InlineElement,
     ListBlock,
     LogicalSection,
@@ -47,6 +48,7 @@ from lxml import etree  # type: ignore[import-untyped]
 
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
 _ALIGNMENT_MAP = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
@@ -239,6 +241,40 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
     _write_caption_paragraph(doc, figure.caption)
 
 
+def _write_formula(doc: DocxDocument, formula: Formula) -> None:
+    """Записать формулу как OOXML-OMath блок.
+
+    Формат:
+        <w:p>
+          <m:oMathPara>
+            <m:oMath>
+              <m:r><m:t>latex_text</m:t></m:r>
+            </m:oMath>
+          </m:oMathPara>
+          <w:r><w:t>\t({number})</w:t></w:r>  ← если есть номер
+        </w:p>
+
+    На Фазе 2 latex сохраняется как простой текст (не парсится в
+    математические объекты). Это обеспечивает round-trip с парсером,
+    который сохраняет видимый текст формулы.
+    """
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_xml = paragraph._p
+
+    omath_para = etree.SubElement(p_xml, f"{{{M_NS}}}oMathPara")
+    omath = etree.SubElement(omath_para, f"{{{M_NS}}}oMath")
+    if formula.latex:
+        m_r = etree.SubElement(omath, f"{{{M_NS}}}r")
+        m_t = etree.SubElement(m_r, f"{{{M_NS}}}t")
+        m_t.text = formula.latex
+
+    if formula.number is not None:
+        # Табуляция + (N) — типичный визуальный формат нумерованной формулы.
+        run = paragraph.add_run(f"\t({formula.number})")
+        run.italic = False
+
+
 def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
     """Записать список (нумерованный/маркированный).
 
@@ -381,7 +417,8 @@ def _write_items(doc: DocxDocument, items: Sequence[LogicalSection | Block]) -> 
             _write_figure(doc, item)
         elif isinstance(item, ListBlock):
             _write_list(doc, item)
-        # Formula — Фаза 3 (OMML)
+        elif isinstance(item, Formula):
+            _write_formula(doc, item)
 
 
 def export_docx(document: Document, profile: Profile, output_path: str | Path) -> None:
