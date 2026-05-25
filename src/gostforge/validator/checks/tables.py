@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from gostforge.model import (
@@ -18,6 +19,16 @@ from gostforge.model import (
 from gostforge.profile import Profile
 
 from ..engine import Violation, register
+
+# Формат подписи таблицы по ГОСТ 7.32-2017: «Таблица N — Название».
+_TABLE_CAPTION_RE = re.compile(
+    r"^Таблица\s+\d+(?:\.\d+)?\s+[—–-]\s+\S"
+)
+
+# Альтернативный вариант: «Таблица 1. Название».
+_TABLE_CAPTION_DOT_RE = re.compile(
+    r"^Таблица\s+\d+(?:\.\d+)?\.\s+\S"
+)
 
 
 def _iter_tables(items: Sequence[LogicalSection | Block]) -> list[Table]:
@@ -69,4 +80,55 @@ def check_table_has_caption(
     return violations
 
 
-__all__ = ["check_table_has_caption"]
+def _caption_text(elements: Sequence[InlineElement]) -> str:
+    """Склеить подпись таблицы в строку (только TextRun)."""
+    return "".join(el.text for el in elements if isinstance(el, TextRun)).strip()
+
+
+@register("B.03")
+def check_table_caption_format(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Подпись таблицы должна быть в формате «Таблица N — Название».
+
+    Параметры:
+    - `allow_dot_after_number` (bool, default False): если True, также
+      принимается «Таблица 1. Название».
+
+    Пустые подписи не проверяются — это случай B.01.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("B.03")
+    allow_dot = False
+    if config and config.params.get("allow_dot_after_number") is not None:
+        allow_dot = bool(config.params["allow_dot_after_number"])
+
+    for page_section, table in _all_tables(document):
+        text = _caption_text(table.caption)
+        if not text:
+            # Пустая подпись — это B.01, не дублируем.
+            continue
+        if _TABLE_CAPTION_RE.match(text):
+            continue
+        if allow_dot and _TABLE_CAPTION_DOT_RE.match(text):
+            continue
+        violations.append(
+            Violation(
+                check_code="B.03",
+                severity="error",
+                message=(
+                    f"Подпись таблицы «{text}» не соответствует формату "
+                    f"«Таблица N — Название»"
+                ),
+                location=f"page_sections.{page_section.id}.table[{table.id}]",
+                suggestion=(
+                    "Использовать формат «Таблица 1 — Название» "
+                    "(длинное тире —, не дефис)"
+                ),
+                details={"table_id": table.id, "caption": text},
+            )
+        )
+    return violations
+
+
+__all__ = ["check_table_caption_format", "check_table_has_caption"]

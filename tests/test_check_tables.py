@@ -107,3 +107,110 @@ def test_b01_nested_logical_sections() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "B.01"]
     assert len(found) == 1
     assert found[0].details["table_id"] == "t-deep"
+
+
+# --- B.03 -------------------------------------------------------------------
+
+
+def test_b03_registered() -> None:
+    assert "B.03" in registered_checks()
+
+
+def test_b03_correct_caption_no_violation() -> None:
+    """«Таблица 1 — Название» — корректная подпись."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — Результаты")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert found == []
+
+
+def test_b03_dot_after_number_violation() -> None:
+    """«Таблица 1. Название» — нарушение."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1. Результаты")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert len(found) == 1
+    assert "не соответствует формату" in found[0].message
+
+
+def test_b03_hyphen_accepted() -> None:
+    """ASCII-дефис ‘-’ принимается."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 - Результаты")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert found == []
+
+
+def test_b03_no_number_violation() -> None:
+    table = Table(id="t-1", caption=[TextRun(text="Таблица Результаты")])
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert len(found) == 1
+
+
+def test_b03_multilevel_number_ok() -> None:
+    """«Таблица 1.2 — Название» — корректно."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1.2 — Сравнение")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert found == []
+
+
+def test_b03_empty_caption_not_flagged() -> None:
+    """Пустая подпись — случай B.01, не дублируем."""
+    table = Table(id="t-1", caption=[])
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert found == []
+
+
+def test_b03_allow_dot_after_number_param() -> None:
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1. Результаты")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["B.03"].params["allow_dot_after_number"] = True
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert found == []
+
+
+def test_b03_caption_in_nested_section() -> None:
+    """B.03 рекурсивно обходит LogicalSection."""
+    table_bad = Table(id="t-deep", caption=[TextRun(text="Таблица 1. Bad")])
+    inner = LogicalSection(
+        id="sec-2",
+        level=2,
+        heading=[TextRun(text="Подраздел")],
+        children=[table_bad],
+    )
+    outer = LogicalSection(
+        id="sec-1",
+        level=1,
+        heading=[TextRun(text="Раздел")],
+        children=[inner],
+    )
+    doc = _doc_with_content([outer])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert len(found) == 1
+    assert found[0].details["table_id"] == "t-deep"

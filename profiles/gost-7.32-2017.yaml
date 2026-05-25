@@ -138,7 +138,7 @@ checks:
   I.06: {enabled: true}
   B.01: {enabled: true}
   B.02: {enabled: true}
-  B.03: {enabled: true}
+  B.03: {enabled: true, params: {allow_dot_after_number: false}}
   B.08: {enabled: true}
   B.09: {enabled: true}
   R.04:
