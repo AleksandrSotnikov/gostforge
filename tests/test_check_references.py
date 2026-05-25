@@ -313,3 +313,73 @@ def test_r05_range_reference_counts() -> None:
     unreferenced = {v.details["entry_id"] for v in found}
     assert "ref-1" not in unreferenced
     assert {"ref-2", "ref-3"}.issubset(unreferenced)
+
+
+# --- R.02 — порядок (алфавит / по упоминанию) ---------------------------
+
+
+def _violations(doc: Document, profile: Profile, code: str) -> list:
+    return [v for v in validate(doc, profile) if v.check_code == code]
+
+
+def _entry_with_fields(
+    entry_id: str, fields: dict[str, str], *, type_: str = "book"
+) -> BibliographyEntry:
+    """Запись с произвольными полями (для нацеленных тестов R.02-R.13)."""
+    full = {"raw": fields.get("raw", entry_id)}
+    full.update(fields)
+    return BibliographyEntry(id=entry_id, type=type_, fields=full)  # type: ignore[arg-type]
+
+
+def test_r02_registered() -> None:
+    assert "R.02" in registered_checks()
+
+
+def test_r02_alphabetical_ok_no_violation() -> None:
+    """Записи отсортированы по алфавиту — нарушения нет."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {"author": "Аверин А. А."}),
+            _entry_with_fields("ref-2", {"author": "Иванов И. И."}),
+            _entry_with_fields("ref-3", {"author": "Петров П. П."}),
+        ]
+    )
+    assert _violations(doc, profile, "R.02") == []
+
+
+def test_r02_alphabetical_disorder_violation() -> None:
+    """Нарушен алфавит — один Violation на первое несоответствие."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {"author": "Петров П. П."}),
+            _entry_with_fields("ref-2", {"author": "Аверин А. А."}),
+        ]
+    )
+    found = _violations(doc, profile, "R.02")
+    assert len(found) == 1
+    assert found[0].details["order"] == "alphabetical"
+    assert found[0].details["prev_id"] == "ref-1"
+    assert found[0].details["curr_id"] == "ref-2"
+
+
+def test_r02_by_mention_violation() -> None:
+    """Источник [2] упомянут в тексте раньше [1] — нарушение."""
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["R.02"] = CheckConfig(
+        enabled=True,
+        params={"order": "by_mention"},
+    )
+    para = Paragraph(id="p-1", content=[TextRun(text="Сначала [2], потом [1].")])
+    doc = _doc_with_paragraphs([para])
+    doc.bibliography.extend(
+        [
+            _entry_with_fields("ref-1", {"author": "Иванов И. И."}),
+            _entry_with_fields("ref-2", {"author": "Петров П. П."}),
+        ]
+    )
+    found = _violations(doc, profile, "R.02")
+    assert len(found) == 1
+    assert found[0].details["order"] == "by_mention"
+    assert found[0].details["prev_index"] == "1"

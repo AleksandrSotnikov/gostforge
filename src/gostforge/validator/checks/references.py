@@ -46,6 +46,45 @@ def _params(profile: Profile) -> dict[str, Any]:
     return dict(config.params)
 
 
+def _check_params(profile: Profile, code: str) -> dict[str, Any]:
+    """Прочитать `checks.<code>.params` из профиля; вернуть пустой dict, если нет."""
+    config = profile.checks.get(code)
+    if config is None:
+        return {}
+    return dict(config.params)
+
+
+def _str_param(params: dict[str, Any], key: str, default: str) -> str:
+    """Достать строковый параметр из профиля с дефолтом."""
+    value = params.get(key, default)
+    if isinstance(value, str):
+        return value
+    return default
+
+
+def _float_param(params: dict[str, Any], key: str, default: float) -> float:
+    """Достать float-параметр из профиля с дефолтом."""
+    value = params.get(key, default)
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _list_str_param(params: dict[str, Any], key: str, default: list[str]) -> list[str]:
+    """Достать список строк из профиля; невалидные элементы пропускаются."""
+    value = params.get(key)
+    if value is None:
+        return list(default)
+    if isinstance(value, list):
+        return [str(item) for item in value if isinstance(item, str)]
+    return list(default)
+
+
 def _bool_param(params: dict[str, Any], key: str, default: bool) -> bool:
     """Достать булев параметр из профиля с дефолтом."""
     value = params.get(key, default)
@@ -369,8 +408,110 @@ def check_citations_have_pages(
     return []
 
 
+# --- R.02 — порядок (алфавит / по упоминанию) ---------------------------
+
+
+@register("R.02")
+def check_bibliography_order(document: Document, profile: Profile) -> list[Violation]:
+    """Записи bibliography должны идти в заданном порядке (алфавит / по упоминанию).
+
+    Параметр `checks.R.02.params.order`:
+      - "alphabetical" (по умолчанию) — соседние записи сравниваются
+        по `fields["author"]` без учёта регистра (русский алфавит).
+        Если у записи нет author — пара пропускается.
+      - "by_mention" — для каждой пары соседних номеров N и N+1
+        проверяется, что N упоминается в тексте раньше N+1.
+
+    При первом несоответствии возвращается единственный Violation.
+    """
+    if not document.bibliography:
+        return []
+
+    params = _check_params(profile, "R.02")
+    order = _str_param(params, "order", "alphabetical")
+
+    if order == "alphabetical":
+        for prev, curr in zip(
+            document.bibliography, document.bibliography[1:], strict=False
+        ):
+            prev_author = prev.fields.get("author")
+            curr_author = curr.fields.get("author")
+            if not prev_author or not curr_author:
+                continue
+            if prev_author.lower() > curr_author.lower():
+                return [
+                    Violation(
+                        check_code="R.02",
+                        severity="warning",
+                        message=(
+                            f"Нарушен алфавитный порядок: запись «{prev.id}» "
+                            f"({prev_author}) идёт раньше «{curr.id}» ({curr_author})"
+                        ),
+                        location=f"bibliography[{curr.id}]",
+                        suggestion=(
+                            "Расположить записи по алфавиту фамилий первых авторов"
+                        ),
+                        details={
+                            "order": "alphabetical",
+                            "prev_id": prev.id,
+                            "curr_id": curr.id,
+                            "prev_author": prev_author,
+                            "curr_author": curr_author,
+                        },
+                    )
+                ]
+        return []
+
+    if order == "by_mention":
+        text = _document_text(document)
+        # Карта: индекс источника (1-based) → позиция первого упоминания в тексте.
+        positions: dict[int, int] = {}
+        for index in range(1, len(document.bibliography) + 1):
+            pattern = re.compile(_ENTRY_REF_RE_TEMPLATE.format(n=index))
+            match = pattern.search(text)
+            if match is not None:
+                positions[index] = match.start()
+        # Перебираем пары соседних номеров N и N+1, у которых обе позиции
+        # известны: первое упоминание N должно предшествовать N+1.
+        for index in range(1, len(document.bibliography)):
+            pos_prev = positions.get(index)
+            pos_next = positions.get(index + 1)
+            if pos_prev is None or pos_next is None:
+                continue
+            if pos_prev > pos_next:
+                prev = document.bibliography[index - 1]
+                curr = document.bibliography[index]
+                return [
+                    Violation(
+                        check_code="R.02",
+                        severity="warning",
+                        message=(
+                            f"Источник [{index}] упомянут в тексте позже, чем "
+                            f"[{index + 1}] — нарушен порядок «по упоминанию»"
+                        ),
+                        location=f"bibliography[{curr.id}]",
+                        suggestion=(
+                            "Перенумеровать записи bibliography в порядке "
+                            "первого упоминания в тексте"
+                        ),
+                        details={
+                            "order": "by_mention",
+                            "prev_id": prev.id,
+                            "curr_id": curr.id,
+                            "prev_index": str(index),
+                            "curr_index": str(index + 1),
+                        },
+                    )
+                ]
+        return []
+
+    # Неизвестное значение параметра order — мягкая деградация, без падения.
+    return []
+
+
 __all__ = [
     "check_bibliography_format",
+    "check_bibliography_order",
     "check_citations_have_pages",
     "check_each_entry_referenced",
     "check_reference_style_numeric",

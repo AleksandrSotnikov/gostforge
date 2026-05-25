@@ -166,6 +166,7 @@ checks:
   B.08: {enabled: true}
   B.09: {enabled: true}
   R.01: {enabled: true}
+  R.02: {enabled: true, params: {order: alphabetical}}
   R.04:
     enabled: true
     params:
