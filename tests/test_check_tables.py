@@ -439,3 +439,71 @@ def test_b04_registered() -> None:
 def test_b05_registered() -> None:
     """Заглушка B.05 зарегистрирована в реестре."""
     assert "B.05" in registered_checks()
+
+
+# --- B.06 (шрифт 12pt в ячейках) ----------------------------------------
+
+
+def test_b06_registered() -> None:
+    """Проверка B.06 зарегистрирована в реестре."""
+    assert "B.06" in registered_checks()
+
+
+def test_b06_correct_font_size_no_violation() -> None:
+    """Все ячейки 12pt — нарушения нет."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H", size_pt=12.0)]],
+        rows=[[[TextRun(text="C", size_pt=12.0)]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.06"]
+    assert found == []
+
+
+def test_b06_wrong_font_size_violation() -> None:
+    """Ячейка 14pt вместо 12pt — нарушение."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H", size_pt=12.0)]],
+        rows=[[[TextRun(text="C", size_pt=14.0)]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.06"]
+    assert len(found) == 1
+    assert found[0].details["table_id"] == "t-1"
+    assert found[0].details["found_pt"] == "14.0"
+
+
+def test_b06_none_size_not_checked() -> None:
+    """TextRun с size_pt=None — наследуется от стиля, не проверяется."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H")]],
+        rows=[[[TextRun(text="C")]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.06"]
+    assert found == []
+
+
+def test_b06_param_override() -> None:
+    """Параметр cell_font_size_pt=10 принимает 10pt и отвергает 12pt."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H", size_pt=12.0)]],
+        rows=[[[TextRun(text="C", size_pt=12.0)]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["B.06"].params["cell_font_size_pt"] = 10
+    found = [v for v in validate(doc, profile) if v.check_code == "B.06"]
+    assert len(found) == 1
+    assert found[0].details["found_pt"] == "12.0"

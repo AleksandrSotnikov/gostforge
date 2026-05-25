@@ -360,9 +360,87 @@ def check_table_referenced_in_text(
     return violations
 
 
+@register("B.06")
+def check_table_cell_font_size(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """В ячейках таблицы шрифт должен быть `cell_font_size_pt` (по умолчанию 12pt).
+
+    Параметры:
+    - `cell_font_size_pt` (float, default 12): ожидаемый кегль в ячейках.
+    - `cell_line_spacing` (float, default 1.0): не проверяется на Фазе 2
+      (line_spacing не хранится на уровне ячейки в текущей модели).
+
+    Для каждой Table проверяется любой TextRun в headers и rows с непустым
+    `size_pt`: если размер отличается от ожидаемого — порождается один
+    Violation на таблицу с указанием найденного размера. Если у TextRun
+    `size_pt is None`, размер наследуется от стиля и не проверяется.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("B.06")
+    expected_size = 12.0
+    if config and config.params.get("cell_font_size_pt") is not None:
+        try:
+            expected_size = float(config.params["cell_font_size_pt"])
+        except (TypeError, ValueError):
+            expected_size = 12.0
+
+    for page_section, table in _all_tables(document):
+        wrong_size: float | None = None
+        for cell in _iter_table_cells(table):
+            for element in cell:
+                if not isinstance(element, TextRun):
+                    continue
+                if element.size_pt is None:
+                    continue
+                if element.size_pt != expected_size:
+                    wrong_size = element.size_pt
+                    break
+            if wrong_size is not None:
+                break
+
+        if wrong_size is None:
+            continue
+
+        violations.append(
+            Violation(
+                check_code="B.06",
+                severity="warning",
+                message=(
+                    f"В ячейках таблицы «{table.id}» найден кегль "
+                    f"{wrong_size} pt, ожидается {expected_size} pt"
+                ),
+                location=f"page_sections.{page_section.id}.table[{table.id}]",
+                suggestion=(
+                    f"Выставить шрифту в ячейках таблицы размер "
+                    f"{expected_size} pt"
+                ),
+                details={
+                    "table_id": table.id,
+                    "expected_pt": str(expected_size),
+                    "found_pt": str(wrong_size),
+                },
+            )
+        )
+
+    return violations
+
+
+def _iter_table_cells(table: Table) -> list[list[InlineElement]]:
+    """Все ячейки таблицы (headers + rows) как плоский список."""
+    cells: list[list[InlineElement]] = []
+    for header_cell in table.headers:
+        cells.append(header_cell)
+    for row in table.rows:
+        for cell in row:
+            cells.append(cell)
+    return cells
+
+
 __all__ = [
     "check_table_caption_above",
     "check_table_caption_format",
+    "check_table_cell_font_size",
     "check_table_continuation_header",
     "check_table_has_caption",
     "check_table_header_repeats",
