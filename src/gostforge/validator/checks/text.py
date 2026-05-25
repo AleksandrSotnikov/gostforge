@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 
 from gostforge.model import (
     Block,
@@ -248,6 +248,41 @@ def check_first_line_indent(document: Document, profile: Profile) -> list[Violat
     return violations
 
 
+def _iter_container_paragraph_groups(
+    document: Document,
+) -> Iterator[list[Paragraph]]:
+    """Итератор по «контейнерам» документа.
+
+    Контейнер — это последовательность сиблингов на одном уровне (либо
+    `content` страничной секции, либо `children` логического раздела).
+    Пустые абзацы T.07 считаются только в пределах одного контейнера: между
+    логическими разделами счётчик сбрасывается, потому что в OOXML заголовок
+    стоит между ними и физически разрывает «цепочку» пустоты.
+    """
+    for page_section in document.page_sections:
+        yield [item for item in page_section.content if isinstance(item, Paragraph)]
+        for ls in _walk_logical_sections(page_section.content):
+            yield [item for item in ls.children if isinstance(item, Paragraph)]
+
+
+def _walk_logical_sections(
+    items: Sequence[LogicalSection | Block],
+) -> Iterator[LogicalSection]:
+    """Рекурсивный обход LogicalSection (вложенные включаются)."""
+    for item in items:
+        if isinstance(item, LogicalSection):
+            yield item
+            yield from _walk_logical_sections(item.children)
+
+
+def _paragraph_is_empty(paragraph: Paragraph) -> bool:
+    """Пустой абзац: нет ни одного TextRun с непустым text.strip()."""
+    for el in paragraph.content:
+        if isinstance(el, TextRun) and el.text and el.text.strip():
+            return False
+    return True
+
+
 @register("T.05")
 def check_alignment(document: Document, profile: Profile) -> list[Violation]:
     """Проверка выравнивания основного текста (по умолчанию по ширине).
@@ -283,10 +318,68 @@ def check_alignment(document: Document, profile: Profile) -> list[Violation]:
     return violations
 
 
+@register("T.07")
+def check_no_consecutive_empty_paragraphs(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """В тексте не должно быть подряд идущих пустых абзацев.
+
+    Параметр `checks.T.07.params.max_consecutive_empty` (int, по умолчанию 1)
+    задаёт, сколько пустых абзацев подряд допустимо. Превышение — нарушение.
+    Счёт ведётся в пределах одного контейнера-сиблингов; через границу
+    логического раздела цепочка не продолжается (между ними стоит заголовок).
+
+    Один Violation на каждую цепочку, превысившую лимит.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("T.07")
+    max_empty = 1
+    if config and config.params.get("max_consecutive_empty") is not None:
+        max_empty = int(config.params["max_consecutive_empty"])
+
+    for paragraphs in _iter_container_paragraph_groups(document):
+        run_length = 0
+        chain_start_id: str | None = None
+        for paragraph in paragraphs:
+            if _paragraph_is_empty(paragraph):
+                if run_length == 0:
+                    chain_start_id = paragraph.id
+                run_length += 1
+            else:
+                if run_length > max_empty:
+                    violations.append(
+                        _t07_violation(run_length, max_empty, chain_start_id)
+                    )
+                run_length = 0
+                chain_start_id = None
+        if run_length > max_empty:
+            violations.append(_t07_violation(run_length, max_empty, chain_start_id))
+    return violations
+
+
+def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violation:
+    location = (
+        f"page_sections.*.paragraph[{location_id}]"
+        if location_id
+        else "page_sections.*"
+    )
+    return Violation(
+        check_code="T.07",
+        severity="warning",
+        message=(
+            f"Подряд идущих пустых абзацев: {count} (допустимо не более {allowed})"
+        ),
+        location=location,
+        suggestion="Удалить лишние пустые абзацы; для отступа использовать spacing_before/after",
+        details={"count": str(count), "allowed": str(allowed)},
+    )
+
+
 __all__ = [
+    "check_alignment",
+    "check_first_line_indent",
     "check_font",
     "check_font_size",
     "check_line_spacing",
-    "check_first_line_indent",
-    "check_alignment",
+    "check_no_consecutive_empty_paragraphs",
 ]

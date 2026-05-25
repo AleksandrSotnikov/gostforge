@@ -303,3 +303,136 @@ def test_t05_skips_headings_and_captions() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.05"]
     assert found == []
+
+
+# --- T.07 (нет пустых абзацев подряд) --------------------------------------
+
+
+def _empty_para(pid: str) -> Paragraph:
+    return Paragraph(id=pid, content=[TextRun(text="")], style_name="Normal")
+
+
+def _text_para(pid: str, text: str = "Текст") -> Paragraph:
+    return Paragraph(id=pid, content=[TextRun(text=text)], style_name="Normal")
+
+
+def test_t07_registered() -> None:
+    assert "T.07" in registered_checks()
+
+
+def test_t07_single_empty_paragraph_no_violation() -> None:
+    """Один пустой абзац подряд — допустимо (max_consecutive_empty=1)."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            content=[_text_para("p1"), _empty_para("p2"), _text_para("p3")],
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.07"]
+    assert found == []
+
+
+def test_t07_two_empty_paragraphs_violation() -> None:
+    """Два пустых абзаца подряд — нарушение."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            content=[
+                _text_para("p1"),
+                _empty_para("p2"),
+                _empty_para("p3"),
+                _text_para("p4"),
+            ],
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.07"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert found[0].details["count"] == "2"
+
+
+def test_t07_three_empty_paragraphs_at_end_violation() -> None:
+    """Цепочка пустых абзацев в конце контейнера тоже должна детектиться."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            content=[
+                _text_para("p1"),
+                _empty_para("p2"),
+                _empty_para("p3"),
+                _empty_para("p4"),
+            ],
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.07"]
+    assert len(found) == 1
+    assert found[0].details["count"] == "3"
+
+
+def test_t07_chain_resets_across_logical_section_boundary() -> None:
+    """Пустой абзац в конце одного раздела и в начале следующего — не цепочка."""
+    sec_a = LogicalSection(
+        id="a", level=1, children=[_text_para("a1"), _empty_para("a2")]
+    )
+    sec_b = LogicalSection(
+        id="b", level=1, children=[_empty_para("b1"), _text_para("b2")]
+    )
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", content=[sec_a, sec_b])
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.07"]
+    assert found == []
+
+
+def test_t07_custom_limit_via_profile_params() -> None:
+    """max_consecutive_empty=2 — два пустых ОК, три — нарушение."""
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["T.07"].params["max_consecutive_empty"] = 2
+    ok_doc = Document()
+    ok_doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            content=[
+                _text_para("p1"),
+                _empty_para("p2"),
+                _empty_para("p3"),
+                _text_para("p4"),
+            ],
+        )
+    )
+    assert [v for v in validate(ok_doc, profile) if v.check_code == "T.07"] == []
+
+    bad_doc = Document()
+    bad_doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            content=[
+                _text_para("p1"),
+                _empty_para("p2"),
+                _empty_para("p3"),
+                _empty_para("p4"),
+                _text_para("p5"),
+            ],
+        )
+    )
+    bad = [v for v in validate(bad_doc, profile) if v.check_code == "T.07"]
+    assert len(bad) == 1
+    assert bad[0].details["count"] == "3"
