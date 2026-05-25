@@ -1,0 +1,80 @@
+# ruff: noqa: RUF001, RUF002
+
+"""Smoke-тесты для веб-интерфейса (Streamlit).
+
+Полноценный e2e Streamlit-приложения за пределами Фазы 1: фреймворк
+требует отдельного раннера и контекста сессии. Здесь мы ограничиваемся
+смоук-проверками:
+
+* модуль ``gostforge.web.app`` импортируется при установленном streamlit;
+* CLI-команда ``gostforge ui`` корректно падает с exit code 2, если
+  streamlit не установлен;
+* CLI-команда ``gostforge ui`` собирает корректную команду для
+  ``streamlit run`` и передаёт её ``subprocess.run``.
+"""
+
+from __future__ import annotations
+
+import sys
+from typing import Any
+
+import pytest
+from click.testing import CliRunner
+
+from gostforge.cli import main
+
+
+def test_app_module_importable() -> None:
+    """``import gostforge.web.app`` не падает при наличии streamlit."""
+    pytest.importorskip("streamlit")
+    # Чистый импорт без побочного запуска render() — render() закрыт
+    # в ``if __name__ == "__main__":`` блок.
+    import gostforge.web.app as app_module
+
+    assert hasattr(app_module, "render"), "В app.py должна быть функция render()"
+
+
+def test_ui_command_without_streamlit_exits_2(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Если streamlit не установлен, ``gostforge ui`` падает с exit code 2."""
+    # Прячем streamlit, чтобы ``import streamlit`` внутри команды упал.
+    monkeypatch.setitem(sys.modules, "streamlit", None)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["ui"])
+    assert result.exit_code == 2, result.output
+    assert "Streamlit не установлен" in result.output
+    assert "gostforge[ui]" in result.output
+
+
+def test_ui_command_invokes_streamlit_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``gostforge ui --port 9000 --host 0.0.0.0`` запускает streamlit run с этими параметрами."""
+    pytest.importorskip("streamlit")
+
+    captured: dict[str, Any] = {}
+
+    def fake_run(cmd: list[str], *args: Any, **kwargs: Any) -> Any:
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+
+        class _Result:
+            returncode = 0
+
+        return _Result()
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    runner = CliRunner()
+    result = runner.invoke(main, ["ui", "--port", "9000", "--host", "0.0.0.0"])
+    assert result.exit_code == 0, result.output
+
+    cmd = captured["cmd"]
+    assert cmd[0] == "streamlit"
+    assert cmd[1] == "run"
+    # Третий аргумент — путь до app.py
+    assert cmd[2].endswith("app.py")
+    assert "--server.address" in cmd
+    assert cmd[cmd.index("--server.address") + 1] == "0.0.0.0"
+    assert "--server.port" in cmd
+    assert cmd[cmd.index("--server.port") + 1] == "9000"

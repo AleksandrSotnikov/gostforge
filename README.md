@@ -99,6 +99,10 @@ gostforge check work.docx --report report.md
 gostforge profiles list
 gostforge profiles show gost-7.32-2017
 gostforge checks
+
+# Веб-интерфейс с drag-and-drop загрузкой и просмотром нарушений
+pip install -e ".[ui]"   # один раз — поставит streamlit
+gostforge ui             # откроется на http://localhost:8501
 ```
 
 Exit code: `0` — нарушений нет; `1` — найдены ошибки (severity=error);

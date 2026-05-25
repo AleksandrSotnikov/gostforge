@@ -297,5 +297,40 @@ def checks_list() -> None:
         click.echo(code)
 
 
+@main.command()
+@click.option("--port", default=8501, help="Порт (по умолчанию 8501).")
+@click.option("--host", default="localhost", help="Адрес для bind (по умолчанию localhost).")
+def ui(host: str, port: int) -> None:
+    """Запустить веб-интерфейс на Streamlit."""
+    try:
+        import streamlit  # noqa: F401
+    except ImportError:
+        click.echo(
+            "Streamlit не установлен. Установите gostforge[ui]:\n"
+            "  pip install -e \".[ui]\"",
+            err=True,
+        )
+        sys.exit(2)
+
+    import subprocess
+
+    # Импортируем модуль приложения, чтобы получить путь до его файла.
+    # Импорт обёрнут в try/except: в нём, помимо streamlit, могут быть
+    # ошибки конфигурации, которые имеет смысл показать.
+    import gostforge.web.app as app_module
+
+    app_path = app_module.__file__
+    cmd = [
+        "streamlit",
+        "run",
+        str(app_path),
+        "--server.address",
+        host,
+        "--server.port",
+        str(port),
+    ]
+    subprocess.run(cmd, check=False)
+
+
 if __name__ == "__main__":
     main()

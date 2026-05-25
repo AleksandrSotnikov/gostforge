@@ -34,11 +34,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+ui = ["streamlit>=1.30"]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
     "ruff>=0.1",
     "mypy>=1.7",
+    "streamlit>=1.30",
 ]
 
 [project.scripts]
