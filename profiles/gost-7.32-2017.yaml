@@ -194,6 +194,7 @@ checks:
   A.03: {enabled: true}
   P.02: {enabled: true}
   P.03: {enabled: true}
+  P.04: {enabled: true}
   K.01: {enabled: true}
   K.02: {enabled: true}
   K.03: {enabled: true, params: {expected_start_value: 3}}

@@ -269,3 +269,42 @@ def test_p03_page_break_none_no_violation() -> None:
     assert found == []
 
 
+# --- P.04 -----------------------------------------------------------------
+
+
+def test_p04_registered() -> None:
+    assert "P.04" in registered_checks()
+
+
+def test_p04_valid_format_no_violation() -> None:
+    """«Приложение А» — корректный формат, нет нарушения."""
+    app = _appendix("app-a", "Приложение А")
+    doc = _doc_with_content([app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.04"]
+    assert found == []
+
+
+def test_p04_valid_with_subtitle_no_violation() -> None:
+    """«Приложение А ПРИМЕР МЕТОДИКИ» — формат с подзаголовком — ок."""
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А ПРИМЕР МЕТОДИКИ РАСЧЁТА")],
+        children=[Paragraph(id="p-1", content=[TextRun(text="...")])],
+    )
+    doc = _doc_with_content([app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.04"]
+    assert found == []
+
+
+def test_p04_lowercase_format_violation() -> None:
+    """«Приложение а» (строчная) — нарушение формата."""
+    app = _appendix("app-a", "Приложение а")
+    doc = _doc_with_content([app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.04"]
+    assert len(found) == 1
+
+

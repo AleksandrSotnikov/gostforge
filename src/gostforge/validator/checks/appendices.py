@@ -245,6 +245,17 @@ def _is_cyrillic_letter(letter: str) -> bool:
 # Используется в P.02..P.05 для отбора секций-приложений.
 _APPENDIX_PREFIX_RE = re.compile(r"^\s*Приложение\b", re.IGNORECASE)
 
+# Строгий формат заголовка приложения (P.04):
+# - точно «Приложение» с заглавной;
+# - один пробел (или несколько);
+# - одна РУССКАЯ ЗАГЛАВНАЯ буква;
+# - после неё либо точка с пробелом и текстом, либо конец строки (опционально
+#   допускаем пробел и далее — содержательный заголовок).
+_STRICT_APPENDIX_HEADING_RE = re.compile(
+    r"^Приложение\s+([А-Я])(?:\s+\S.*|\.\s+\S.*|$)"
+)
+
+
 def _iter_paragraphs(items: Sequence[LogicalSection | Block]) -> list[Paragraph]:
     """Рекурсивно собрать все Paragraph (через LogicalSection.children)."""
     result: list[Paragraph] = []
@@ -419,7 +430,49 @@ def check_appendix_page_break(
     return violations
 
 
+# --- P.04 ------------------------------------------------------------------
+
+
+@register("P.04")
+def check_appendix_heading_format(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Формат заголовка приложения: «Приложение X», где X — русская заглавная буква.
+
+    После «X» может следовать пробел и содержательный заголовок («ПРИМЕР
+    МЕТОДИКИ»), либо точка с пробелом и содержательный заголовок, либо
+    конец строки. Дополнительные символы (например, скобки или цифры
+    вместо буквы) — нарушение.
+    """
+    _ = profile
+    violations: list[Violation] = []
+    appendices = _appendix_sections(document)
+    for section in appendices:
+        heading = _heading_text(section.heading).strip()
+        if _STRICT_APPENDIX_HEADING_RE.match(heading):
+            continue
+        violations.append(
+            Violation(
+                check_code="P.04",
+                severity="warning",
+                message=(
+                    f"Заголовок «{heading}» не соответствует формату "
+                    f"«Приложение X», где X — русская заглавная буква"
+                ),
+                location=f"page_sections.*.logical_section[{section.id}]",
+                suggestion=(
+                    "Привести заголовок к виду «Приложение А», «Приложение Б» "
+                    "и т.д. (русская заглавная буква, без латиницы и цифр)"
+                ),
+                details={"section_id": section.id, "heading": heading},
+            )
+        )
+    return violations
+
+
 __all__ = [
+    "check_appendix_heading_format",
     "check_appendix_letter_marking",
     "check_appendix_page_break",
     "check_appendix_referenced",
