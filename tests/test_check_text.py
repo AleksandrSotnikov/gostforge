@@ -858,3 +858,77 @@ def test_t12_custom_units_param() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "T.12"]
     assert len(found) == 1
     assert found[0].details["count"] == "1"
+
+
+# --- T.13 (NBSP между инициалами и фамилией) -----------------------------
+
+
+def test_t13_registered() -> None:
+    assert "T.13" in registered_checks()
+
+
+def test_t13_nbsp_no_violation() -> None:
+    """Если между инициалами и фамилией стоит NBSP — нарушения нет."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Автор: И. И. Иванов.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.13"]
+    assert found == []
+
+
+def test_t13_regular_space_violation() -> None:
+    """Обычные пробелы между инициалами и фамилией — нарушение."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Автор: И. И. Иванов.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.13"]
+    assert len(found) == 1
+    assert found[0].severity == "info"
+    assert found[0].details["count"] == "1"
+
+
+def test_t13_multiple_occurrences_single_violation() -> None:
+    """Несколько ФИО — один Violation, count в details."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Авторы: И. И. Иванов, П. П. Петров.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.13"]
+    assert len(found) == 1
+    assert found[0].details["count"] == "2"
+
+
+def test_t13_text_without_initials_no_violation() -> None:
+    """Текст без ФИО — нарушения нет."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Просто текст без инициалов.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.13"]
+    assert found == []
+
+
+def test_t13_skips_headers_and_footers() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="И. И. Иванов")],
+        style_name="Header",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.13"]
+    assert found == []

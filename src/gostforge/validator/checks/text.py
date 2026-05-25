@@ -588,10 +588,52 @@ def check_nbsp_between_number_and_unit(
 
 
 # T.13: инициалы и фамилия (И. И. Иванов). Между ними должен быть NBSP,
-# а не обычный пробел.
+# а не обычный пробел. Пробелы в шаблоне — обычные (U+0020), NBSP сюда
+# не попадает.
 _INITIALS_SURNAME_RE = re.compile(
     r"[А-ЯЁ]\. [А-ЯЁ]\. [А-ЯЁ][а-яё]+"
 )
+
+
+@register("T.13")
+def check_nbsp_between_initials_and_surname(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """Между инициалами и фамилией должен стоять неразрывный пробел.
+
+    Эвристика: regex `[А-ЯЁ]. [А-ЯЁ]. [А-ЯЁ][а-яё]+` в склеенном тексте
+    параграфа — если совпало, значит между инициалами и фамилией стоит
+    обычный пробел вместо NBSP. Один Violation на параграф, в
+    `details["count"]` — количество найденных случаев.
+    """
+    violations: list[Violation] = []
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) == "header_footer":
+            continue
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        matches = _INITIALS_SURNAME_RE.findall(text)
+        if not matches:
+            continue
+        violations.append(
+            Violation(
+                check_code="T.13",
+                severity="info",
+                message=(
+                    f"В абзаце «{_preview(paragraph.content)}» между инициалами и "
+                    f"фамилией стоит обычный пробел вместо неразрывного "
+                    f"(найдено: {len(matches)})"
+                ),
+                location=f"page_sections.*.paragraph[{paragraph.id}]",
+                suggestion=(
+                    "Заменить обычные пробелы на неразрывные между инициалами "
+                    "и фамилией"
+                ),
+                details={"count": str(len(matches))},
+            )
+        )
+    return violations
 
 
 @register("T.11")
@@ -652,6 +694,7 @@ __all__ = [
     "check_font",
     "check_font_size",
     "check_line_spacing",
+    "check_nbsp_between_initials_and_surname",
     "check_nbsp_between_number_and_unit",
     "check_no_consecutive_empty_paragraphs",
     "check_no_double_spaces",
