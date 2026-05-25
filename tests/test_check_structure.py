@@ -1,4 +1,6 @@
-"""Тесты S.01 — наличие обязательных разделов."""
+# ruff: noqa: RUF001, RUF002
+
+"""Тесты S.01, S.02, S.06, S.07 — структура работы."""
 
 from gostforge.model import (
     Document,
@@ -271,3 +273,107 @@ def test_s06_section_without_paragraph_skipped() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "S.06"]
     assert found == []
+
+
+# --- S.02 -------------------------------------------------------------------
+
+
+def test_s02_registered() -> None:
+    assert "S.02" in registered_checks()
+
+
+def test_s02_correct_order_no_violation() -> None:
+    doc = _doc(
+        [
+            _heading("Реферат"),
+            _heading("Содержание"),
+            _heading("Введение"),
+            _heading("Заключение"),
+            _heading("Список использованных источников"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.02"]
+    assert found == []
+
+
+def test_s02_wrong_order_violation() -> None:
+    """Заключение перед Введением — нарушение."""
+    doc = _doc(
+        [
+            _heading("Реферат"),
+            _heading("Заключение"),
+            _heading("Введение"),
+            _heading("Список использованных источников"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.02"]
+    # Один из (Заключение/Введение) выпадает из LIS
+    assert len(found) == 1
+    msgs = " ".join(v.message for v in found)
+    assert "не на своём месте" in msgs
+
+
+def test_s02_alias_recognized() -> None:
+    """«Список литературы» равен «Список использованных источников»."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("Заключение"),
+            _heading("Список литературы"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.02"]
+    assert found == []
+
+
+def test_s02_extra_sections_ignored() -> None:
+    """Главы и прочие неожидаемые разделы — не считаются (фильтруются)."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("Глава 1"),
+            _heading("Глава 2"),
+            _heading("Заключение"),
+            _heading("Список использованных источников"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.02"]
+    assert found == []
+
+
+def test_s02_appendix_prefix_match() -> None:
+    """«Приложение А» считается «Приложением» (префиксный матч)."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("Заключение"),
+            _heading("Список использованных источников"),
+            _heading("Приложение А"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.02"]
+    assert found == []
+
+
+def test_s02_custom_expected_order_via_params() -> None:
+    doc = _doc([_heading("B"), _heading("A")])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["S.02"].params["expected_order"] = ["A", "B"]
+    found = [v for v in validate(doc, profile) if v.check_code == "S.02"]
+    assert len(found) == 1
+    assert "не на своём месте" in found[0].message
+
+
+def test_s02_single_matched_section_no_violation() -> None:
+    """Если совпал только один раздел из expected — нечего сравнивать."""
+    doc = _doc([_heading("Введение"), _heading("Какой-то-свой-раздел")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.02"]
+    assert found == []
+
+
