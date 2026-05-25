@@ -97,6 +97,100 @@ def test_h01_unset_props_are_not_violations() -> None:
     assert found == []
 
 
+# --- H.02 -------------------------------------------------------------------
+
+
+def test_h02_registered() -> None:
+    assert "H.02" in registered_checks()
+
+
+def test_h02_correct_heading_no_violation() -> None:
+    """Заголовок 2 уровня в правильном формате — нарушения нет.
+
+    По профилю heading_2: TNR, 14pt, bold, без uppercase.
+    """
+    doc = _doc(
+        [_heading("Подраздел", level=2, font="Times New Roman", size_pt=14, bold=True)]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
+    assert found == []
+
+
+def test_h02_wrong_font_violation() -> None:
+    doc = _doc(
+        [_heading("Подраздел", level=2, font="Arial", size_pt=14, bold=True)]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
+    assert any("Arial" in v.message for v in found)
+
+
+def test_h02_wrong_size_violation() -> None:
+    doc = _doc(
+        [_heading("Подраздел", level=2, font="Times New Roman", size_pt=12, bold=True)]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
+    assert any("12" in v.message for v in found)
+
+
+def test_h02_not_bold_violation() -> None:
+    doc = _doc(
+        [_heading("Подраздел", level=2, font="Times New Roman", size_pt=14, bold=False)]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
+    assert any("полужирным" in v.message for v in found)
+
+
+def test_h02_skips_other_levels() -> None:
+    """H.02 — только для level=2; для level=1 свои правила, level=3+ — пока ничего."""
+    doc = _doc(
+        [
+            _heading("ВВЕДЕНИЕ", level=1, font="Arial", size_pt=14, bold=True),
+            _heading("Sub-sub", level=3, font="Arial", size_pt=14, bold=True),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
+    assert found == []
+
+
+def test_h02_unset_props_are_not_violations() -> None:
+    """Если у TextRun font/size/bold не заданы — нарушения нет (наследуется)."""
+    doc = _doc([_heading("Подраздел", level=2)])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
+    assert found == []
+
+
+def test_h02_traverses_nested_sections() -> None:
+    """H.02 находит подразделы внутри LogicalSection.children."""
+    inner = _heading("Подраздел", level=2, font="Arial", size_pt=14, bold=True)
+    outer = LogicalSection(
+        id="outer",
+        level=1,
+        heading=[TextRun(text="1 Основная часть")],
+        children=[inner],
+    )
+    doc = _doc([outer])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
+    assert any("Arial" in v.message for v in found)
+
+
+def test_h02_uppercase_param_enforced() -> None:
+    """Если в профиле heading_2.uppercase=True — заголовок должен быть в верхнем регистре."""
+    doc = _doc(
+        [_heading("Подраздел", level=2, font="Times New Roman", size_pt=14, bold=True)]
+    )
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.extra["heading_2"] = {**profile.styles.extra.get("heading_2", {}), "uppercase": True}
+    found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
+    assert any("верхнем регистре" in v.message for v in found)
+
+
 # --- H.03 -------------------------------------------------------------------
 
 

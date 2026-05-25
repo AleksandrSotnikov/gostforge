@@ -150,6 +150,79 @@ def check_heading_1_format(document: Document, profile: Profile) -> list[Violati
     return violations
 
 
+@register("H.02")
+def check_heading_2_format(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка формата заголовков 2 уровня.
+
+    Сверяется с `profile.styles.extra.heading_2` (font, size_pt, bold,
+    uppercase). Если у заголовка свойство явно задано и не совпадает с
+    эталоном — нарушение. None означает «наследуется» — пропускаем.
+    """
+    violations: list[Violation] = []
+    heading_2: dict[str, Any] = profile.styles.extra.get("heading_2", {}) or {}
+
+    expected_font: str | None = heading_2.get("font")
+    expected_size: float | None = heading_2.get("size_pt")
+    expected_bold: bool | None = heading_2.get("bold")
+    expected_uppercase: bool | None = heading_2.get("uppercase")
+
+    for section in _all_logical_sections(document):
+        if section.level != 2:
+            continue
+
+        text = _heading_text(section.heading)
+        runs = _heading_runs(section.heading)
+
+        if expected_uppercase is True and text and text != text.upper():
+            violations.append(
+                _violation(
+                    "H.02",
+                    f"Заголовок 2 уровня «{text}» должен быть в верхнем регистре",
+                    section.id,
+                    suggestion="Привести заголовок к верхнему регистру",
+                )
+            )
+
+        for run in runs:
+            if not run.text or not run.text.strip():
+                continue
+            if expected_font and run.font and run.font != expected_font:
+                violations.append(
+                    _violation(
+                        "H.02",
+                        f"В заголовке 2 уровня «{text}» использован шрифт "
+                        f"«{run.font}» вместо «{expected_font}»",
+                        section.id,
+                        suggestion=f"Использовать шрифт «{expected_font}» в заголовках 2 уровня",
+                    )
+                )
+            if (
+                expected_size is not None
+                and run.size_pt is not None
+                and abs(run.size_pt - float(expected_size)) > _SIZE_TOLERANCE_PT
+            ):
+                violations.append(
+                    _violation(
+                        "H.02",
+                        f"В заголовке 2 уровня «{text}» использован кегль "
+                        f"{run.size_pt} pt вместо {expected_size} pt",
+                        section.id,
+                        suggestion=f"Использовать кегль {expected_size} pt в заголовках 2 уровня",
+                    )
+                )
+            if expected_bold is True and run.bold is False:
+                violations.append(
+                    _violation(
+                        "H.02",
+                        f"Заголовок 2 уровня «{text}» не выделен полужирным",
+                        section.id,
+                        suggestion="Сделать заголовок полужирным",
+                    )
+                )
+
+    return violations
+
+
 @register("H.03")
 def check_heading_number_no_trailing_dot(
     document: Document, profile: Profile
@@ -372,6 +445,7 @@ def _violation(
 __all__ = [
     "all_logical_sections",
     "check_heading_1_format",
+    "check_heading_2_format",
     "check_heading_hierarchy",
     "check_heading_no_terminal_punctuation",
     "check_heading_number_no_trailing_dot",
