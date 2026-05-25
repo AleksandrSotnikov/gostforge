@@ -230,6 +230,60 @@ def test_i03_caption_in_nested_section() -> None:
     assert found[0].details["figure_id"] == "fig-deep"
 
 
+# --- I.04 (подпись выровнена по центру, шрифт 12pt) ---------------------
+
+
+def test_i04_registered() -> None:
+    assert "I.04" in registered_checks()
+
+
+def test_i04_correct_size_no_violation() -> None:
+    """Подпись 12pt — нарушения нет."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема", size_pt=12)],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.04"]
+    assert found == []
+
+
+def test_i04_wrong_size_violation() -> None:
+    """Подпись 14pt — нарушение (ожидается 12pt)."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема", size_pt=14)],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.04"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert found[0].details["found"] == "14"
+
+
+def test_i04_unset_size_no_violation() -> None:
+    """Если size_pt у TextRun не задан — нарушения нет (наследуется)."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.04"]
+    assert found == []
+
+
+def test_i04_empty_caption_skipped() -> None:
+    """Пустая подпись — это случай I.01."""
+    figure = Figure(id="fig-1", caption=[])
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.04"]
+    assert found == []
+
+
 # --- I.05 (сквозная нумерация рисунков) ---------------------------------
 
 

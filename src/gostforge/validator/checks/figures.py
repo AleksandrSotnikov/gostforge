@@ -153,6 +153,77 @@ def check_figure_caption_format(
     return violations
 
 
+_SIZE_TOLERANCE_PT = 0.1
+
+
+@register("I.04")
+def check_figure_caption_style(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Подпись рисунка должна быть нужного кегля (и центрирована).
+
+    Параметры (`profile.checks["I.04"].params`):
+    - `caption_size_pt: float = 12` — ожидаемый кегль подписи.
+    - `caption_alignment: str = "center"` — ожидаемое выравнивание
+      (на Фазе 2 не проверяется: caption — это `list[InlineElement]`,
+      у которого нет alignment; TODO — связать caption с Paragraph).
+
+    Логика для каждой Figure:
+    - Пустая подпись пропускается (это случай I.01).
+    - Для каждого непустого TextRun: если у него задан `size_pt` и он
+      отличается от `caption_size_pt` — Violation (warning).
+    """
+    config = profile.checks.get("I.04")
+    expected_size: float = 12.0
+    if config and config.params.get("caption_size_pt") is not None:
+        expected_size = float(config.params["caption_size_pt"])
+
+    violations: list[Violation] = []
+    for page_section, figure in _all_figures(document):
+        if not _has_text(figure.caption):
+            # Пустая подпись — I.01, не дублируем.
+            continue
+
+        seen_sizes: set[float] = set()
+        for element in figure.caption:
+            if not isinstance(element, TextRun):
+                continue
+            if not element.text or not element.text.strip():
+                continue
+            if element.size_pt is None:
+                continue
+            if (
+                abs(element.size_pt - expected_size) > _SIZE_TOLERANCE_PT
+                and element.size_pt not in seen_sizes
+            ):
+                seen_sizes.add(element.size_pt)
+                violations.append(
+                    Violation(
+                        check_code="I.04",
+                        severity="warning",
+                        message=(
+                            f"Подпись рисунка «{figure.id}» имеет кегль "
+                            f"{element.size_pt} pt вместо ожидаемых "
+                            f"{expected_size} pt"
+                        ),
+                        location=(
+                            f"page_sections.{page_section.id}.figure[{figure.id}]"
+                        ),
+                        suggestion=(
+                            f"Использовать кегль {expected_size} pt для подписи "
+                            f"рисунка"
+                        ),
+                        details={
+                            "figure_id": figure.id,
+                            "expected": str(expected_size),
+                            "found": str(element.size_pt),
+                        },
+                    )
+                )
+
+    return violations
+
+
 # Извлечь номер из подписи рисунка: «Рисунок 1 — Название», «Рис. 2», «Рис 3».
 _FIGURE_NUMBER_RE = re.compile(r"^Рис(?:унок)?\.?\s+(\d+)")
 
@@ -329,6 +400,7 @@ def check_figure_referenced_in_text(
 __all__ = [
     "check_figure_caption_below",
     "check_figure_caption_format",
+    "check_figure_caption_style",
     "check_figure_has_caption",
     "check_figure_numbering_continuous",
     "check_figure_referenced_in_text",

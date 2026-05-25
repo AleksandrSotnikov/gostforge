@@ -149,6 +149,7 @@ checks:
   I.01: {enabled: true}
   I.02: {enabled: true}
   I.03: {enabled: true, params: {allow_dot_after_number: false}}
+  I.04: {enabled: true, params: {caption_size_pt: 12, caption_alignment: center}}
   I.05: {enabled: true}
   I.06: {enabled: true}
   B.01: {enabled: true}
