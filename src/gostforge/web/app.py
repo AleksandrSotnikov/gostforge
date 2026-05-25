@@ -32,10 +32,12 @@ from gostforge import __version__
 from gostforge.cli import _write_markdown_report, _write_xlsx_report
 from gostforge.parser import parse_docx
 from gostforge.profile import list_profiles, load_profile
+from gostforge.stats import compute_stats
 from gostforge.validator import Violation, validate
 from gostforge.validator.engine import registered_checks
 
 if TYPE_CHECKING:
+    from gostforge.model import Document
     from gostforge.profile import Profile
 
 
@@ -53,13 +55,42 @@ def _violations_to_rows(violations: list[Violation]) -> list[dict[str, str]]:
     ]
 
 
-def _process_file(uploaded_file: Any, profile: Profile) -> list[Violation]:
-    """Сохранить загруженный файл во временный путь, распарсить и проверить."""
+def _process_file(uploaded_file: Any, profile: Profile) -> tuple[Document, list[Violation]]:
+    """Сохранить загруженный файл во временный путь, распарсить и проверить.
+
+    Возвращает кортеж (Document, violations) — модель нужна для вкладки
+    «Статистика», violations — для вкладки «Проверка».
+    """
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         tmp.write(uploaded_file.getvalue())
         tmp_path = Path(tmp.name)
     document = parse_docx(tmp_path)
-    return validate(document, profile)
+    return document, validate(document, profile)
+
+
+def _render_stats_table(name: str, document: Document) -> None:
+    """Вкладка «Статистика» — числовые метрики структуры документа."""
+    st.subheader(name)
+    s = compute_stats(document)
+    rows = [
+        ("Секций вёрстки", s.page_sections),
+        ("Разделов 1 уровня", s.logical_sections_level_1),
+        ("Разделов всего", s.logical_sections_total),
+        ("Параграфов всего", s.paragraphs),
+        ("  …непустых", s.paragraphs_non_empty),
+        ("Таблиц", s.tables),
+        ("Рисунков", s.figures),
+        ("Источников", s.bibliography_entries),
+        ("Слов", s.words),
+        ("Символов", s.characters),
+    ]
+    try:
+        import pandas as pd  # type: ignore[import-untyped]
+
+        df: Any = pd.DataFrame(rows, columns=["Показатель", "Значение"])
+    except ImportError:  # pragma: no cover
+        df = [{"Показатель": k, "Значение": v} for k, v in rows]
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 def _build_report_bytes(
@@ -162,20 +193,32 @@ def _render_main(profile_id: str) -> None:
         return
 
     prof = load_profile(profile_id)
+    documents: dict[str, Document] = {}
     results: dict[str, list[Violation]] = {}
 
     for uf in uploaded:
         try:
-            violations = _process_file(uf, prof)
+            document, violations = _process_file(uf, prof)
         except Exception as e:
             st.error(f"Не удалось обработать «{uf.name}»: {e}")
             continue
+        documents[uf.name] = document
         results[uf.name] = violations
-        _render_file_result(uf.name, violations)
-        st.divider()
 
     if not results:
         return
+
+    tab_check, tab_stats = st.tabs(["Проверка", "Статистика"])
+
+    with tab_check:
+        for name, violations in results.items():
+            _render_file_result(name, violations)
+            st.divider()
+
+    with tab_stats:
+        for name, document in documents.items():
+            _render_stats_table(name, document)
+            st.divider()
 
     total = sum(len(v) for v in results.values())
     st.markdown(
