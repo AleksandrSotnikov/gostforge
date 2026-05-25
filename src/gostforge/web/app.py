@@ -537,7 +537,14 @@ def render() -> None:
     )
 
     if mode == "Конструктор":
-        _render_builder_mode()
+        # Новый интерактивный редактор (Фаза 2). Старый _render_builder_mode
+        # с генерацией болванки по шаблону сохранён в этом модуле для
+        # обратной совместимости и доступен напрямую через
+        # ``_render_builder_mode()`` — кнопка «Загрузить шаблон» внутри
+        # интерактивного редактора покрывает тот же сценарий.
+        from gostforge.web.builder_editor import render_interactive_builder
+
+        render_interactive_builder()
     else:
         profile_id = _render_sidebar(profiles)
         _render_main(profile_id)
