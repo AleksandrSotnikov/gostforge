@@ -135,4 +135,97 @@ def check_figure_caption_format(
     return violations
 
 
-__all__ = ["check_figure_caption_format", "check_figure_has_caption"]
+# Извлечь номер из подписи рисунка: «Рисунок 1 — Название», «Рис. 2», «Рис 3».
+_FIGURE_NUMBER_RE = re.compile(r"^Рис(?:унок)?\.?\s+(\d+)")
+
+
+@register("I.05")
+def check_figure_numbering_continuous(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """Сквозная нумерация рисунков: номера должны идти 1, 2, 3, ...
+
+    Извлекает номер из caption по regex `^Рис(?:унок)?\\.?\\s+(\\d+)`.
+    Пустые подписи пропускаются (это случай I.01).
+
+    Возможные нарушения:
+    - пропуск: после рисунка N ожидается N+1, найден M (M > N+1)
+    - дубликат: один и тот же номер встречается у двух рисунков
+    """
+    violations: list[Violation] = []
+    numbered: list[tuple[Figure, int]] = []
+    for _ps, figure in _all_figures(document):
+        text = _caption_text(figure.caption)
+        if not text:
+            continue
+        match = _FIGURE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            numbered.append((figure, int(match.group(1))))
+        except ValueError:
+            continue
+
+    if not numbered:
+        return violations
+
+    seen: dict[int, Figure] = {}
+    expected = 1
+    for figure, num in numbered:
+        if num in seen:
+            previous = seen[num]
+            violations.append(
+                Violation(
+                    check_code="I.05",
+                    severity="error",
+                    message=(
+                        f"Номер {num} встречается у двух рисунков: "
+                        f"«{previous.id}» и «{figure.id}»"
+                    ),
+                    location=f"figure[{figure.id}]",
+                    suggestion=(
+                        f"Перенумеровать рисунки так, чтобы каждый имел "
+                        f"уникальный сквозной номер"
+                    ),
+                    details={
+                        "figure_id": figure.id,
+                        "duplicate_of": previous.id,
+                        "number": str(num),
+                    },
+                )
+            )
+            continue
+        seen[num] = figure
+        if num != expected:
+            violations.append(
+                Violation(
+                    check_code="I.05",
+                    severity="error",
+                    message=(
+                        f"После рисунка {expected - 1} ожидается рисунок "
+                        f"{expected}, найдено {num}"
+                    ),
+                    location=f"figure[{figure.id}]",
+                    suggestion=(
+                        f"Перенумеровать рисунок: «Рисунок {expected}» вместо "
+                        f"«Рисунок {num}»"
+                    ),
+                    details={
+                        "figure_id": figure.id,
+                        "expected": str(expected),
+                        "found": str(num),
+                    },
+                )
+            )
+            expected = num + 1
+        else:
+            expected += 1
+
+    return violations
+
+
+__all__ = [
+    "check_figure_caption_format",
+    "check_figure_has_caption",
+    "check_figure_numbering_continuous",
+]

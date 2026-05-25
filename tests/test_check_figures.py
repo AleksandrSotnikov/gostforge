@@ -212,3 +212,100 @@ def test_i03_caption_in_nested_section() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
     assert len(found) == 1
     assert found[0].details["figure_id"] == "fig-deep"
+
+
+# --- I.05 (сквозная нумерация рисунков) ---------------------------------
+
+
+def test_i05_registered() -> None:
+    assert "I.05" in registered_checks()
+
+
+def test_i05_continuous_numbering_no_violation() -> None:
+    """Рисунки 1, 2, 3 — нарушения нет."""
+    figs = [
+        Figure(id=f"f-{i}", caption=[TextRun(text=f"Рисунок {i} — Имя {i}")])
+        for i in (1, 2, 3)
+    ]
+    doc = _doc_with_content(list(figs))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.05"]
+    assert found == []
+
+
+def test_i05_gap_in_numbering_violation() -> None:
+    """Рисунки 1, 3 — пропуск второго номера."""
+    figs = [
+        Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — A")]),
+        Figure(id="f-3", caption=[TextRun(text="Рисунок 3 — C")]),
+    ]
+    doc = _doc_with_content(list(figs))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.05"]
+    assert len(found) == 1
+    assert found[0].details["expected"] == "2"
+    assert found[0].details["found"] == "3"
+
+
+def test_i05_duplicate_number_violation() -> None:
+    """Два рисунка с номером 1 — нарушение «дубликат»."""
+    figs = [
+        Figure(id="f-a", caption=[TextRun(text="Рисунок 1 — A")]),
+        Figure(id="f-b", caption=[TextRun(text="Рисунок 1 — B")]),
+    ]
+    doc = _doc_with_content(list(figs))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.05"]
+    assert len(found) == 1
+    assert "встречается у двух" in found[0].message
+    assert found[0].details["duplicate_of"] == "f-a"
+
+
+def test_i05_starts_not_from_one_violation() -> None:
+    """Первый рисунок — 2, должно быть 1."""
+    figs = [
+        Figure(id="f-2", caption=[TextRun(text="Рисунок 2 — B")]),
+        Figure(id="f-3", caption=[TextRun(text="Рисунок 3 — C")]),
+    ]
+    doc = _doc_with_content(list(figs))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.05"]
+    assert any(v.details.get("expected") == "1" for v in found)
+
+
+def test_i05_empty_caption_skipped() -> None:
+    """Пустые подписи — это случай I.01, не учитываются в I.05."""
+    figs = [
+        Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — A")]),
+        Figure(id="f-2", caption=[]),  # пустая, не считается
+        Figure(id="f-2b", caption=[TextRun(text="Рисунок 2 — B")]),
+    ]
+    doc = _doc_with_content(list(figs))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.05"]
+    assert found == []
+
+
+def test_i05_nested_logical_sections() -> None:
+    """Рисунки во вложенных секциях тоже участвуют в сквозной нумерации."""
+    fig1 = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — A")])
+    fig3 = Figure(id="f-3", caption=[TextRun(text="Рисунок 3 — C")])
+    inner = LogicalSection(
+        id="sec-2", level=2, heading=[TextRun(text="Sub")], children=[fig3]
+    )
+    outer = LogicalSection(
+        id="sec-1", level=1, heading=[TextRun(text="Main")], children=[fig1, inner]
+    )
+    doc = _doc_with_content([outer])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.05"]
+    assert len(found) == 1
+    assert found[0].details["found"] == "3"
+
+
+def test_i05_no_figures_no_violation() -> None:
+    """Документ без рисунков — нет нарушений."""
+    doc = _doc_with_content([])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.05"]
+    assert found == []
