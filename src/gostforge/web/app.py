@@ -39,6 +39,7 @@ from gostforge.exporter import export_docx
 from gostforge.fixer import fix as run_fix
 from gostforge.fixer.engine import registered_fixers
 from gostforge.parser import parse_docx
+from gostforge.pdf_exporter import LibreOfficeNotFoundError, convert_to_pdf
 from gostforge.profile import list_profiles, load_profile
 from gostforge.stats import compute_stats
 from gostforge.validator import Violation, validate
@@ -89,6 +90,22 @@ def _build_fixed_docx_bytes(document: Document, profile: Profile) -> tuple[bytes
     data = out_path.read_bytes()
     codes = [fa.fixer_code for fa in fixes_applied]
     return data, codes
+
+
+def _build_pdf_bytes(uploaded_file: Any) -> bytes:
+    """Сконвертировать загруженный .docx → .pdf и вернуть байты результата.
+
+    Сохраняем загруженный файл во временный путь (LibreOffice читает с
+    диска, а не из памяти) и вызываем :func:`convert_to_pdf`. Может
+    поднять :class:`LibreOfficeNotFoundError`, ``subprocess.CalledProcessError``,
+    ``subprocess.TimeoutExpired`` — обрабатываем вызывающим кодом.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+        tmp.write(uploaded_file.getvalue())
+        docx_path = Path(tmp.name)
+    pdf_path = docx_path.with_suffix(".pdf")
+    convert_to_pdf(docx_path, pdf_path)
+    return pdf_path.read_bytes()
 
 
 def _render_stats_table(name: str, document: Document) -> None:
@@ -194,6 +211,54 @@ def _render_file_result(name: str, violations: list[Violation]) -> None:
             st.markdown(f"- **{v.check_code}** — `{loc}`")
 
 
+def _render_pdf_tab(uploads: dict[str, Any]) -> None:
+    """Вкладка «PDF» — конвертация загруженных .docx → .pdf через LibreOffice.
+
+    Для каждого файла предлагается кнопка «Сгенерировать PDF». Сама
+    конвертация запускается только по клику (LibreOffice стартует
+    ~2 секунды — лениво экономим время загрузки страницы). При успехе
+    показываем download_button с байтами .pdf. Если LibreOffice не
+    установлен — выводим единичный warning сверху и не показываем кнопки.
+    """
+    # Проверяем доступность LibreOffice один раз — если его нет, нет
+    # смысла рисовать кнопки конвертации.
+    try:
+        from gostforge.pdf_exporter import _find_soffice
+
+        _find_soffice()
+    except LibreOfficeNotFoundError:
+        st.warning(
+            "LibreOffice не установлен, PDF недоступен. "
+            "Установите libreoffice (Ubuntu/Debian: sudo apt install libreoffice; "
+            "macOS: brew install --cask libreoffice) и перезапустите gostforge."
+        )
+        return
+
+    st.caption(
+        "Конвертация выполняется через LibreOffice headless. "
+        "Полезно для генерации финальной PDF-версии работы после автофиксов."
+    )
+
+    for name, uf in uploads.items():
+        st.subheader(name)
+        stem = Path(name).stem or "document"
+        if st.button(f"Сгенерировать PDF «{name}»", key=f"gen_pdf_{name}"):
+            try:
+                pdf_bytes = _build_pdf_bytes(uf)
+            except Exception as e:
+                st.error(f"Не удалось сконвертировать «{name}» в PDF: {e}")
+                continue
+            st.success("PDF готов — нажмите «Скачать».")
+            st.download_button(
+                f"Скачать PDF «{name}»",
+                data=pdf_bytes,
+                file_name=f"{stem}.pdf",
+                mime="application/pdf",
+                key=f"download_pdf_{name}",
+            )
+        st.divider()
+
+
 def _render_main(profile_id: str) -> None:
     """Главная область — загрузка файлов и результаты."""
     st.title("gostforge — нормоконтроль .docx по ГОСТ")
@@ -218,6 +283,7 @@ def _render_main(profile_id: str) -> None:
     prof = load_profile(profile_id)
     documents: dict[str, Document] = {}
     results: dict[str, list[Violation]] = {}
+    uploads: dict[str, Any] = {}
 
     for uf in uploaded:
         try:
@@ -227,11 +293,14 @@ def _render_main(profile_id: str) -> None:
             continue
         documents[uf.name] = document
         results[uf.name] = violations
+        uploads[uf.name] = uf
 
     if not results:
         return
 
-    tab_check, tab_stats, tab_fix = st.tabs(["Проверка", "Статистика", "Автоисправление"])
+    tab_check, tab_stats, tab_fix, tab_pdf = st.tabs(
+        ["Проверка", "Статистика", "Автоисправление", "PDF"]
+    )
 
     with tab_check:
         for name, violations in results.items():
@@ -273,6 +342,9 @@ def _render_main(profile_id: str) -> None:
                 key=f"download_fixed_{name}",
             )
             st.divider()
+
+    with tab_pdf:
+        _render_pdf_tab(uploads)
 
     total = sum(len(v) for v in results.values())
     st.markdown(
