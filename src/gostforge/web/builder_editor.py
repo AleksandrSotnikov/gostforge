@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -613,11 +614,44 @@ def _render_section_tree() -> None:
 def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
     """Кнопки сохранения/загрузки JSON в sidebar.
 
-    На текущем этапе — заглушка. Включается в отдельном коммите вместе
-    с парой ``json.dumps`` / ``json.loads``.
+    Студент может выгрузить текущий ``builder_state`` в .json и
+    позже загрузить его обратно через file_uploader — это позволяет
+    делать перерывы в работе без потери прогресса.
+
+    Безопасность: JSON, который не является объектом с ключом
+    ``sections``, отклоняется с понятной ошибкой.
     """
-    _ = state  # пометка: state будет использован в коммите с save/load
-    return
+    st.sidebar.divider()
+    st.sidebar.subheader("Сохранение / загрузка")
+
+    # Скачать текущий state как JSON.
+    state_json = json.dumps(state, ensure_ascii=False, indent=2)
+    st.sidebar.download_button(
+        "Скачать сохранение (.json)",
+        data=state_json.encode("utf-8"),
+        file_name="gostforge-builder-state.json",
+        mime="application/json",
+        key="builder_state_download",
+    )
+
+    # Загрузить state из JSON.
+    uploaded = st.sidebar.file_uploader(
+        "Загрузить сохранение (.json)",
+        type=["json"],
+        key="builder_state_upload",
+    )
+    if uploaded is not None:
+        try:
+            new_state = json.loads(uploaded.getvalue().decode("utf-8"))
+        except Exception as exc:  # pragma: no cover - UI feedback
+            st.sidebar.error(f"Не удалось прочитать JSON: {exc}")
+        else:
+            if isinstance(new_state, dict) and "sections" in new_state:
+                st.session_state["builder_state"] = new_state
+                st.sidebar.success("Состояние загружено")
+                st.rerun()
+            else:
+                st.sidebar.error("В JSON отсутствует ключ 'sections'")
 
 
 def _delete_section(idx: int) -> None:

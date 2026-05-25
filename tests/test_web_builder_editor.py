@@ -333,6 +333,26 @@ def test_build_skips_empty_table_and_list() -> None:
     assert data[:2] == b"PK"
 
 
+def test_state_round_trip_via_json() -> None:
+    """state → json.dumps → json.loads → _build_document_from_state не падает.
+
+    Покрывает функциональность «Скачать сохранение / Загрузить
+    сохранение» — JSON-сериализация state должна быть обратимой.
+    """
+    import json
+
+    state = _default_state()
+    state["title"] = "Тест round-trip"
+    state["sections"][0]["blocks"].append(
+        {"kind": "paragraph", "text": "Текст параграфа."}
+    )
+    blob = json.dumps(state, ensure_ascii=False).encode("utf-8")
+    restored = json.loads(blob.decode("utf-8"))
+    assert restored == state
+    data = _build_document_from_state(restored)
+    assert data[:2] == b"PK"
+
+
 def test_document_to_state_extracts_bibliography_references() -> None:
     """Раздел «Список ...» в Document превращается в references, не blocks."""
     builder = coursework_template(title="К", author="A", year=2026)
