@@ -1,6 +1,6 @@
-# ruff: noqa: RUF001, RUF002
+# ruff: noqa: RUF001, RUF002, RUF003
 
-"""Тесты S.01, S.02, S.06, S.07 — структура работы."""
+"""Тесты S.01, S.02, S.03, S.04, S.05, S.06, S.07, S.08 — структура работы."""
 
 from gostforge.model import (
     Document,
@@ -489,3 +489,72 @@ def test_s07_section_with_nested_subsection_not_empty() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "S.07"]
     assert found == []
+
+
+# --- S.03 -------------------------------------------------------------------
+
+
+def test_s03_registered() -> None:
+    assert "S.03" in registered_checks()
+
+
+def test_s03_known_headings_no_violation() -> None:
+    """Ожидаемые заголовки и «Глава N» / «Приложение Х» — нарушений нет."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("Глава 1"),
+            _heading("Глава 2"),
+            _heading("Заключение"),
+            _heading("Список использованных источников"),
+            _heading("Приложение А"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.03"]
+    assert found == []
+
+
+def test_s03_unknown_heading_violation() -> None:
+    """Произвольное название раздела — Violation с severity=warning."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("Моя собственная штука"),
+            _heading("Заключение"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.03"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "Моя собственная штука" in found[0].message
+
+
+def test_s03_alias_is_accepted() -> None:
+    """«Список литературы» — алиас «Список использованных источников»."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("Заключение"),
+            _heading("Список литературы"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.03"]
+    assert found == []
+
+
+def test_s03_custom_expected_via_params() -> None:
+    """Пользовательский expected_headings перекрывает дефолт."""
+    doc = _doc([_heading("Введение"), _heading("Что-то ещё")])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["S.03"].params["expected_headings"] = ["Что-то ещё"]
+    found = [v for v in validate(doc, profile) if v.check_code == "S.03"]
+    # «Введение» больше не входит в expected, но «Что-то ещё» — входит.
+    # Должно быть ровно одно нарушение (про «Введение»).
+    # Но «Введение» — не «Глава N» и не «Приложение Х», так что violation.
+    assert len(found) == 1
+    assert "Введение" in found[0].message
+
+
