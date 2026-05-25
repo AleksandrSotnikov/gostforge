@@ -216,3 +216,101 @@ def test_h08_traverses_nested_sections() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "H.08"]
     assert len(found) == 1
     assert "Подраздел." in found[0].message
+
+
+# --- H.04 (нумерация заголовков без пропусков) ----------------------------
+
+
+def test_h04_registered() -> None:
+    assert "H.04" in registered_checks()
+
+
+def test_h04_no_numbering_no_violation() -> None:
+    """Если ни один заголовок 1 уровня не нумерован — проверка пропускает."""
+    doc = _doc([_heading("Введение"), _heading("Заключение")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.04"]
+    assert found == []
+
+
+def test_h04_continuous_numbering_no_violation() -> None:
+    doc = _doc(
+        [
+            _heading("1 Анализ"),
+            _heading("2 Проектирование"),
+            _heading("3 Реализация"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.04"]
+    assert found == []
+
+
+def test_h04_gap_in_numbering_violation() -> None:
+    doc = _doc(
+        [
+            _heading("1 Анализ"),
+            _heading("3 Реализация"),  # пропущена 2
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.04"]
+    assert len(found) == 1
+    assert found[0].details["expected"] == "2"
+    assert found[0].details["found"] == "3"
+
+
+def test_h04_starts_not_from_one_violation() -> None:
+    """Первый раздел — «2», должен быть «1»."""
+    doc = _doc([_heading("2 Анализ"), _heading("3 Реализация")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.04"]
+    assert len(found) == 1
+    assert found[0].details["expected"] == "1"
+
+
+def test_h04_mixed_numbering_warning() -> None:
+    """Часть нумерованы, часть — нет — warning."""
+    doc = _doc(
+        [
+            _heading("Введение"),  # без номера
+            _heading("1 Анализ"),
+            _heading("Заключение"),  # без номера
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.04"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "единый стиль" in found[0].message
+
+
+def test_h04_dotted_number_recognized() -> None:
+    """«1. Введение» — номер 1 распознаётся (для целей H.04)."""
+    doc = _doc(
+        [
+            _heading("1. Анализ"),
+            _heading("2. Проектирование"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.04"]
+    assert found == []
+
+
+def test_h04_sublevels_ignored() -> None:
+    """Подуровни (level=2 и ниже) на H.04 не влияют."""
+    inner1 = _heading("1.1 Подраздел", level=2)
+    inner2 = _heading("1.2 Подраздел", level=2)
+    outer1 = LogicalSection(
+        id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[inner1, inner2]
+    )
+    outer2 = LogicalSection(
+        id="o2", level=1, heading=[TextRun(text="2 Проект")]
+    )
+    doc = _doc([outer1, outer2])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.04"]
+    assert found == []
+
+

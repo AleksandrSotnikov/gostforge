@@ -27,6 +27,10 @@ _SIZE_TOLERANCE_PT = 0.1
 # Группа 1 — сам номер (1, 1.2, 1.2.3), группа 2 — точка после.
 _NUMBER_WITH_DOT = re.compile(r"^(\d+(?:\.\d+)*)(\.)\s")
 
+# Шаблон для извлечения верхнего номера раздела (без подуровней),
+# например «1 Введение» → 1, «1.2 Анализ» → 1, «1. Введение» → 1.
+_LEADING_NUMBER = re.compile(r"^(\d+)(?:\.\d+)*\.?\s")
+
 
 def _heading_text(content: Sequence[InlineElement]) -> str:
     return "".join(el.text for el in content if isinstance(el, TextRun))
@@ -207,6 +211,100 @@ def check_heading_no_terminal_punctuation(
     return violations
 
 
+@register("H.04")
+def check_heading_numbering_continuous(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Нумерация разделов 1 уровня не должна иметь пропусков.
+
+    Семантика (Фаза 1):
+    - Берутся все LogicalSection level==1 в порядке появления.
+    - Если ни один не нумерован — проверка ничего не делает.
+    - Если ВСЕ нумерованы — проверяется последовательность 1, 2, 3, ...
+      На первый «выпадающий» номер — Violation (severity=error).
+    - Граничный случай (часть нумерованы, часть — нет) — Violation
+      severity=warning «используйте единый стиль».
+    """
+    violations: list[Violation] = []
+    level1: list[LogicalSection] = []
+    for ps in document.page_sections:
+        level1.extend(s for s in iter_logical_sections(ps.content) if s.level == 1)
+
+    if not level1:
+        return violations
+
+    numbered: list[tuple[LogicalSection, int]] = []
+    unnumbered: list[LogicalSection] = []
+    for section in level1:
+        text = _heading_text(section.heading).lstrip()
+        match = _LEADING_NUMBER.match(text)
+        if match:
+            try:
+                numbered.append((section, int(match.group(1))))
+            except ValueError:
+                unnumbered.append(section)
+        else:
+            unnumbered.append(section)
+
+    if not numbered:
+        # Никто не нумерован — валидный сценарий (нумерации нет).
+        return violations
+
+    if unnumbered:
+        # Смешанный стиль — мягкое предупреждение.
+        first_un = unnumbered[0]
+        first_num_text = _heading_text(numbered[0][0].heading).strip()
+        violations.append(
+            Violation(
+                check_code="H.04",
+                severity="warning",
+                message=(
+                    f"Часть заголовков 1 уровня нумерованы, часть — нет; "
+                    f"используйте единый стиль (например, «{_heading_text(first_un.heading).strip()}» "
+                    f"без номера, а «{first_num_text}» — с номером)"
+                ),
+                location=f"page_sections.*.logical_section[{first_un.id}]",
+                suggestion=(
+                    "Принять единый стиль: либо нумеровать все разделы 1 уровня, "
+                    "либо ни один"
+                ),
+                details={"section_id": first_un.id},
+            )
+        )
+        return violations
+
+    # Все нумерованы — проверяем 1, 2, 3, ...
+    expected = 1
+    for section, num in numbered:
+        if num != expected:
+            heading = _heading_text(section.heading).strip()
+            violations.append(
+                Violation(
+                    check_code="H.04",
+                    severity="error",
+                    message=(
+                        f"Нумерация разделов нарушена: после {expected - 1} "
+                        f"ожидается {expected}, найдено {num} (заголовок «{heading}»)"
+                    ),
+                    location=f"page_sections.*.logical_section[{section.id}]",
+                    suggestion=(
+                        f"Перенумеровать раздел: «{expected} ...» вместо «{num} ...»"
+                    ),
+                    details={
+                        "section_id": section.id,
+                        "expected": str(expected),
+                        "found": str(num),
+                    },
+                )
+            )
+            # Остановимся на первом выпадающем — дальше всё равно сместится.
+            break
+        expected += 1
+
+    return violations
+
+
 def _violation(
     code: str,
     message: str,
@@ -230,5 +328,6 @@ __all__ = [
     "check_heading_1_format",
     "check_heading_no_terminal_punctuation",
     "check_heading_number_no_trailing_dot",
+    "check_heading_numbering_continuous",
     "iter_logical_sections",
 ]
