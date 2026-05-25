@@ -455,3 +455,70 @@ def test_r03_unknown_type_skipped() -> None:
         ]
     )
     assert _violations(doc, profile, "R.03") == []
+
+
+# --- R.08 — дата обращения для электронных ------------------------------
+
+
+def test_r08_registered() -> None:
+    assert "R.08" in registered_checks()
+
+
+def test_r08_web_with_access_date_no_violation() -> None:
+    """У web-записи есть access_date — нарушения нет."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"url": "https://example.org", "access_date": "01.05.2023"},
+                type_="web",
+            ),
+        ]
+    )
+    assert _violations(doc, profile, "R.08") == []
+
+
+def test_r08_web_without_access_date_violation() -> None:
+    """У web-записи нет access_date — Violation."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"url": "https://example.org"},
+                type_="web",
+            ),
+        ]
+    )
+    found = _violations(doc, profile, "R.08")
+    assert len(found) == 1
+    assert found[0].severity == "error"
+    assert found[0].details["entry_id"] == "ref-1"
+
+
+def test_r08_article_with_url_without_access_date_violation() -> None:
+    """У статьи с url, но без access_date — тоже Violation R.08."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"url": "https://example.org", "year": "2022"},
+                type_="article",
+            ),
+        ]
+    )
+    found = _violations(doc, profile, "R.08")
+    assert len(found) == 1
+
+
+def test_r08_book_without_url_no_violation() -> None:
+    """Книга без url — R.08 не применяется."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {"year": "2020"}, type_="book"),
+        ]
+    )
+    assert _violations(doc, profile, "R.08") == []

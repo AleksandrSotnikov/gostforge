@@ -569,7 +569,51 @@ def check_required_fields_by_type(document: Document, profile: Profile) -> list[
     return violations
 
 
+# --- R.08 — дата обращения для электронных ------------------------------
+
+
+@register("R.08")
+def check_access_date_for_web(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Электронные ресурсы должны содержать дату обращения.
+
+    Запись считается электронной, если её type == "web" или в полях есть
+    url (например, у статьи с DOI и онлайн-версией). Отсутствие
+    `access_date` — error.
+    """
+    violations: list[Violation] = []
+    for entry in document.bibliography:
+        is_web = entry.type == "web" or "url" in entry.fields
+        if not is_web:
+            continue
+        if entry.fields.get("access_date"):
+            continue
+        violations.append(
+            Violation(
+                check_code="R.08",
+                severity="error",
+                message=(
+                    f"Запись {entry.id} (электронный ресурс) не содержит "
+                    "даты обращения"
+                ),
+                location=f"bibliography[{entry.id}]",
+                suggestion=(
+                    "Добавить «(дата обращения: ДД.ММ.ГГГГ)» после URL "
+                    "по ГОСТ Р 7.0.100-2018"
+                ),
+                details={
+                    "entry_id": entry.id,
+                    "entry_type": entry.type,
+                },
+            )
+        )
+    return violations
+
+
 __all__ = [
+    "check_access_date_for_web",
     "check_bibliography_format",
     "check_bibliography_order",
     "check_citations_have_pages",
