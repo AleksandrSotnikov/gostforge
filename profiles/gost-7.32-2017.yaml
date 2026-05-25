@@ -126,8 +126,18 @@ checks:
   T.13: {enabled: true}
   S.01: {enabled: true}
   S.02: {enabled: true}
+  S.03: {enabled: true}
+  S.04:
+    enabled: true
+    params:
+      required_elements: [актуальность, цель, задач, объект, предмет]
+  S.05:
+    enabled: true
+    params:
+      min_paragraphs: 3
   S.06: {enabled: true, params: {required_for_level: 1}}
   S.07: {enabled: true}
+  S.08: {enabled: true}
   H.01: {enabled: true}
   H.02: {enabled: true}
   H.03: {enabled: true}
@@ -157,8 +167,48 @@ checks:
   C.01: {enabled: true}
   C.02: {enabled: true}
   C.04: {enabled: true}
-  P.01: {enabled: true}
+  P.01:
+    enabled: true
+    params:
+      forbidden_letters: [Ё, З, Й, О, Ч, Ь, Ъ, Ы]
+  A.01:
+    enabled: true
+    params:
+      known_abbreviations: []
   P.03: {enabled: true}
   K.01: {enabled: true}
   K.02: {enabled: true}
-  K.03: {enabled: true}
+  K.03: {enabled: true, params: {expected_start_value: 3}}
+  K.04: {enabled: true, params: {allow_restart_in_appendix: false}}
+  K.05: {enabled: true}
+  K.06:
+    enabled: true
+    params:
+      exclude_types: []
+  M.01: {enabled: true, params: {required: false}}
+  M.03: {enabled: true}
+  M.04: {enabled: true}
+  L.01: {enabled: true, params: {allowed_markers: ["•", "-", "–"]}}
+  L.02: {enabled: true}
+  L.03: {enabled: true}
+  L.04: {enabled: true}
+  M.02: {enabled: true}
+  M.05: {enabled: true}
+  V.01:
+    enabled: true
+    params:
+      min_pages: 25
+      max_pages: 50
+      words_per_page: 250
+  V.02:
+    enabled: true
+    params:
+      intro_min_words: 800
+      intro_max_words: 1500
+      conclusion_min_words: 500
+      conclusion_max_words: 1200
+  V.03: {enabled: true}
+  V.04: {enabled: true, params: {min_figures_per_10_pages: 1, min_tables_per_10_pages: 1}}
+  X.01: {enabled: true}
+  X.02: {enabled: true}
+  X.03: {enabled: true}

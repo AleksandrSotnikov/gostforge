@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
 
 from gostforge.model import (
@@ -306,8 +307,7 @@ def check_sections_order(document: Document, profile: Profile) -> list[Violation
                 message=msg,
                 location=f"page_sections.*.logical_section[{section.id}]",
                 suggestion=(
-                    "Расположите разделы в порядке, предусмотренном ГОСТ: "
-                    + " → ".join(expected)
+                    "Расположите разделы в порядке, предусмотренном ГОСТ: " + " → ".join(expected)
                 ),
                 details={
                     "section_id": section.id,
@@ -328,16 +328,12 @@ def _is_section_empty(section: LogicalSection) -> bool:
       иных блоков (Table/Figure/LogicalSection).
     """
     meaningful_children = [
-        c
-        for c in section.children
-        if isinstance(c, (Paragraph, Table, Figure, LogicalSection))
+        c for c in section.children if isinstance(c, (Paragraph, Table, Figure, LogicalSection))
     ]
     if not meaningful_children:
         return True
 
-    has_other = any(
-        isinstance(c, (Table, Figure, LogicalSection)) for c in meaningful_children
-    )
+    has_other = any(isinstance(c, (Table, Figure, LogicalSection)) for c in meaningful_children)
     if has_other:
         return False
 
@@ -389,9 +385,302 @@ def check_no_empty_sections(
     return violations
 
 
+# --- S.03 — названия разделов соответствуют профилю ------------------------
+
+# Регулярки для «допустимых» названий разделов, помимо явных expected:
+# - «Глава 1», «Глава 2», ...
+# - «Приложение А», «Приложение 1», «Приложение Б», ...
+_GENERIC_CHAPTER = re.compile(r"^глава\s+\S+", re.IGNORECASE)
+_GENERIC_APPENDIX = re.compile(r"^приложение(\s+\S+)?", re.IGNORECASE)
+
+
+def _default_s03_expected(profile: Profile) -> list[str]:
+    """Если у S.03 нет своего expected_headings — берём из S.01 + S.02.
+
+    Приоритет:
+    1. checks.S.03.params.expected_headings (если задан).
+    2. checks.S.01.params.required_headings ∪ checks.S.02.params.expected_order.
+    3. Дефолты модуля.
+    """
+    expected: list[str] = []
+    seen: set[str] = set()
+
+    s01_cfg = profile.checks.get("S.01")
+    if s01_cfg and s01_cfg.params.get("required_headings"):
+        for h in s01_cfg.params["required_headings"]:
+            if h not in seen:
+                expected.append(h)
+                seen.add(h)
+    else:
+        for h in _DEFAULT_REQUIRED_HEADINGS:
+            if h not in seen:
+                expected.append(h)
+                seen.add(h)
+
+    s02_cfg = profile.checks.get("S.02")
+    if s02_cfg and s02_cfg.params.get("expected_order"):
+        for h in s02_cfg.params["expected_order"]:
+            if h not in seen:
+                expected.append(h)
+                seen.add(h)
+    else:
+        for h in _DEFAULT_EXPECTED_ORDER:
+            if h not in seen:
+                expected.append(h)
+                seen.add(h)
+    return expected
+
+
+@register("S.03")
+def check_section_names_match_profile(document: Document, profile: Profile) -> list[Violation]:
+    """Названия разделов уровня 1 должны быть из ожидаемого списка профиля.
+
+    Параметры (`checks.S.03.params`):
+    - `expected_headings`: список ожидаемых заголовков. Если не задан —
+      берётся объединение из S.01.required_headings и S.02.expected_order
+      (с алиасами из ``_HEADING_ALIASES``).
+
+    Допустимыми также считаются:
+    - совпадения с алиасами ожидаемых заголовков;
+    - «Глава N» (где N — любое слово/номер);
+    - «Приложение Х» (любая буква/номер).
+
+    Семантика — soft (warning), чтобы не плодить ложные срабатывания
+    на нестандартных названиях.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("S.03")
+
+    if config and config.params.get("expected_headings"):
+        expected: list[str] = list(config.params["expected_headings"])
+    else:
+        expected = _default_s03_expected(profile)
+
+    # Нормализованный список допустимых вариантов с учётом алиасов.
+    allowed_normalized: set[str] = set()
+    for exp in expected:
+        allowed_normalized.add(_normalize(exp))
+        for alias in _HEADING_ALIASES.get(exp, []):
+            allowed_normalized.add(_normalize(alias))
+
+    sections: list[LogicalSection] = []
+    for ps in document.page_sections:
+        sections.extend(_all_level1_sections(ps.content))
+
+    for section in sections:
+        heading = _heading_text(section.heading)
+        if not heading:
+            continue
+        norm = _normalize(heading)
+        if norm in allowed_normalized:
+            continue
+        # «Глава N»
+        if _GENERIC_CHAPTER.match(heading):
+            continue
+        # «Приложение Х»
+        if _GENERIC_APPENDIX.match(heading):
+            continue
+        violations.append(
+            Violation(
+                check_code="S.03",
+                severity="warning",
+                message=(
+                    f"Название раздела «{heading}» не входит в список "
+                    f"ожидаемых по профилю — возможно, неверное название"
+                ),
+                location=f"page_sections.*.logical_section[{section.id}]",
+                suggestion=("Проверьте формулировку заголовка — ожидаются: " + ", ".join(expected)),
+                details={
+                    "section_id": section.id,
+                    "heading": heading,
+                },
+            )
+        )
+    return violations
+
+
+# --- S.04 — введение содержит обязательные элементы ------------------------
+
+_DEFAULT_S04_REQUIRED_ELEMENTS: list[str] = [
+    "актуальность",
+    "цель",
+    "задач",
+    "объект",
+    "предмет",
+]
+
+
+def _find_section_by_heading(
+    document: Document, *target_headings_normalized: str
+) -> LogicalSection | None:
+    """Найти первый LogicalSection уровня 1, чей заголовок совпадает с
+    одним из target_headings_normalized (уже нормализованных).
+    """
+    sections: list[LogicalSection] = []
+    for ps in document.page_sections:
+        sections.extend(_all_level1_sections(ps.content))
+    for section in sections:
+        norm = _normalize(_heading_text(section.heading))
+        if norm in target_headings_normalized:
+            return section
+    return None
+
+
+def _collect_section_text(section: LogicalSection) -> str:
+    """Склеить весь текст раздела (включая под-разделы) в одну строку."""
+    parts: list[str] = []
+
+    def visit(items: Sequence[LogicalSection | Block]) -> None:
+        for item in items:
+            if isinstance(item, Paragraph):
+                for el in item.content:
+                    if isinstance(el, TextRun):
+                        parts.append(el.text)
+                parts.append(" ")
+            elif isinstance(item, LogicalSection):
+                # Также включаем заголовки подразделов
+                parts.append(_heading_text(item.heading))
+                parts.append(" ")
+                visit(item.children)
+
+    visit(section.children)
+    return "".join(parts)
+
+
+@register("S.04")
+def check_introduction_required_elements(document: Document, profile: Profile) -> list[Violation]:
+    """Введение должно содержать ключевые элементы (актуальность, цель и т.п.).
+
+    Параметры (`checks.S.04.params`):
+    - `required_elements`: список ключевых фраз. По умолчанию:
+      ``["актуальность", "цель", "задач", "объект", "предмет"]``.
+
+    Алгоритм: найти раздел «Введение» (case-insensitive), склеить его
+    текст, для каждого элемента проверить наличие подстроки. Если нет —
+    одна Violation на каждый отсутствующий элемент.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("S.04")
+    required: list[str] = list(_DEFAULT_S04_REQUIRED_ELEMENTS)
+    if config and config.params.get("required_elements"):
+        required = list(config.params["required_elements"])
+
+    intro = _find_section_by_heading(document, "введение")
+    if intro is None:
+        # Нет «Введения» — это уже зафиксирует S.01. Здесь молчим.
+        return []
+
+    text = _collect_section_text(intro).lower()
+    for element in required:
+        needle = element.lower()
+        if needle and needle not in text:
+            violations.append(
+                Violation(
+                    check_code="S.04",
+                    severity="warning",
+                    message=(f"Во «Введении» отсутствует упоминание «{element}»"),
+                    location=f"page_sections.*.logical_section[{intro.id}]",
+                    suggestion=(f"Добавить во «Введение» формулировку, содержащую «{element}»"),
+                    details={
+                        "section_id": intro.id,
+                        "missing_element": element,
+                    },
+                )
+            )
+    return violations
+
+
+# --- S.05 — заключение содержит N+ параграфов -------------------------------
+
+
+def _count_meaningful_paragraphs(section: LogicalSection) -> int:
+    """Количество непустых параграфов раздела (включая вложенные).
+
+    Пустыми считаются параграфы без TextRun или у которых все TextRun
+    после strip() пусты.
+    """
+    count = 0
+
+    def visit(items: Sequence[LogicalSection | Block]) -> None:
+        nonlocal count
+        for item in items:
+            if isinstance(item, Paragraph):
+                text = "".join(el.text for el in item.content if isinstance(el, TextRun))
+                if text.strip():
+                    count += 1
+            elif isinstance(item, LogicalSection):
+                visit(item.children)
+
+    visit(section.children)
+    return count
+
+
+@register("S.05")
+def check_conclusion_min_paragraphs(document: Document, profile: Profile) -> list[Violation]:
+    """Заключение должно содержать не менее N непустых параграфов.
+
+    На Фазе 1 — простая эвристика. Параметр
+    `checks.S.05.params.min_paragraphs` (по умолчанию 3).
+    """
+    config = profile.checks.get("S.05")
+    min_paragraphs = 3
+    if config and config.params.get("min_paragraphs") is not None:
+        try:
+            min_paragraphs = int(config.params["min_paragraphs"])
+        except (TypeError, ValueError):
+            min_paragraphs = 3
+
+    conclusion = _find_section_by_heading(document, "заключение")
+    if conclusion is None:
+        # Нет «Заключения» — зафиксирует S.01.
+        return []
+
+    actual = _count_meaningful_paragraphs(conclusion)
+    if actual >= min_paragraphs:
+        return []
+    return [
+        Violation(
+            check_code="S.05",
+            severity="warning",
+            message=(
+                f"«Заключение» содержит {actual} непустых параграфов, "
+                f"ожидается не менее {min_paragraphs}"
+            ),
+            location=f"page_sections.*.logical_section[{conclusion.id}]",
+            suggestion=(
+                "Заключение должно содержать выводы по каждой задаче "
+                "из введения — добавьте недостающие параграфы"
+            ),
+            details={
+                "section_id": conclusion.id,
+                "actual": str(actual),
+                "expected_min": str(min_paragraphs),
+            },
+        )
+    ]
+
+
+# --- S.08 — заглушка под V.02 ----------------------------------------------
+
+
+@register("S.08")
+def check_intro_conclusion_volume(document: Document, profile: Profile) -> list[Violation]:
+    """Объём введения и заключения в нормах.
+
+    Заглушка под будущую V.02. Регистрируется, чтобы профили могли
+    включать её, но фактически ничего не возвращает. Когда V.02 будет
+    реализована, обе проверки будут объединены.
+    """
+    return []
+
+
 __all__ = [
+    "check_conclusion_min_paragraphs",
+    "check_intro_conclusion_volume",
+    "check_introduction_required_elements",
     "check_no_empty_sections",
     "check_required_sections",
+    "check_section_names_match_profile",
     "check_section_page_break",
     "check_sections_order",
 ]

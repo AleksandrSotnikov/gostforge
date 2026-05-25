@@ -1,6 +1,6 @@
-# ruff: noqa: RUF001, RUF002
+# ruff: noqa: RUF001, RUF002, RUF003
 
-"""Тесты S.01, S.02, S.06, S.07 — структура работы."""
+"""Тесты S.01, S.02, S.03, S.04, S.05, S.06, S.07, S.08 — структура работы."""
 
 from gostforge.model import (
     Document,
@@ -489,3 +489,210 @@ def test_s07_section_with_nested_subsection_not_empty() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "S.07"]
     assert found == []
+
+
+# --- S.03 -------------------------------------------------------------------
+
+
+def test_s03_registered() -> None:
+    assert "S.03" in registered_checks()
+
+
+def test_s03_known_headings_no_violation() -> None:
+    """Ожидаемые заголовки и «Глава N» / «Приложение Х» — нарушений нет."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("Глава 1"),
+            _heading("Глава 2"),
+            _heading("Заключение"),
+            _heading("Список использованных источников"),
+            _heading("Приложение А"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.03"]
+    assert found == []
+
+
+def test_s03_unknown_heading_violation() -> None:
+    """Произвольное название раздела — Violation с severity=warning."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("Моя собственная штука"),
+            _heading("Заключение"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.03"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "Моя собственная штука" in found[0].message
+
+
+def test_s03_alias_is_accepted() -> None:
+    """«Список литературы» — алиас «Список использованных источников»."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("Заключение"),
+            _heading("Список литературы"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.03"]
+    assert found == []
+
+
+def test_s03_custom_expected_via_params() -> None:
+    """Пользовательский expected_headings перекрывает дефолт."""
+    doc = _doc([_heading("Введение"), _heading("Что-то ещё")])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["S.03"].params["expected_headings"] = ["Что-то ещё"]
+    found = [v for v in validate(doc, profile) if v.check_code == "S.03"]
+    # «Введение» больше не входит в expected, но «Что-то ещё» — входит.
+    # Должно быть ровно одно нарушение (про «Введение»).
+    # Но «Введение» — не «Глава N» и не «Приложение Х», так что violation.
+    assert len(found) == 1
+    assert "Введение" in found[0].message
+
+
+# --- S.04 -------------------------------------------------------------------
+
+
+def test_s04_registered() -> None:
+    assert "S.04" in registered_checks()
+
+
+def test_s04_all_elements_present_no_violation() -> None:
+    intro_text = (
+        "Актуальность темы обусловлена. Цель работы — исследовать вопрос. "
+        "Задачи: рассмотреть факторы. Объект — система. Предмет — методология."
+    )
+    intro = LogicalSection(
+        id="sec-intro",
+        level=1,
+        heading=[TextRun(text="Введение")],
+        children=[Paragraph(id="p-1", content=[TextRun(text=intro_text)])],
+    )
+    doc = _doc([intro])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.04"]
+    assert found == []
+
+
+def test_s04_missing_elements_violation() -> None:
+    """Если во введении не хватает ключевых элементов — Violation на каждый."""
+    intro = LogicalSection(
+        id="sec-intro",
+        level=1,
+        heading=[TextRun(text="Введение")],
+        children=[
+            Paragraph(
+                id="p-1",
+                content=[TextRun(text="Текст без ключевых слов.")],
+            )
+        ],
+    )
+    doc = _doc([intro])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.04"]
+    # Всего 5 ключевых элементов отсутствуют.
+    assert len(found) == 5
+    assert all(v.severity == "warning" for v in found)
+
+
+def test_s04_no_introduction_skipped() -> None:
+    """Если «Введения» нет — S.04 не срабатывает (это уже S.01)."""
+    doc = _doc(
+        [
+            _heading("Глава 1"),
+            _heading("Заключение"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.04"]
+    assert found == []
+
+
+def test_s04_custom_required_elements_via_params() -> None:
+    intro = LogicalSection(
+        id="sec-intro",
+        level=1,
+        heading=[TextRun(text="Введение")],
+        children=[Paragraph(id="p-1", content=[TextRun(text="Только цель указана.")])],
+    )
+    doc = _doc([intro])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["S.04"].params["required_elements"] = ["цель", "гипотеза"]
+    found = [v for v in validate(doc, profile) if v.check_code == "S.04"]
+    assert len(found) == 1
+    assert "гипотеза" in found[0].message
+
+
+# --- S.05 -------------------------------------------------------------------
+
+
+def test_s05_registered() -> None:
+    assert "S.05" in registered_checks()
+
+
+def test_s05_enough_paragraphs_no_violation() -> None:
+    conclusion = LogicalSection(
+        id="sec-concl",
+        level=1,
+        heading=[TextRun(text="Заключение")],
+        children=[
+            Paragraph(id="p-1", content=[TextRun(text="Вывод 1.")]),
+            Paragraph(id="p-2", content=[TextRun(text="Вывод 2.")]),
+            Paragraph(id="p-3", content=[TextRun(text="Вывод 3.")]),
+        ],
+    )
+    doc = _doc([conclusion])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.05"]
+    assert found == []
+
+
+def test_s05_too_few_paragraphs_violation() -> None:
+    """Заключение с одним параграфом — нарушение (min=3)."""
+    conclusion = LogicalSection(
+        id="sec-concl",
+        level=1,
+        heading=[TextRun(text="Заключение")],
+        children=[
+            Paragraph(id="p-1", content=[TextRun(text="Единственный вывод.")]),
+        ],
+    )
+    doc = _doc([conclusion])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.05"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "1" in found[0].message
+
+
+def test_s05_custom_min_paragraphs_param() -> None:
+    """min_paragraphs=2 — три параграфа достаточно, один — нарушение."""
+    conclusion = LogicalSection(
+        id="sec-concl",
+        level=1,
+        heading=[TextRun(text="Заключение")],
+        children=[
+            Paragraph(id="p-1", content=[TextRun(text="Один.")]),
+        ],
+    )
+    doc = _doc([conclusion])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["S.05"].params["min_paragraphs"] = 2
+    found = [v for v in validate(doc, profile) if v.check_code == "S.05"]
+    assert len(found) == 1
+
+
+# --- S.08 -------------------------------------------------------------------
+
+
+def test_s08_registered() -> None:
+    """S.08 — заглушка под V.02, но должна быть зарегистрирована."""
+    assert "S.08" in registered_checks()

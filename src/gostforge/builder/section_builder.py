@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from gostforge.model import (
     Document,
     Figure,
+    Formula,
     ListBlock,
     LogicalSection,
     Paragraph,
@@ -110,6 +111,22 @@ class SectionBuilder:
             items=[[TextRun(text=item)] for item in items],
         )
         self._section.children.append(block)
+        return self
+
+    def formula(self, latex: str, *, numbered: bool = True) -> SectionBuilder:
+        """Добавить формулу. Если numbered=True, нумерация автоматическая.
+
+        На Фазе 1 экспортёр формул не пишет в OOXML, поэтому в результирующем
+        .docx формула пока не появится. Парсер уже умеет читать `<m:oMath>`,
+        так что round-trip из существующих документов работает.
+        """
+        number = self._root._next_formula_number() if numbered else None
+        formula = Formula(
+            id=self._root._next_id("formula"),
+            latex=latex,
+            number=number,
+        )
+        self._section.children.append(formula)
         return self
 
     def table(

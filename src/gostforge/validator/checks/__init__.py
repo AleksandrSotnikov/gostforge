@@ -21,11 +21,19 @@
 """
 
 from . import (  # noqa: F401
+    abbreviations,
+    appendices,
+    crossrefs,
     figures,
     formatting,
+    formulas,
     headings,
+    lists,
+    page_sections,
     references,
     structure,
+    style,
     tables,
     text,
+    volume,
 )

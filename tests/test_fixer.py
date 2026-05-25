@@ -1,6 +1,6 @@
 # ruff: noqa: RUF001, RUF002, RUF003
 
-"""Тесты движка автоисправлений и фиксеров T.08/T.09/T.10/T.11/H.03/H.08."""
+"""Тесты движка автоисправлений и фиксеров T.08/T.09/T.10/T.11/T.12/T.13/H.03/H.08."""
 
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ def _doc_with_section(section: LogicalSection) -> Document:
 def test_fix_registry_has_codes() -> None:
     """Все ожидаемые коды зарегистрированы."""
     codes = set(registered_fixers())
-    assert {"T.08", "T.09", "T.10", "T.11", "H.03", "H.08"}.issubset(codes)
+    assert {"T.08", "T.09", "T.10", "T.11", "T.12", "T.13", "H.03", "H.08"}.issubset(codes)
 
 
 # --- T.08: двойные пробелы --------------------------------------------------
@@ -209,6 +209,116 @@ def test_t11_in_word_hyphen_kept() -> None:
     assert applied == []
     text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
     assert text_runs[0].text == "веб-сервис"
+
+
+# --- T.12: NBSP между числом и единицей -------------------------------------
+
+
+def test_t12_registered() -> None:
+    """Фиксер T.12 присутствует в реестре."""
+    assert "T.12" in registered_fixers()
+
+
+def test_t12_inserts_nbsp_between_number_and_unit() -> None:
+    """ «5 кг» → «5<NBSP>кг»."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="вес 5 кг и длина 10 м")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.12"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "T.12"
+    assert isinstance(applied[0], FixApplied)
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    # Между числом и единицей должен стоять U+00A0, остальные пробелы — обычные.
+    assert text_runs[0].text == "вес 5 кг и длина 10 м"
+
+
+def test_t12_no_change_when_already_nbsp() -> None:
+    """Если уже стоит NBSP — фиксер ничего не делает."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="вес 5 кг")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.12"])
+    assert applied == []
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "вес 5 кг"
+
+
+def test_t12_no_change_when_no_units() -> None:
+    """В тексте без единиц измерения — никаких правок."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="просто текст без чисел")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.12"])
+    assert applied == []
+
+
+# --- T.13: NBSP между инициалами и фамилией ---------------------------------
+
+
+def test_t13_registered() -> None:
+    """Фиксер T.13 присутствует в реестре."""
+    assert "T.13" in registered_fixers()
+
+
+def test_t13_inserts_nbsp_between_initials_and_surname() -> None:
+    """ «И. И. Иванов» → «И.<NBSP>И.<NBSP>Иванов»."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="автор: И. И. Иванов и А. Б. Петров")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.13"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "T.13"
+    assert isinstance(applied[0], FixApplied)
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert (
+        text_runs[0].text
+        == "автор: И. И. Иванов и А. Б. Петров"
+    )
+
+
+def test_t13_no_change_when_already_nbsp() -> None:
+    """Если NBSP уже стоит — фиксер ничего не делает."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="И. И. Иванов")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.13"])
+    assert applied == []
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "И. И. Иванов"
+
+
+def test_t13_no_change_without_pattern() -> None:
+    """В тексте без шаблона «И. И. Фамилия» — никаких правок."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="просто текст без инициалов")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.13"])
+    assert applied == []
 
 
 # --- H.03: точка после номера заголовка --------------------------------------

@@ -226,4 +226,7 @@ class Document:
     metadata: DocumentMetadata = field(default_factory=DocumentMetadata)
     page_sections: list[PageSection] = field(default_factory=list)
     bibliography: list[BibliographyEntry] = field(default_factory=list)
+    # Глобальные настройки документа из word/settings.xml.
+    # None — не задано (наследуется от приложения).
+    auto_hyphenation: bool | None = None
     abbreviations: dict[str, str] = field(default_factory=dict)
