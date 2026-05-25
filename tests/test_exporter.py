@@ -7,10 +7,12 @@ import docx as python_docx
 from gostforge.exporter import export_docx
 from gostforge.model import (
     Document,
+    Figure,
     LogicalSection,
     PageGeometry,
     PageSection,
     Paragraph,
+    Table,
     TextRun,
 )
 from gostforge.profile import load_profile
@@ -113,3 +115,94 @@ def test_export_preserves_bold_italic(tmp_path: Path) -> None:
     runs = raw.paragraphs[0].runs
     assert runs[0].bold is True
     assert runs[2].italic is True
+
+
+def test_export_applies_paragraph_level_alignment_and_break(tmp_path: Path) -> None:
+    """Per-paragraph alignment, line_spacing, indent, page_break_before."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            content=[
+                Paragraph(
+                    id="p1",
+                    content=[TextRun(text="Текст")],
+                    style_name="Normal",
+                    alignment="center",
+                    line_spacing=2.0,
+                    first_line_indent_cm=0.0,
+                    page_break_before=True,
+                )
+            ],
+        )
+    )
+    from gostforge.profile import load_profile
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    raw = python_docx.Document(str(out))
+    p = raw.paragraphs[0]
+    pf = p.paragraph_format
+    assert pf.alignment == 1  # WD_ALIGN_PARAGRAPH.CENTER
+    assert pf.line_spacing == 2.0
+    assert pf.first_line_indent.cm == 0.0
+    assert pf.page_break_before is True
+
+
+def test_export_writes_table_with_caption(tmp_path: Path) -> None:
+    doc = Document()
+    table = Table(
+        id="t1",
+        caption=[TextRun(text="Таблица 1 — Результаты")],
+        headers=[
+            [TextRun(text="A")],
+            [TextRun(text="B")],
+        ],
+        rows=[
+            [[TextRun(text="1")], [TextRun(text="2")]],
+            [[TextRun(text="3")], [TextRun(text="4")]],
+        ],
+    )
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", content=[table])
+    )
+    from gostforge.profile import load_profile
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    raw = python_docx.Document(str(out))
+    # Над таблицей должен быть параграф-подпись
+    texts = [p.text for p in raw.paragraphs]
+    assert any("Таблица 1" in t for t in texts)
+    # И сама таблица 3×2 (1 шапка + 2 строки)
+    assert len(raw.tables) == 1
+    docx_table = raw.tables[0]
+    assert len(docx_table.rows) == 3
+    assert len(docx_table.columns) == 2
+    assert docx_table.rows[0].cells[0].text == "A"
+    assert docx_table.rows[2].cells[1].text == "4"
+
+
+def test_export_writes_figure_placeholder_with_caption(tmp_path: Path) -> None:
+    doc = Document()
+    fig = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема")],
+    )
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", content=[fig])
+    )
+    from gostforge.profile import load_profile
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    raw = python_docx.Document(str(out))
+    texts = [p.text for p in raw.paragraphs]
+    # Плейсхолдер рисунка + подпись
+    assert any("[Рисунок: fig-1]" in t for t in texts)
+    assert any("Рисунок 1" in t for t in texts)
