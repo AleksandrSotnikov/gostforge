@@ -1,3 +1,5 @@
+# ruff: noqa: RUF002, RUF003
+
 """Тесты K.* — проверок колонтитулов и нумерации на уровне PageSection-ов."""
 
 from __future__ import annotations
@@ -448,4 +450,103 @@ def test_k01_empty_template_no_violation() -> None:
     profile.sections_template = []
     doc = Document()
     violations = [v for v in validate(doc, profile) if v.check_code == "K.01"]
+    assert violations == []
+
+
+# --- K.06 ---------------------------------------------------------------------
+
+
+def test_k06_registered() -> None:
+    assert "K.06" in registered_checks()
+
+
+def test_k06_all_sections_unlinked_no_violation() -> None:
+    """Все секции (кроме первой) с link_to_previous=False — нарушений нет."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="title",
+            name="Титульный лист",
+            type="title",
+            link_to_previous=False,
+        )
+    )
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="Основная часть",
+            type="main",
+            link_to_previous=False,
+        )
+    )
+    profile = _profile()
+    violations = [v for v in validate(doc, profile) if v.check_code == "K.06"]
+    assert violations == []
+
+
+def test_k06_linked_section_violation() -> None:
+    """Секция с link_to_previous=True — Violation."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="title",
+            name="Титульный лист",
+            type="title",
+            link_to_previous=False,
+        )
+    )
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="Основная часть",
+            type="main",
+            link_to_previous=True,
+        )
+    )
+    profile = _profile()
+    violations = [v for v in validate(doc, profile) if v.check_code == "K.06"]
+    assert len(violations) == 1
+    assert violations[0].severity == "warning"
+    assert "main" in violations[0].location
+    assert "link_to_previous" in violations[0].location
+
+
+def test_k06_first_section_link_ignored() -> None:
+    """У первой секции link_to_previous не имеет смысла — игнорируем."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="title",
+            name="Титульный лист",
+            type="title",
+            link_to_previous=True,
+        )
+    )
+    profile = _profile()
+    violations = [v for v in validate(doc, profile) if v.check_code == "K.06"]
+    assert violations == []
+
+
+def test_k06_exclude_types_param() -> None:
+    """Тип из exclude_types не вызывает Violation."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="title",
+            name="Титульный лист",
+            type="title",
+            link_to_previous=False,
+        )
+    )
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="Основная часть",
+            type="main",
+            link_to_previous=True,
+        )
+    )
+    profile = _profile()
+    profile.checks["K.06"].params["exclude_types"] = ["main"]
+    violations = [v for v in validate(doc, profile) if v.check_code == "K.06"]
     assert violations == []

@@ -317,6 +317,59 @@ def _lis_length(seq_a: Sequence[str], seq_b: Sequence[str]) -> list[int]:
     return indices
 
 
+# --- K.06 — колонтитулы отвязаны от предыдущей секции -----------------------
+
+
+@register("K.06")
+def check_headers_not_linked_to_previous(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Колонтитулы PageSection-ов (кроме первой) должны быть отвязаны.
+
+    По ГОСТ титульный лист, фронтматтер и основная часть имеют разные
+    колонтитулы (на титуле — пусто, в основной части — номера страниц).
+    Word-флаг ``link_to_previous=True`` означает, что секция наследует
+    колонтитул от предыдущей, что нарушает это требование.
+
+    Параметры (`checks.K.06.params`):
+    - `exclude_types`: список типов PageSection, для которых проверка
+      не применяется (по умолчанию пустой список).
+    """
+    config = profile.checks.get("K.06")
+    exclude_types: set[str] = set()
+    if config is not None:
+        raw_exclude = config.params.get("exclude_types") or []
+        if isinstance(raw_exclude, (list, tuple)):
+            exclude_types = {str(t) for t in raw_exclude}
+
+    violations: list[Violation] = []
+    for index, section in enumerate(document.page_sections):
+        if index == 0:
+            # Первая секция не имеет «предыдущей», флаг не имеет смысла.
+            continue
+        if section.type in exclude_types:
+            continue
+        if not section.link_to_previous:
+            continue
+        violations.append(
+            Violation(
+                check_code="K.06",
+                severity="warning",
+                message=(
+                    f"Секция «{section.name}» (тип {section.type}) связана "
+                    f"с колонтитулом предыдущей секции (link_to_previous=True)"
+                ),
+                location=f"page_sections.{section.id}.link_to_previous",
+                suggestion=(
+                    "Отвязать колонтитул от предыдущей секции "
+                    "(в Word: «Как в предыдущем разделе» — выключить)"
+                ),
+                details={"section_id": section.id, "type": section.type},
+            )
+        )
+    return violations
+
+
 @register("K.01")
 def check_sections_match_template(
     document: Document, profile: Profile
