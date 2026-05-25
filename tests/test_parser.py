@@ -396,3 +396,33 @@ def test_parse_bibliography_paragraphs_kept_in_section(tmp_path: Path) -> None:
     bib_texts = [_para_text(p) for p in bib_paragraphs]
     assert any("Иванов И. И. Основы" in t for t in bib_texts)
     assert any("Петров П. П. Анализ" in t for t in bib_texts)
+
+
+def test_parser_extracts_header_with_page_field(tmp_path: Path) -> None:
+    """Если PAGE-поле в header (а не footer) — парсер кладёт {page} в page_section.header."""
+    import docx as python_docx
+    from docx.oxml.ns import qn  # type: ignore[import-not-found]
+    from lxml import etree
+
+    doc = python_docx.Document()
+    section = doc.sections[0]
+    header = section.header
+    p = header.add_paragraph()
+    p.paragraph_format.alignment = python_docx.enum.text.WD_ALIGN_PARAGRAPH.CENTER
+    # Вставляем <w:fldSimple w:instr="PAGE"/> прямо в lxml-узел параграфа.
+    fld = etree.SubElement(p._p, qn("w:fldSimple"))
+    fld.set(qn("w:instr"), "PAGE")
+    run = etree.SubElement(fld, qn("w:r"))
+    rt = etree.SubElement(run, qn("w:t"))
+    rt.text = ""
+    out = tmp_path / "h.docx"
+    doc.save(str(out))
+
+    from gostforge.parser import parse_docx
+    parsed = parse_docx(out)
+    page_section = parsed.page_sections[0]
+    assert page_section.header is not None
+    center = page_section.header.default.center
+    assert center is not None
+    assert any(getattr(r, "text", "") == "{page}" for r in center)
+    assert page_section.page_numbering.visible is True

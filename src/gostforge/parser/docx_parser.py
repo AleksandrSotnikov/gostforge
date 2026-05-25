@@ -173,7 +173,27 @@ def _extract_page_section(docx_doc: DocxDocument) -> PageSection:
         page_section.footer = footer_config
         page_section.page_numbering.visible = True
 
+    header_config = _extract_header(sect)
+    if header_config is not None:
+        page_section.header = header_config
+        # Если PAGE-поле было в шапке, тоже считаем нумерацию видимой
+        if _template_has_text(header_config.default, "{page}"):
+            page_section.page_numbering.visible = True
+
     return page_section
+
+
+def _template_has_text(template: ContentTemplate | None, needle: str) -> bool:
+    """Проверка: есть ли в каком-либо слоте шаблона текст `needle`."""
+    if template is None:
+        return False
+    for slot in (template.left, template.center, template.right):
+        if slot is None:
+            continue
+        for el in slot:
+            if isinstance(el, TextRun) and needle in el.text:
+                return True
+    return False
 
 
 def _extract_page_number_start(sect: DocxSection) -> int | None:
@@ -282,28 +302,49 @@ def _detect_orientation(sect: DocxSection) -> Literal["portrait", "landscape"]:
 
 def _extract_footer(sect: DocxSection) -> HeaderConfig | None:
     """Прочитать footer секции и собрать HeaderConfig, если есть поле PAGE."""
-    footer = sect.footer
-    if footer is None:
+    return _extract_header_or_footer(sect.footer)
+
+
+def _extract_header(sect: DocxSection) -> HeaderConfig | None:
+    """Прочитать header секции и собрать HeaderConfig, если есть поле PAGE.
+
+    Симметрично _extract_footer. Поле PAGE в header — это альтернатива
+    положению номера страницы (top_*); проверка F.04 такие случаи
+    обрабатывает.
+    """
+    return _extract_header_or_footer(sect.header)
+
+
+def _extract_header_or_footer(container: Any) -> HeaderConfig | None:
+    """Общая логика парсинга header/footer: ищем поле PAGE и кладём в подходящий слот."""
+    if container is None:
         return None
 
-    center_runs: list[InlineElement] = []
+    template = ContentTemplate()
+    found = False
 
-    for fp in footer.paragraphs:
+    for fp in container.paragraphs:
         if not _paragraph_has_page_field(fp):
             continue
         alignment = _alignment_to_literal(fp.paragraph_format.alignment)
-        # Центральная позиция определяется выравниванием по центру.
-        # Если выравнивание иное — на Фазе 0 всё равно учитываем как центр,
-        # т.к. отдельных левой/правой колонок в footer мы пока не строим.
-        if alignment != "right":
-            center_runs.append(TextRun(text="{page}"))
-        # На Фазе 0 ограничиваемся одним маркером {page}.
+        slot_runs = [TextRun(text="{page}")]
+        # Распределение по слоту определяется выравниванием параграфа в
+        # колонтитуле. None и justify трактуем как center — это типичный
+        # случай отображения номера страницы.
+        if alignment == "right":
+            template.right = slot_runs
+        elif alignment == "left":
+            template.left = slot_runs
+        else:
+            template.center = slot_runs
+        found = True
+        # На Фазе 1 ограничиваемся одним маркером {page} в колонтитуле.
         break
 
-    if not center_runs:
+    if not found:
         return None
 
-    return HeaderConfig(default=ContentTemplate(center=center_runs))
+    return HeaderConfig(default=template)
 
 
 def _paragraph_has_page_field(fp: DocxParagraph) -> bool:
