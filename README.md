@@ -160,11 +160,28 @@ gostforge annotate work.docx --profile gost-7.32-2017 -o work_annotated.docx
 
 В Фазе 1 — CLI. Визуальный редактор конструктора планируется в Фазе 2 (см. roadmap).
 
+## Плагины проверок
+
+Кафедральные или организационные проверки можно подключать в виде
+**плагинов** — обычных Python-файлов в каталоге
+`~/.gostforge/plugins/` (`%APPDATA%\gostforge\plugins\` на Windows).
+Каждая зарегистрированная через `@register("X.NN")` функция автоматически
+попадает в общий реестр и может быть включена в любой профиль.
+
+```bash
+gostforge plugins dir    # узнать/создать каталог плагинов
+gostforge plugins list   # увидеть загруженные плагины и их коды
+```
+
+Полный гайд с примерами и предупреждениями о безопасности —
+[docs/plugins.md](docs/plugins.md).
+
 ## Документация
 
 - [Архитектура](docs/architecture.md)
 - [Каталог проверок](docs/checks-catalog.md)
 - [Система профилей](docs/profiles.md)
+- [Плагины проверок](docs/plugins.md)
 - [Колонтитулы и секции](docs/page-sections.md)
 - [Roadmap](docs/roadmap.md)
 - [Работа с Claude Code](docs/claude-code-workflow.md) — как продолжать разработку
