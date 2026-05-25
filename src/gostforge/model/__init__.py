@@ -12,7 +12,7 @@ from enum import Enum
 from typing import Literal
 
 
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.2.0"
 
 
 # --- Inline content -----------------------------------------------------------
@@ -20,13 +20,21 @@ SCHEMA_VERSION = "0.1.0"
 
 @dataclass
 class TextRun:
-    """Фрагмент текста с inline-разметкой."""
+    """Фрагмент текста с inline-разметкой.
+
+    Все атрибуты форматирования (`bold`, `italic`, `superscript`, `subscript`,
+    `font`, `size_pt`) могут быть `None`, что означает «наследуется от
+    стиля абзаца». Парсер выставляет только те значения, которые run задаёт
+    явно. Проверки трактуют `None` как «нет нарушения».
+    """
 
     text: str
-    bold: bool = False
-    italic: bool = False
-    superscript: bool = False
-    subscript: bool = False
+    bold: bool | None = None
+    italic: bool | None = None
+    superscript: bool | None = None
+    subscript: bool | None = None
+    font: str | None = None
+    size_pt: float | None = None
 
 
 @dataclass
@@ -61,10 +69,25 @@ class Block:
     type: BlockType
 
 
+ParagraphAlignment = Literal["left", "right", "center", "justify"]
+
+
 @dataclass
 class Paragraph(Block):
     type: BlockType = BlockType.PARAGRAPH
     content: list[InlineElement] = field(default_factory=list)
+    # Имя Word-стиля (Normal, Heading 1, Caption, ...). Используется
+    # парсером и проверками для классификации абзаца.
+    style_name: str | None = None
+    alignment: ParagraphAlignment | None = None
+    line_spacing: float | None = None
+    first_line_indent_cm: float | None = None
+    # Принудительный разрыв страницы перед параграфом.
+    # None — наследуется (значение не задано явно ни на параграфе, ни в стиле,
+    # либо парсер не смог его установить).
+    # True/False — задано явно (через w:pPr/w:pageBreakBefore у параграфа или
+    # унаследовано от Word-стиля).
+    page_break_before: bool | None = None
 
 
 @dataclass

@@ -102,20 +102,53 @@ def list_profiles(search_paths: list[Path] | None = None) -> list[str]:
     return sorted(ids)
 
 
+def _deep_merge(parent: Any, child: Any) -> Any:
+    """Рекурсивное слияние словарей.
+
+    - dict: ключи объединяются, child перебивает parent при совпадении.
+    - list: child заменяет parent целиком (если непустой); пустой list child
+      означает «использовать родительский».
+    - скаляры: child перебивает parent, если он не None.
+    """
+    if isinstance(parent, dict) and isinstance(child, dict):
+        merged: dict[str, Any] = dict(parent)
+        for key, child_value in child.items():
+            if key in merged:
+                merged[key] = _deep_merge(merged[key], child_value)
+            else:
+                merged[key] = child_value
+        return merged
+    if isinstance(parent, list) and isinstance(child, list):
+        return child if child else parent
+    return child if child is not None else parent
+
+
+# Поля, которые должны браться у ребёнка как есть (не сливаются),
+# потому что идентифицируют сам профиль.
+_CHILD_OVERRIDE_FIELDS = {"id", "name", "version", "extends", "effective_from",
+                          "effective_until"}
+
+
 def _merge_profile(parent: Profile, child: Profile) -> Profile:
-    """Глубокое слияние: child переопределяет parent по полям."""
-    # TODO: написать полноценный deep-merge на dict-уровне (фаза 0).
-    # Текущая реализация — заглушка.
-    merged = parent.model_copy(deep=True)
-    if child.styles:
-        merged.styles = child.styles  # упрощённо
-    if child.sections_template:
-        merged.sections_template = child.sections_template
-    if child.checks:
-        merged.checks = {**parent.checks, **child.checks}
-    merged.id = child.id
-    merged.name = child.name
-    merged.version = child.version
-    merged.extends = child.extends
-    merged.description = child.description or parent.description
-    return merged
+    """Глубокое слияние: child переопределяет parent поле-в-поле.
+
+    Работает через `model_dump()`, чтобы единообразно обходить вложенные
+    pydantic-модели, dict-поля (`styles.extra`, `checks[*].params`) и списки.
+    """
+    parent_data = parent.model_dump()
+    child_data = child.model_dump(exclude_unset=True)
+
+    merged_data = _deep_merge(parent_data, child_data)
+
+    # Эти поля всегда идут от ребёнка, даже если он их не задал явно
+    # (model_dump(exclude_unset=True) их пропустит).
+    for f in _CHILD_OVERRIDE_FIELDS:
+        value = getattr(child, f)
+        if value is not None:
+            merged_data[f] = value
+
+    # description: непустое значение ребёнка перебивает родителя.
+    if child.description:
+        merged_data["description"] = child.description
+
+    return Profile(**merged_data)

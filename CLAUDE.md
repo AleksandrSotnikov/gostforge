@@ -19,8 +19,10 @@
 
 ## Текущая фаза
 
-**Фаза 0 — фундамент.** Скелет проекта, базовая модель, профиль, одна проверка (F.01).
-План фаз — в `docs/roadmap.md`.
+**Фаза 0 (фундамент) завершена, Фаза 1 (MVP нормоконтроля) — в активной разработке.**
+Реализовано **30+ проверок** в категориях F/T/S/H/I/B/R, парсер, экспортёр,
+автофиксер, два режима (нормоконтроль и конструктор), CLI + Streamlit UI.
+Актуальный список проверок — `gostforge checks`. План фаз — `docs/roadmap.md`.
 
 ## Стек
 
@@ -29,20 +31,26 @@
 - `pydantic` — схемы профилей
 - `pyyaml` — загрузка профилей
 - `click` — CLI
+- `streamlit` — веб-интерфейс (опциональная зависимость `[ui]`)
+- `openpyxl` — Excel-отчёты
 - `pytest` — тесты, `ruff` — линтинг, `mypy` — типы
 
 ## Структура
 
 ```
 src/gostforge/
-├── model/          # Модель документа (центральный контракт)
+├── model/          # Модель документа (центральный контракт, dataclass)
 ├── profile/        # Pydantic-схема профилей + загрузка YAML с наследованием
-├── parser/         # .docx → Model (эвристический)
-├── exporter/       # Model → .docx
-├── validator/      # Движок проверок
+├── parser/         # .docx → Document (python-docx + lxml)
+├── exporter/       # Document → .docx
+├── validator/      # Движок проверок (30+ реализованы)
 │   ├── engine.py   # Реестр проверок + функция validate()
-│   └── checks/     # Реализации проверок по категориям
-└── cli.py          # Точка входа gostforge
+│   └── checks/     # Реализации проверок по категориям F/T/S/H/I/B/R
+├── fixer/          # Автоисправление: симметричный движок (T.08, T.09, T.10, T.11, H.03, H.08)
+├── builder/        # Конструктор работ: WorkBuilder + шаблоны
+├── stats.py        # compute_stats(Document) → DocumentStats
+├── web/            # Streamlit-приложение (опциональный extra [ui])
+└── cli.py          # Точка входа gostforge (check, fix, new, stats, ui, profiles, checks)
 
 profiles/           # YAML-профили (base + примеры наследников)
 tests/              # pytest-тесты (fixtures/ под gitignore для реальных .docx)
@@ -72,23 +80,32 @@ docs/               # Архитектура, каталог проверок, r
 ## Команды
 
 ```bash
-# Установка для разработки
+# Установка для разработки (UI — отдельный extra)
 pip install -e ".[dev]"
+pip install -e ".[dev,ui]"
 
-# Тесты
-pytest                                  # все тесты
-pytest tests/test_validator.py -v       # конкретный модуль
-pytest -k "F_01"                        # по имени теста
+# Тесты — ВАЖНО: только `python -m pytest`, не голый `pytest`
+# (в окружении pytest не всегда видит editable-копию пакета).
+python -m pytest -q                          # все тесты (281+)
+python -m pytest tests/test_validator.py -v  # конкретный модуль
+python -m pytest -k "F_01"                   # по имени теста
+
+# В worktree агента (если pytest не находит модуль gostforge):
+PYTHONPATH=$(pwd)/src python -m pytest -q
 
 # Проверка типов и стиля (должны проходить перед коммитом)
 ruff check src tests
 ruff format src tests
 mypy src
 
-# CLI
-gostforge profiles list
-gostforge profiles show gost-7.32-2017
-gostforge check path/to/work.docx --profile gost-7.32-2017
+# CLI (полный набор)
+gostforge check work.docx --profile gost-7.32-2017 [--report report.xlsx] [--quiet]
+gostforge fix work.docx -o fixed.docx [--only T.08] [--dry-run]
+gostforge new my-coursework.docx --template coursework --title "..." --year 2026
+gostforge stats work.docx
+gostforge profiles list / show <id>
+gostforge checks
+gostforge ui                                # веб-интерфейс
 ```
 
 ## Что нельзя

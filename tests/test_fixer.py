@@ -1,0 +1,311 @@
+# ruff: noqa: RUF001, RUF002, RUF003
+
+"""Тесты движка автоисправлений и фиксеров T.08/T.09/T.10/T.11/H.03/H.08."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from gostforge.exporter import export_docx
+from gostforge.fixer import FixApplied, fix, registered_fixers
+from gostforge.model import (
+    Document,
+    LogicalSection,
+    PageGeometry,
+    PageSection,
+    Paragraph,
+    TextRun,
+)
+from gostforge.parser import parse_docx
+from gostforge.profile import load_profile
+from gostforge.validator import validate
+
+
+def _doc_with_paragraph(paragraph: Paragraph) -> Document:
+    """Утилита: документ с одной страничной секцией и одним абзацем."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="Основная часть",
+            type="main",
+            page=PageGeometry(),
+            content=[paragraph],
+        )
+    )
+    return doc
+
+
+def _doc_with_section(section: LogicalSection) -> Document:
+    """Утилита: документ с одной страничной секцией и одним LogicalSection."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="Основная часть",
+            type="main",
+            page=PageGeometry(),
+            content=[section],
+        )
+    )
+    return doc
+
+
+# --- регистрация фиксеров ----------------------------------------------------
+
+
+def test_fix_registry_has_codes() -> None:
+    """Все ожидаемые коды зарегистрированы."""
+    codes = set(registered_fixers())
+    assert {"T.08", "T.09", "T.10", "T.11", "H.03", "H.08"}.issubset(codes)
+
+
+# --- T.08: двойные пробелы --------------------------------------------------
+
+
+def test_t08_collapses_double_spaces() -> None:
+    """Множественные пробелы внутри run-а схлопываются в один."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="hello  world")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.08"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "T.08"
+    assert isinstance(applied[0], FixApplied)
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "hello world"
+
+
+def test_t08_no_change_when_clean() -> None:
+    """Если двойных пробелов нет — FixApplied пустой."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="hello world")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.08"])
+    assert applied == []
+
+
+# --- T.09: хвостовые пробелы -------------------------------------------------
+
+
+def test_t09_strips_trailing_whitespace() -> None:
+    """Хвостовой пробел в последнем run-е убирается."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="text   ")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.09"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "T.09"
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "text"
+
+
+def test_t09_trailing_in_middle_run_not_touched() -> None:
+    """Пробел в конце run-а, который не последний в параграфе, сохраняется."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="a "), TextRun(text="b")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.09"])
+    assert applied == []
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "a "
+    assert text_runs[1].text == "b"
+
+
+# --- T.10: прямые кавычки → «ёлочки» ----------------------------------------
+
+
+def test_t10_replaces_paired_quotes_single_run() -> None:
+    """Пара прямых кавычек в одном run-е заменяется на «ёлочки»."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text='"привет"')],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.10"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "T.10"
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "«привет»"
+
+
+def test_t10_skips_unpaired_quote() -> None:
+    """Нечётное число кавычек — фиксер не трогает (нет уверенной пары)."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text='hello "world')],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.10"])
+    assert applied == []
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == 'hello "world'
+
+
+def test_t10_skips_multi_run_paragraph() -> None:
+    """Параграф из нескольких непустых TextRun-ов не трогаем (форматирование)."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text='"привет'), TextRun(text=' мир"')],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.10"])
+    assert applied == []
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == '"привет'
+    assert text_runs[1].text == ' мир"'
+
+
+# --- T.11: дефис → длинное тире ---------------------------------------------
+
+
+def test_t11_hyphen_to_em_dash() -> None:
+    """ « - » → « — » в одном TextRun-е."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="a - b")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.11"])
+    assert len(applied) == 1
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "a — b"
+
+
+def test_t11_in_word_hyphen_kept() -> None:
+    """Дефис без пробелов вокруг (внутри слова) не трогаем."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="веб-сервис")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.11"])
+    assert applied == []
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "веб-сервис"
+
+
+# --- H.03: точка после номера заголовка --------------------------------------
+
+
+def test_h03_removes_dot_after_number() -> None:
+    """ «1. Введение» → «1 Введение»."""
+    section = LogicalSection(
+        id="s1",
+        heading=[TextRun(text="1. Введение")],
+        level=1,
+    )
+    doc = _doc_with_section(section)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["H.03"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "H.03"
+    runs = [el for el in section.heading if isinstance(el, TextRun)]
+    assert runs[0].text == "1 Введение"
+
+
+# --- H.08: точка в конце заголовка -------------------------------------------
+
+
+def test_h08_removes_trailing_dot() -> None:
+    """ «Введение.» → «Введение»."""
+    section = LogicalSection(
+        id="s1",
+        heading=[TextRun(text="Введение.")],
+        level=1,
+    )
+    doc = _doc_with_section(section)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["H.08"])
+    assert len(applied) == 1
+    runs = [el for el in section.heading if isinstance(el, TextRun)]
+    assert runs[0].text == "Введение"
+
+
+def test_h08_preserves_question_mark() -> None:
+    """Знак вопроса в конце заголовка — допустим, не трогаем."""
+    section = LogicalSection(
+        id="s1",
+        heading=[TextRun(text="Что такое?")],
+        level=1,
+    )
+    doc = _doc_with_section(section)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["H.08"])
+    assert applied == []
+    runs = [el for el in section.heading if isinstance(el, TextRun)]
+    assert runs[0].text == "Что такое?"
+
+
+# --- end-to-end: export → parse → fix → export → parse → validate -----------
+
+
+def test_fix_round_trip_through_export(tmp_path: Path) -> None:
+    """После fix + export + parse в документе нет T.08-нарушений."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="hello  world", font="Times New Roman", size_pt=14)],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+
+    # До фикса — есть нарушение T.08.
+    pre = [v for v in validate(doc, profile) if v.check_code == "T.08"]
+    assert pre, "тест должен начинаться с нарушением T.08"
+
+    fix(doc, profile, codes=["T.08"])
+
+    out = tmp_path / "fixed.docx"
+    export_docx(doc, profile, out)
+    reparsed = parse_docx(out)
+    post = [v for v in validate(reparsed, profile) if v.check_code == "T.08"]
+    assert post == []
+
+
+# --- фильтрация по кодам -----------------------------------------------------
+
+
+def test_fix_with_codes_filter() -> None:
+    """`codes=["T.08"]` применяет только T.08, остальные пропускает."""
+    # В параграфе и двойной пробел (T.08), и парные кавычки (T.10).
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text='"a  b"')],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+
+    applied = fix(doc, profile, codes=["T.08"])
+    codes = {a.fixer_code for a in applied}
+    assert codes == {"T.08"}
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    # T.08 сработал: двойной пробел схлопнулся; T.10 не запускался — кавычки на месте.
+    assert text_runs[0].text == '"a b"'
