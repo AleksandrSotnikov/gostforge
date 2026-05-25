@@ -10,6 +10,9 @@ from pathlib import Path
 import click
 
 from gostforge import __version__
+from gostforge.exporter import export_docx
+from gostforge.fixer import FixApplied
+from gostforge.fixer import fix as run_fix
 from gostforge.parser import parse_docx
 from gostforge.profile import list_profiles, load_profile
 from gostforge.validator import Violation, validate
@@ -264,6 +267,69 @@ def check(path: Path, profile: str, report: Path | None, quiet: bool) -> None:
 
     if total_errors > 0:
         sys.exit(1)
+
+
+def _print_fixes(applied: list[FixApplied]) -> None:
+    """Вывести таблицу применённых автоправок."""
+    if not applied:
+        click.echo("  " + click.style("[OK]", fg="green", bold=True) + "  Ничего исправлять не пришлось")
+        return
+
+    click.echo(
+        "  "
+        + click.style("[FIX]", fg="cyan", bold=True)
+        + f"  Применено правок: {len(applied)}"
+    )
+    for record in applied:
+        code = click.style(record.fixer_code, bold=True)
+        click.echo(f"    {code}  {record.description}")
+        if record.location:
+            click.echo("       " + click.style(record.location, fg="bright_black"))
+
+
+@main.command("fix")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить исправленный .docx.",
+)
+@click.option("--profile", "-p", default="gost-7.32-2017")
+@click.option(
+    "--only",
+    multiple=True,
+    help="Применить только указанные коды (можно указать несколько раз).",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Не записывать файл, только показать какие правки были бы применены.",  # noqa: RUF001
+)
+def fix_cmd(
+    path: Path, output: Path, profile: str, only: tuple[str, ...], dry_run: bool
+) -> None:
+    """Применить безопасные автоисправления к .docx и записать результат в OUTPUT."""
+    try:
+        prof = load_profile(profile)
+    except FileNotFoundError as e:
+        click.echo(f"Ошибка: {e}", err=True)
+        sys.exit(2)
+
+    document = parse_docx(path)
+    codes = list(only) if only else None
+    applied = run_fix(document, prof, codes=codes)
+
+    click.secho(f"\n>>> {path.name}", bold=True)
+    _print_fixes(applied)
+
+    if dry_run:
+        click.echo(click.style("\n--dry-run: файл не записан.", fg="yellow"))
+        return
+
+    export_docx(document, prof, output)
+    click.echo(click.style(f"\nИсправленный документ сохранён: {output}", fg="green"))  # noqa: RUF001
 
 
 @main.group()
