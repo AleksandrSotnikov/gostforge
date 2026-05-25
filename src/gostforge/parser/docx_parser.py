@@ -117,6 +117,7 @@ def parse_docx(path: str | Path) -> Document:
     _populate_content(docx_doc, page_section)
     bibliography = _extract_bibliography([page_section])
     auto_hyphenation = _extract_auto_hyphenation(docx_doc)
+    _populate_image_dpi(docx_doc, page_section)
 
     return Document(
         metadata=metadata,
@@ -124,6 +125,46 @@ def parse_docx(path: str | Path) -> Document:
         bibliography=bibliography,
         auto_hyphenation=auto_hyphenation,
     )
+
+
+def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> None:
+    """Для каждой Figure с image_path вида 'embedded:rIdN' извлечь DPI.
+
+    Использует Pillow для определения разрешения media-file. Если Pillow
+    недоступен, оставляет dpi=None. DPI вычисляется как min(x_dpi, y_dpi)
+    из info['dpi'] или из физических размеров EMU vs пикселей (упрощённо —
+    только info['dpi']).
+    """
+    try:
+        from PIL import Image  # type: ignore[import-not-found]
+    except ImportError:
+        return
+
+    def _iter_figures(items: list[LogicalSection | Block]) -> list[Figure]:
+        out: list[Figure] = []
+        for item in items:
+            if isinstance(item, Figure):
+                out.append(item)
+            elif isinstance(item, LogicalSection):
+                out.extend(_iter_figures(item.children))
+        return out
+
+    figures = _iter_figures(page_section.content)
+    for fig in figures:
+        if not fig.image_path.startswith("embedded:"):
+            continue
+        rid = fig.image_path[len("embedded:"):]
+        try:
+            image_part = docx_doc.part.related_parts.get(rid)
+            if image_part is None:
+                continue
+            blob = image_part.blob
+            with Image.open(__import__("io").BytesIO(blob)) as im:
+                dpi_value = im.info.get("dpi")
+                if dpi_value:
+                    fig.dpi = int(min(dpi_value))
+        except Exception:  # noqa: BLE001 — повреждённый media-file не должен валить парсер
+            continue
 
 
 def _extract_auto_hyphenation(docx_doc: DocxDocument) -> bool | None:
@@ -586,7 +627,13 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
     if drawings:
         counters.figure += 1
         image_path = _extract_drawing_rid(drawings[0])
-        return Figure(id=f"fig-{counters.figure}", image_path=image_path, caption=[])
+        alignment = _alignment_to_literal(dp.paragraph_format.alignment)
+        return Figure(
+            id=f"fig-{counters.figure}",
+            image_path=image_path,
+            caption=[],
+            alignment=alignment,
+        )
     omml_text = _extract_omml_text(dp._p)
     if omml_text is not None:
         counters.formula += 1

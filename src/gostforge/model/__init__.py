@@ -96,6 +96,11 @@ class Figure(Block):
     image_path: str = ""
     caption: list[InlineElement] = field(default_factory=list)
     number: int | None = None  # проставляется на экспорте
+    # Выравнивание параграфа, содержащего рисунок (заполняется парсером).
+    # None — не задано / наследуется от стиля.
+    alignment: Literal["left", "right", "center", "justify"] | None = None
+    # DPI извлекается парсером из media-file через Pillow. None = не определено.
+    dpi: int | None = None
 
 
 @dataclass

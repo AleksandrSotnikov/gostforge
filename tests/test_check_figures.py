@@ -555,3 +555,76 @@ def test_i10_returns_empty_phase2_stub() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.10"]
     assert found == []
+
+
+# --- I.08 (DPI изображения) ------------------------------------------------
+
+
+def test_i08_registered() -> None:
+    assert "I.08" in registered_checks()
+
+
+def test_i08_dpi_above_minimum_no_violation() -> None:
+    """Рисунок с DPI=300 проходит проверку при min_dpi=150."""
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", dpi=300, caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.08"]
+    assert found == []
+
+
+def test_i08_low_dpi_violation() -> None:
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", dpi=72, caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.08"]
+    assert len(found) == 1
+    assert found[0].details["actual"] == "72"
+    assert "72" in found[0].message
+
+
+def test_i08_unknown_dpi_skipped() -> None:
+    """Если DPI=None (Pillow недоступен или формат без метаданных) — пропускаем."""
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", dpi=None, caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.08"]
+    assert found == []
+
+
+# --- I.09 (центрирование рисунка) ------------------------------------------
+
+
+def test_i09_registered() -> None:
+    assert "I.09" in registered_checks()
+
+
+def test_i09_centered_no_violation() -> None:
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", alignment="center", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.09"]
+    assert found == []
+
+
+def test_i09_left_aligned_violation() -> None:
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", alignment="left", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.09"]
+    assert len(found) == 1
+    assert found[0].details["actual"] == "left"
+
+
+def test_i09_unset_alignment_skipped() -> None:
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", alignment=None, caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.09"]
+    assert found == []

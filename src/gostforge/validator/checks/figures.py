@@ -510,11 +510,85 @@ def check_figure_blank_line_after_caption(
     return []
 
 
+@register("I.08")
+def check_figure_dpi(document: Document, profile: Profile) -> list[Violation]:
+    """Качество изображения: DPI ≥ min_dpi.
+
+    Параметр `checks.I.08.params.min_dpi: int = 150`.
+    Парсер заполняет `Figure.dpi` через Pillow для embedded-изображений.
+    Если dpi=None — Pillow недоступен или формат не содержит метаданных,
+    проверка пропускается.
+    """
+    config = profile.checks.get("I.08")
+    min_dpi = 150
+    if config and config.params.get("min_dpi"):
+        min_dpi = int(config.params["min_dpi"])
+
+    violations: list[Violation] = []
+    for page_section, fig in _all_figures(document):
+        if fig.dpi is None:
+            continue
+        if fig.dpi < min_dpi:
+            violations.append(
+                Violation(
+                    check_code="I.08",
+                    severity="warning",
+                    message=(
+                        f"Рисунок «{fig.id}» имеет DPI={fig.dpi}, "
+                        f"ожидается ≥ {min_dpi}"
+                    ),
+                    location=f"page_sections.{page_section.id}.figure[{fig.id}].dpi",
+                    suggestion=(
+                        f"Пересохранить изображение с разрешением ≥ {min_dpi} DPI "
+                        f"для качественной печати"
+                    ),
+                    details={"actual": str(fig.dpi), "expected_min": str(min_dpi)},
+                )
+            )
+    return violations
+
+
+@register("I.09")
+def check_figure_centered(document: Document, profile: Profile) -> list[Violation]:
+    """Рисунок выровнен по центру (warning).
+
+    Парсер заполняет `Figure.alignment` из paragraph_format параграфа,
+    содержащего рисунок. None означает «наследуется от стиля» — проверка
+    пропускается.
+    """
+    config = profile.checks.get("I.09")
+    expected = "center"
+    if config and config.params.get("alignment"):
+        expected = str(config.params["alignment"])
+
+    violations: list[Violation] = []
+    for page_section, fig in _all_figures(document):
+        if fig.alignment is None:
+            continue
+        if fig.alignment != expected:
+            violations.append(
+                Violation(
+                    check_code="I.09",
+                    severity="warning",
+                    message=(
+                        f"Рисунок «{fig.id}» выровнен «{fig.alignment}», "
+                        f"ожидается «{expected}»"
+                    ),
+                    location=f"page_sections.{page_section.id}.figure[{fig.id}].alignment",
+                    suggestion=f"Выровнять рисунок «{expected}»",
+                    details={"expected": expected, "actual": fig.alignment},
+                )
+            )
+    return violations
+
+
 __all__ = [
     "check_figure_blank_line_after_caption",
     "check_figure_caption_below",
     "check_figure_caption_format",
     "check_figure_caption_style",
+    "check_figure_centered",
+    "check_figure_dpi",
     "check_figure_has_caption",
     "check_figure_numbering_continuous",
     "check_figure_reference_precedes",

@@ -153,6 +153,8 @@ checks:
   I.05: {enabled: true}
   I.06: {enabled: true}
   I.07: {enabled: true}
+  I.08: {enabled: true, params: {min_dpi: 150}}
+  I.09: {enabled: true, params: {alignment: center}}
   I.10: {enabled: true}
   B.01: {enabled: true}
   B.02: {enabled: true}
