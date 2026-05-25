@@ -1,3 +1,5 @@
+# ruff: noqa: RUF002, RUF003
+
 """Внутренняя модель документа.
 
 Это сердце системы: и парсер, и валидатор, и экспортёр работают через эту
@@ -12,7 +14,7 @@ from enum import Enum
 from typing import Literal
 
 
-SCHEMA_VERSION = "0.2.0"
+SCHEMA_VERSION = "0.3.0"
 
 
 # --- Inline content -----------------------------------------------------------
@@ -22,19 +24,25 @@ SCHEMA_VERSION = "0.2.0"
 class TextRun:
     """Фрагмент текста с inline-разметкой.
 
-    Все атрибуты форматирования (`bold`, `italic`, `superscript`, `subscript`,
-    `font`, `size_pt`) могут быть `None`, что означает «наследуется от
-    стиля абзаца». Парсер выставляет только те значения, которые run задаёт
-    явно. Проверки трактуют `None` как «нет нарушения».
+    Все атрибуты форматирования (`bold`, `italic`, `underline`,
+    `superscript`, `subscript`, `font`, `size_pt`, `color_hex`) могут быть
+    `None`, что означает «наследуется от стиля абзаца». Парсер выставляет
+    только те значения, которые run задаёт явно. Проверки трактуют `None`
+    как «нет нарушения».
     """
 
     text: str
     bold: bool | None = None
     italic: bool | None = None
+    underline: bool | None = None
     superscript: bool | None = None
     subscript: bool | None = None
     font: str | None = None
     size_pt: float | None = None
+    # Цвет в формате #RRGGBB. В обычном тексте проверка X.* запретит
+    # непустой color_hex; используется для синтаксической подсветки
+    # кода в BlockType.CODE.
+    color_hex: str | None = None
 
 
 @dataclass
@@ -43,9 +51,39 @@ class CrossRef:
 
     target_id: str
     display_template: str = "{kind} {num}"  # на экспорте: "рисунок 3", "таблица 1.2"
+    # Текст «(см. ...)», «согласно ...» — добавляется перед автогенерируемой
+    # ссылкой. None = только сам номер.
+    prefix: str | None = None
 
 
-InlineElement = TextRun | CrossRef
+@dataclass
+class InlineFormula:
+    """LaTeX-формула, отрисовываемая в потоке текста.
+
+    На экспорте → OMML внутри run параграфа (а не отдельный <m:oMathPara>).
+    На парсинге → распознаётся по <m:oMath>, лежащему внутри <w:r>.
+    """
+
+    latex: str
+    # id опционален: inline-формулы обычно не нумеруются.
+    id: str | None = None
+
+
+@dataclass
+class Citation:
+    """Inline-цитата на источник из Document.bibliography.
+
+    Отображается как «[N]» или «[N, с. P]» (по заданному template).
+    Номер N вычисляется на экспорте из позиции источника в
+    Document.bibliography (1-based).
+    """
+
+    source_id: str  # ссылка на BibliographyEntry.id
+    pages: str | None = None  # "12", "12-15", "12, 17-20"
+    template: str = "[{n}]"  # либо "[{n}, с. {pages}]"
+
+
+InlineElement = TextRun | CrossRef | InlineFormula | Citation
 
 
 # --- Блоки --------------------------------------------------------------------
