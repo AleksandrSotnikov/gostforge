@@ -660,8 +660,23 @@ def check_conclusion_min_paragraphs(document: Document, profile: Profile) -> lis
     ]
 
 
+# --- S.08 — заглушка под V.02 ----------------------------------------------
+
+
+@register("S.08")
+def check_intro_conclusion_volume(document: Document, profile: Profile) -> list[Violation]:
+    """Объём введения и заключения в нормах.
+
+    Заглушка под будущую V.02. Регистрируется, чтобы профили могли
+    включать её, но фактически ничего не возвращает. Когда V.02 будет
+    реализована, обе проверки будут объединены.
+    """
+    return []
+
+
 __all__ = [
     "check_conclusion_min_paragraphs",
+    "check_intro_conclusion_volume",
     "check_introduction_required_elements",
     "check_no_empty_sections",
     "check_required_sections",

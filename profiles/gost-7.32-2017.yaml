@@ -137,6 +137,7 @@ checks:
       min_paragraphs: 3
   S.06: {enabled: true, params: {required_for_level: 1}}
   S.07: {enabled: true}
+  S.08: {enabled: true}
   H.01: {enabled: true}
   H.02: {enabled: true}
   H.03: {enabled: true}

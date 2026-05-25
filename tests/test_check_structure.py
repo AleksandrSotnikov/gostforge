@@ -690,3 +690,9 @@ def test_s05_custom_min_paragraphs_param() -> None:
     assert len(found) == 1
 
 
+# --- S.08 -------------------------------------------------------------------
+
+
+def test_s08_registered() -> None:
+    """S.08 — заглушка под V.02, но должна быть зарегистрирована."""
+    assert "S.08" in registered_checks()
