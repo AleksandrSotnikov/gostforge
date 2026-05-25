@@ -356,6 +356,48 @@ def profiles_show(profile_id: str) -> None:
     click.echo(prof.model_dump_json(indent=2))
 
 
+@profiles.command("validate")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+def profiles_validate(path: Path) -> None:
+    """Проверить YAML-файл профиля на корректность.
+
+    Выводит сводку: число включённых проверок, сколько из них
+    реализовано в текущем gostforge, нет ли ссылок на отсутствующие коды.
+    """
+    import yaml
+    from gostforge.profile.schema import Profile
+
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        click.echo(f"Ошибка парсинга YAML: {e}", err=True)
+        sys.exit(2)
+
+    try:
+        prof = Profile(**data)
+    except Exception as e:  # noqa: BLE001 — отображаем pydantic-ошибку как есть
+        click.echo(f"Профиль не прошёл валидацию схемы:", err=True)
+        click.echo(str(e), err=True)
+        sys.exit(2)
+
+    enabled_codes = {c for c, cfg in prof.checks.items() if cfg.enabled}
+    available = set(registered_checks())
+    runnable = enabled_codes & available
+    skipped = enabled_codes - available
+
+    click.echo(click.style(f"Профиль: {prof.id} v{prof.version}", bold=True))
+    click.echo(f"  Включено проверок: {len(enabled_codes)}")
+    click.echo(f"  Будет запущено: {len(runnable)}")
+    if skipped:
+        click.echo(
+            click.style(f"  Не реализованы ({len(skipped)}): ", fg="yellow")
+            + ", ".join(sorted(skipped))
+        )
+    if prof.extends:
+        click.echo(f"  Наследует от: {prof.extends}")
+    click.echo(click.style("[OK]", fg="green", bold=True) + " Файл валиден")
+
+
 @main.command("checks")
 def checks_list() -> None:
     """Показать список зарегистрированных проверок."""

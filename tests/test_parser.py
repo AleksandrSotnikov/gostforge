@@ -493,3 +493,31 @@ def test_parser_splits_lists_by_intervening_paragraph(tmp_path: Path) -> None:
     assert len(list_blocks) == 2
     assert len(list_blocks[0].items) == 2
     assert len(list_blocks[1].items) == 2
+
+
+def test_parser_extracts_image_rid_from_drawing(tmp_path: Path) -> None:
+    """Парсер сохраняет rId изображения как 'embedded:rIdN' в Figure.image_path."""
+    try:
+        from PIL import Image  # type: ignore[import-not-found]
+    except ImportError:
+        import pytest
+        pytest.skip("Pillow не установлен")
+    import docx as python_docx
+
+    from gostforge.model import Figure
+    from gostforge.parser import parse_docx
+
+    img = tmp_path / "test.png"
+    Image.new("RGB", (20, 20), color="blue").save(img)
+
+    doc = python_docx.Document()
+    p = doc.add_paragraph()
+    p.add_run().add_picture(str(img))
+    out = tmp_path / "with_image.docx"
+    doc.save(str(out))
+
+    parsed = parse_docx(out)
+    figures = [b for b in parsed.page_sections[0].content if isinstance(b, Figure)]
+    assert len(figures) == 1
+    # image_path должен начинаться с 'embedded:rId' — это идентификатор отношения
+    assert figures[0].image_path.startswith("embedded:rId"), figures[0].image_path

@@ -585,7 +585,8 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
     drawings = dp._p.findall(f".//{{{W_NS}}}drawing")
     if drawings:
         counters.figure += 1
-        return Figure(id=f"fig-{counters.figure}", image_path="", caption=[])
+        image_path = _extract_drawing_rid(drawings[0])
+        return Figure(id=f"fig-{counters.figure}", image_path=image_path, caption=[])
     omml_text = _extract_omml_text(dp._p)
     if omml_text is not None:
         counters.formula += 1
@@ -596,6 +597,26 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
         )
     counters.paragraph += 1
     return _build_paragraph(dp, idx=counters.paragraph)
+
+
+def _extract_drawing_rid(drawing_elem: Any) -> str:
+    """Извлечь relationship-id изображения из <w:drawing>.
+
+    Внутри <w:drawing> есть <a:blip r:embed="rIdN"/> (или r:link для
+    внешних ссылок). Возвращает идентификатор вида 'embedded:rIdN'.
+    Если не нашли — пустую строку (тогда экспортёр напишет placeholder).
+    """
+    # Namespace для DrawingML и Relationships
+    a_ns = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    r_ns = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    for blip in drawing_elem.iter(f"{{{a_ns}}}blip"):
+        embed = blip.get(f"{{{r_ns}}}embed")
+        if embed:
+            return f"embedded:{embed}"
+        link = blip.get(f"{{{r_ns}}}link")
+        if link:
+            return f"linked:{link}"
+    return ""
 
 
 def _extract_omml_text(p_elem: Any) -> str | None:
