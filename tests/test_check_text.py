@@ -932,3 +932,42 @@ def test_t13_skips_headers_and_footers() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.13"]
     assert found == []
+
+
+# --- T.06 (автопереносы отключены) ----------------------------------------
+
+
+def test_t06_registered() -> None:
+    assert "T.06" in registered_checks()
+
+
+def test_t06_hyphenation_disabled_no_violation() -> None:
+    doc = Document(auto_hyphenation=False)
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", page=PageGeometry())
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.06"]
+    assert found == []
+
+
+def test_t06_hyphenation_enabled_violation() -> None:
+    doc = Document(auto_hyphenation=True)
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", page=PageGeometry())
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.06"]
+    assert len(found) == 1
+    assert "автоматический перенос" in found[0].message
+
+
+def test_t06_none_value_skipped() -> None:
+    """None означает «не определено» — проверка не применяется."""
+    doc = Document(auto_hyphenation=None)
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", page=PageGeometry())
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.06"]
+    assert found == []

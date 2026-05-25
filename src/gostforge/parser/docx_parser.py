@@ -116,12 +116,42 @@ def parse_docx(path: str | Path) -> Document:
     page_section = _extract_page_section(docx_doc)
     _populate_content(docx_doc, page_section)
     bibliography = _extract_bibliography([page_section])
+    auto_hyphenation = _extract_auto_hyphenation(docx_doc)
 
     return Document(
         metadata=metadata,
         page_sections=[page_section],
         bibliography=bibliography,
+        auto_hyphenation=auto_hyphenation,
     )
+
+
+def _extract_auto_hyphenation(docx_doc: DocxDocument) -> bool | None:
+    """Прочитать `<w:autoHyphenation/>` из word/settings.xml.
+
+    По OOXML autoHyphenation — toggle-элемент: его наличие включает
+    автоматический перенос. Отсутствие = выключен. На Фазе 1
+    интерпретируем строго: элемент найден → True, иначе False.
+    """
+    try:
+        settings_part = docx_doc.part.package.part_related_by(
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings"
+        )
+    except Exception:  # noqa: BLE001 — settings.xml не обязательная часть
+        return None
+    settings_xml = settings_part.blob
+    try:
+        root = etree.fromstring(settings_xml)
+    except Exception:  # noqa: BLE001
+        return None
+    auto_hyph = root.find(f"{{{W_NS}}}autoHyphenation")
+    if auto_hyph is None:
+        return False
+    val = auto_hyph.get(f"{{{W_NS}}}val")
+    # По OOXML toggle: отсутствие val или val="1"/"true" → on; "0"/"false" → off.
+    if val in {"0", "false"}:
+        return False
+    return True
 
 
 # --- метаданные --------------------------------------------------------------

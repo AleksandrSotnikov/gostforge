@@ -687,8 +687,35 @@ def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violati
     )
 
 
+@register("T.06")
+def check_auto_hyphenation_disabled(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """По ГОСТ автоматические переносы в работе должны быть отключены.
+
+    Парсер выставляет `Document.auto_hyphenation = True/False/None` из
+    word/settings.xml (`<w:autoHyphenation/>`). Если True — нарушение.
+    None означает «не определено» и пропускается.
+    """
+    if document.auto_hyphenation is True:
+        return [
+            Violation(
+                check_code="T.06",
+                severity="error",
+                message="В документе включён автоматический перенос слов",
+                location="document.auto_hyphenation",
+                suggestion=(
+                    "В Word: Разметка страницы → Расстановка переносов → Нет"
+                ),
+                details={"actual": "True"},
+            )
+        ]
+    return []
+
+
 __all__ = [
     "check_alignment",
+    "check_auto_hyphenation_disabled",
     "check_em_dash_instead_of_hyphen",
     "check_first_line_indent",
     "check_font",
