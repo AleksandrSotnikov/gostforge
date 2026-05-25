@@ -32,6 +32,8 @@ from . import (  # noqa: F401
     page_sections,
     references,
     structure,
+    style,
     tables,
     text,
+    volume,
 )

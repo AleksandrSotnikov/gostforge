@@ -190,3 +190,21 @@ checks:
   M.04: {enabled: true}
   L.01: {enabled: true, params: {allowed_markers: ["•", "-", "–"]}}
   L.02: {enabled: true}
+  V.01:
+    enabled: true
+    params:
+      min_pages: 25
+      max_pages: 50
+      words_per_page: 250
+  V.02:
+    enabled: true
+    params:
+      intro_min_words: 800
+      intro_max_words: 1500
+      conclusion_min_words: 500
+      conclusion_max_words: 1200
+  V.03: {enabled: true}
+  V.04: {enabled: true, params: {min_figures_per_10_pages: 1, min_tables_per_10_pages: 1}}
+  X.01: {enabled: true}
+  X.02: {enabled: true}
+  X.03: {enabled: true}
