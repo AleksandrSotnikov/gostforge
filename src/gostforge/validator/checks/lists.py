@@ -152,7 +152,7 @@ def _ordered_item_format(item: Sequence[InlineElement]) -> str | None:
 
 @register("L.02")
 def check_ordered_list_uniform_format(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document, profile: Profile
 ) -> list[Violation]:
     """Стиль нумерации нумерованных списков должен быть единообразным.
 
