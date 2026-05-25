@@ -23,6 +23,11 @@ from ..engine import Violation, register
 # Не допускаем цифры в составе — тогда это код/идентификатор, не аббр.
 _ABBR_RE = re.compile(r"\b([A-ZА-ЯЁ]{2,10})\b")
 
+# Расширенный паттерн — допускает точки между заглавными буквами
+# («В.К.Р.» / «В. К. Р.» / «ВКР»). Используется в A.03 для группировки.
+_ABBR_DOTTED_RE = re.compile(
+    r"\b(?:[A-ZА-ЯЁ]{2,10}|(?:[A-ZА-ЯЁ]\.\s?){2,10})"
+)
 
 # Общеизвестные аббревиатуры, не требующие расшифровки. Можно расширять
 # через `checks.A.01.params.known_abbreviations` в профиле.
@@ -218,6 +223,37 @@ def _collect_abbreviations(paragraphs: Sequence[Paragraph]) -> set[str]:
     return found
 
 
+def _collect_abbreviation_forms(
+    paragraphs: Sequence[Paragraph],
+) -> dict[str, set[str]]:
+    """Сгруппировать встретившиеся аббревиатуры по «канонизированному» ключу.
+
+    Канонизация: удалить точки и пробелы, привести к верхнему регистру.
+    Это позволяет уловить «ВКР» / «вкр» / «В.К.Р.» как одну группу.
+
+    Возвращает словарь {canonical_upper -> set формовидов},
+    где формовид — это исходное написание из текста.
+    """
+    groups: dict[str, set[str]] = {}
+    for paragraph in paragraphs:
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        # Ищем как обычные АББР, так и с точками — чтобы учесть «В.К.Р.».
+        for match in _ABBR_DOTTED_RE.finditer(text):
+            form = match.group(0).rstrip()
+            # Канонизация: убрать точки и пробелы, привести к UPPER.
+            key = re.sub(r"[.\s]", "", form).upper()
+            if len(key) < 2 or len(key) > 10:
+                continue
+            # Дополнительный фильтр: ключ должен быть только из букв
+            # (не должно быть цифр, дефисов и пр.).
+            if not re.fullmatch(r"[A-ZА-ЯЁ]+", key):
+                continue
+            groups.setdefault(key, set()).add(form)
+    return groups
+
+
 # --- A.02 ------------------------------------------------------------------
 
 
@@ -306,7 +342,58 @@ def check_abbreviations_list_required(
     return violations
 
 
+# --- A.03 ------------------------------------------------------------------
+
+
+@register("A.03")
+def check_abbreviation_consistent_form(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Аббревиатура должна использоваться в одном и том же написании.
+
+    Эвристика:
+    1. Собрать все аббревиатуры со всех абзацев (с учётом точек —
+       «В.К.Р.» канонизируется в «ВКР»).
+    2. Сгруппировать по канонизированному (без точек/пробелов, UPPER)
+       написанию.
+    3. Если в группе больше одного «видимого» написания (например,
+       «ВКР» и «вкр», или «ВКР» и «В.К.Р.») — Violation на группу.
+    """
+    _ = profile  # на Фазе 1 параметризация не требуется
+    violations: list[Violation] = []
+    paragraphs = _all_paragraphs(document)
+    groups = _collect_abbreviation_forms(paragraphs)
+
+    for canonical, forms in groups.items():
+        if len(forms) <= 1:
+            continue
+        forms_sorted = sorted(forms)
+        violations.append(
+            Violation(
+                check_code="A.03",
+                severity="info",
+                message=(
+                    f"Аббревиатура «{canonical}» встречается в разных "
+                    f"написаниях: " + ", ".join(f"«{f}»" for f in forms_sorted)
+                ),
+                location="document",
+                suggestion=(
+                    f"Привести все упоминания к единому написанию "
+                    f"«{canonical}»"
+                ),
+                details={
+                    "abbreviation": canonical,
+                    "forms": "; ".join(forms_sorted),
+                },
+            )
+        )
+
+    return violations
+
+
 __all__ = [
+    "check_abbreviation_consistent_form",
     "check_abbreviation_first_use_explained",
     "check_abbreviations_list_required",
 ]
