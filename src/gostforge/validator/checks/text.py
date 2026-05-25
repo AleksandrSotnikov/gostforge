@@ -25,6 +25,11 @@ _NON_BODY_STYLES = {"footnote text", "header", "footer"}
 # Допуск по кеглю (Word хранит размеры с шагом 0.5pt, иногда плавающие значения)
 _SIZE_TOLERANCE_PT = 0.1
 
+# Допуск по межстрочному интервалу и отступу красной строки. line_spacing
+# в Word может быть округлён до сотых, indent — до миллиметров.
+_LINE_SPACING_TOLERANCE = 0.01
+_INDENT_TOLERANCE_CM = 0.05
+
 
 def _iter_paragraphs(items: list[LogicalSection | Block]) -> list[Paragraph]:
     """Рекурсивно собрать все Paragraph из списка вложенных элементов модели."""
@@ -170,4 +175,118 @@ def check_font_size(document: Document, profile: Profile) -> list[Violation]:
     return violations
 
 
-__all__ = ["check_font", "check_font_size"]
+@register("T.03")
+def check_line_spacing(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка межстрочного интервала основного текста (по умолчанию 1.5).
+
+    Параметры `checks.T.03.params`:
+    - `line_spacing` (по умолчанию `profile.styles.body.line_spacing`).
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("T.03")
+    expected = float(profile.styles.body.line_spacing)
+    if config and config.params.get("line_spacing") is not None:
+        expected = float(config.params["line_spacing"])
+
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) != "body":
+            continue
+        if paragraph.line_spacing is None:
+            continue
+        if abs(paragraph.line_spacing - expected) > _LINE_SPACING_TOLERANCE:
+            violations.append(
+                Violation(
+                    check_code="T.03",
+                    severity="error",
+                    message=(
+                        f"Межстрочный интервал {paragraph.line_spacing} в абзаце "
+                        f"«{_preview(paragraph.content)}» не соответствует {expected}"
+                    ),
+                    location=f"page_sections.*.paragraph[{paragraph.id}].line_spacing",
+                    suggestion=f"Установить межстрочный интервал {expected} для основного текста",
+                    details={"expected": str(expected), "actual": str(paragraph.line_spacing)},
+                )
+            )
+    return violations
+
+
+@register("T.04")
+def check_first_line_indent(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка отступа красной строки основного текста (по умолчанию 1.25 см).
+
+    Параметры `checks.T.04.params`:
+    - `first_line_indent_cm` (по умолчанию `profile.styles.body.first_line_indent_cm`).
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("T.04")
+    expected = float(profile.styles.body.first_line_indent_cm)
+    if config and config.params.get("first_line_indent_cm") is not None:
+        expected = float(config.params["first_line_indent_cm"])
+
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) != "body":
+            continue
+        if paragraph.first_line_indent_cm is None:
+            continue
+        if abs(paragraph.first_line_indent_cm - expected) > _INDENT_TOLERANCE_CM:
+            violations.append(
+                Violation(
+                    check_code="T.04",
+                    severity="error",
+                    message=(
+                        f"Отступ красной строки {paragraph.first_line_indent_cm} см "
+                        f"в абзаце «{_preview(paragraph.content)}» не соответствует {expected} см"
+                    ),
+                    location=f"page_sections.*.paragraph[{paragraph.id}].first_line_indent_cm",
+                    suggestion=f"Установить отступ первой строки {expected} см",
+                    details={
+                        "expected": str(expected),
+                        "actual": str(paragraph.first_line_indent_cm),
+                    },
+                )
+            )
+    return violations
+
+
+@register("T.05")
+def check_alignment(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка выравнивания основного текста (по умолчанию по ширине).
+
+    Параметры `checks.T.05.params`:
+    - `alignment`: 'left' | 'right' | 'center' | 'justify' (по умолчанию body.alignment).
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("T.05")
+    expected = profile.styles.body.alignment
+    if config and config.params.get("alignment"):
+        expected = config.params["alignment"]
+
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) != "body":
+            continue
+        if paragraph.alignment is None:
+            continue
+        if paragraph.alignment != expected:
+            violations.append(
+                Violation(
+                    check_code="T.05",
+                    severity="error",
+                    message=(
+                        f"Выравнивание «{paragraph.alignment}» в абзаце "
+                        f"«{_preview(paragraph.content)}» не соответствует «{expected}»"
+                    ),
+                    location=f"page_sections.*.paragraph[{paragraph.id}].alignment",
+                    suggestion=f"Установить выравнивание «{expected}» для основного текста",
+                    details={"expected": expected, "actual": paragraph.alignment},
+                )
+            )
+    return violations
+
+
+__all__ = [
+    "check_font",
+    "check_font_size",
+    "check_line_spacing",
+    "check_first_line_indent",
+    "check_alignment",
+]

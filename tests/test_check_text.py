@@ -163,3 +163,143 @@ def test_t02_caption_wrong_size_violation() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "T.02"]
     assert len(found) == 1
     assert found[0].details["category"] == "caption"
+
+
+# --- T.03 (межстрочный интервал) -------------------------------------------
+
+
+def test_t03_correct_line_spacing_no_violation() -> None:
+    paragraph = Paragraph(
+        id="p1", content=[TextRun(text="Текст")], style_name="Normal", line_spacing=1.5
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.03"]
+    assert found == []
+
+
+def test_t03_wrong_line_spacing_violation() -> None:
+    paragraph = Paragraph(
+        id="p1", content=[TextRun(text="Текст")], style_name="Normal", line_spacing=1.0
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.03"]
+    assert len(found) == 1
+    assert found[0].details["expected"] == "1.5"
+
+
+def test_t03_skips_paragraph_without_explicit_spacing() -> None:
+    """line_spacing=None означает «наследуется от стиля» — не нарушение."""
+    paragraph = Paragraph(id="p1", content=[TextRun(text="Текст")], style_name="Normal")
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.03"]
+    assert found == []
+
+
+def test_t03_ignores_captions() -> None:
+    """У подписей рисунков/таблиц своя строка — не считается нарушением T.03."""
+    paragraph = Paragraph(
+        id="p1", content=[TextRun(text="Рисунок 1")], style_name="Caption", line_spacing=1.0
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.03"]
+    assert found == []
+
+
+# --- T.04 (отступ красной строки) ------------------------------------------
+
+
+def test_t04_correct_indent_no_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Текст")],
+        style_name="Normal",
+        first_line_indent_cm=1.25,
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.04"]
+    assert found == []
+
+
+def test_t04_wrong_indent_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Текст")],
+        style_name="Normal",
+        first_line_indent_cm=0.5,
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.04"]
+    assert len(found) == 1
+
+
+def test_t04_indent_within_tolerance() -> None:
+    """1.26 см — в пределах допуска 0.05 см."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Текст")],
+        style_name="Normal",
+        first_line_indent_cm=1.26,
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.04"]
+    assert found == []
+
+
+# --- T.05 (выравнивание) ---------------------------------------------------
+
+
+def test_t05_correct_alignment_no_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Текст")],
+        style_name="Normal",
+        alignment="justify",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.05"]
+    assert found == []
+
+
+def test_t05_wrong_alignment_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Текст")],
+        style_name="Normal",
+        alignment="left",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.05"]
+    assert len(found) == 1
+    assert found[0].details["actual"] == "left"
+
+
+def test_t05_skips_headings_and_captions() -> None:
+    """Заголовки и подписи имеют собственное выравнивание (H.*/I.*/B.*)."""
+    heading = Paragraph(
+        id="p1",
+        content=[TextRun(text="Введение")],
+        style_name="Heading 1",
+        alignment="center",
+    )
+    caption = Paragraph(
+        id="p2",
+        content=[TextRun(text="Рисунок 1")],
+        style_name="Caption",
+        alignment="center",
+    )
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", content=[heading, caption])
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.05"]
+    assert found == []
