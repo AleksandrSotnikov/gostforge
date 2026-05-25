@@ -332,5 +332,40 @@ def ui(host: str, port: int) -> None:
     subprocess.run(cmd, check=False)
 
 
+@main.command()
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+def stats(path: Path) -> None:
+    """Показать структурную статистику документа.
+
+    Считает число разделов, параграфов, таблиц, рисунков, источников
+    и слов. Не зависит от профиля и не выполняет проверки.
+    """
+    from gostforge.stats import compute_stats
+
+    targets = [path] if path.is_file() else sorted(path.glob("*.docx"))
+    if not targets:
+        click.echo(f"Не найдено .docx файлов в {path}", err=True)
+        sys.exit(1)
+
+    for target in targets:
+        document = parse_docx(target)
+        s = compute_stats(document)
+        click.secho(f"\n>>> {target.name}", bold=True)
+        rows = [
+            ("Секций вёрстки (PageSection)", s.page_sections),
+            ("Разделов 1 уровня", s.logical_sections_level_1),
+            ("Разделов всего", s.logical_sections_total),
+            ("Параграфов всего", s.paragraphs),
+            ("  …непустых", s.paragraphs_non_empty),
+            ("Таблиц", s.tables),
+            ("Рисунков", s.figures),
+            ("Источников", s.bibliography_entries),
+            ("Слов", s.words),
+            ("Символов", s.characters),
+        ]
+        for label, value in rows:
+            click.echo(f"  {label:<32} {value}")
+
+
 if __name__ == "__main__":
     main()
