@@ -28,6 +28,7 @@ from . import (  # noqa: F401
     formatting,
     formulas,
     headings,
+    lists,
     page_sections,
     references,
     structure,
