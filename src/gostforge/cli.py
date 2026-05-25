@@ -111,6 +111,87 @@ def _write_markdown_report(
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def _write_xlsx_report(
+    results: dict[str, list[Violation]], output: Path, profile_id: str
+) -> None:
+    """Сохранить отчёт в Excel: один лист «Сводка» + по листу на каждый файл."""
+    # openpyxl уже в зависимостях; импорт локально, чтобы CLI грузился без него
+    # при использовании только Markdown-отчётов.
+    from openpyxl import Workbook  # type: ignore[import-not-found]
+    from openpyxl.styles import Alignment, Font, PatternFill  # type: ignore[import-not-found]
+
+    wb = Workbook()
+    summary = wb.active
+    summary.title = "Сводка"
+
+    bold = Font(bold=True)
+    header_fill = PatternFill(start_color="DDDDDD", end_color="DDDDDD", fill_type="solid")
+    wrap = Alignment(wrap_text=True, vertical="top")
+
+    summary.append([f"Отчёт нормоконтроля — профиль {profile_id}"])
+    summary["A1"].font = Font(bold=True, size=14)
+    summary.append([])
+    summary.append(["Файл", "Нарушений", "Ошибок", "Предупр.", "Инфо"])
+    for cell in summary[3]:
+        cell.font = bold
+        cell.fill = header_fill
+
+    for file_path, violations in results.items():
+        name = Path(file_path).name
+        total = len(violations)
+        errs = sum(1 for v in violations if v.severity == "error")
+        warns = sum(1 for v in violations if v.severity == "warning")
+        infos = sum(1 for v in violations if v.severity == "info")
+        summary.append([name, total, errs, warns, infos])
+
+    for col_letter, width in zip("ABCDE", (40, 12, 10, 12, 8), strict=True):
+        summary.column_dimensions[col_letter].width = width
+
+    for file_path, violations in results.items():
+        # Имя листа — обрезаем до 31 символа (ограничение Excel) и удаляем спецсимволы
+        sheet_name = Path(file_path).stem[:28] + "…" if len(Path(file_path).stem) > 28 else Path(file_path).stem
+        sheet_name = "".join(c for c in sheet_name if c not in "[]:*?/\\") or "файл"
+        # Уникализация на случай совпадения имён
+        base = sheet_name
+        suffix = 1
+        while sheet_name in wb.sheetnames:
+            suffix += 1
+            sheet_name = f"{base}_{suffix}"[:31]
+
+        ws = wb.create_sheet(sheet_name)
+        ws.append(["Код", "Серьёзность", "Сообщение", "Расположение", "Что исправить"])
+        for cell in ws[1]:
+            cell.font = bold
+            cell.fill = header_fill
+
+        for v in violations:
+            ws.append([v.check_code, v.severity, v.message, v.location, v.suggestion])
+
+        for col_letter, width in zip("ABCDE", (10, 14, 60, 40, 60), strict=True):
+            ws.column_dimensions[col_letter].width = width
+        for row in ws.iter_rows(min_row=2):
+            for cell in row:
+                cell.alignment = wrap
+
+    wb.save(str(output))
+
+
+def _write_report(
+    results: dict[str, list[Violation]], output: Path, profile_id: str
+) -> str:
+    """Выбрать формат отчёта по расширению файла. Возвращает подпись формата."""
+    suffix = output.suffix.lower()
+    if suffix == ".xlsx":
+        _write_xlsx_report(results, output, profile_id)
+        return "Excel"
+    if suffix in {".md", ".markdown", ""}:
+        _write_markdown_report(results, output, profile_id)
+        return "Markdown"
+    # Неизвестное расширение — fallback на Markdown
+    _write_markdown_report(results, output, profile_id)
+    return "Markdown"
+
+
 @click.group()
 @click.version_option(__version__, prog_name="gostforge")
 def main() -> None:
@@ -124,7 +205,7 @@ def main() -> None:
     "--report",
     "-r",
     type=click.Path(path_type=Path),
-    help="Путь к Markdown-отчёту (рекомендуется .md)",
+    help="Путь к отчёту. Формат определяется по расширению: .xlsx → Excel, .md → Markdown",
 )
 @click.option("--quiet", "-q", is_flag=True, help="Показать только сводку и список кодов")
 def check(path: Path, profile: str, report: Path | None, quiet: bool) -> None:
@@ -178,8 +259,8 @@ def check(path: Path, profile: str, report: Path | None, quiet: bool) -> None:
     )
 
     if report:
-        _write_markdown_report(results, report, profile)
-        click.echo(click.style(f"Отчёт сохранён: {report}", fg="green"))
+        fmt = _write_report(results, report, profile)
+        click.echo(click.style(f"{fmt}-отчёт сохранён: {report}", fg="green"))
 
     if total_errors > 0:
         sys.exit(1)
