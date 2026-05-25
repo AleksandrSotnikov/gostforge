@@ -127,7 +127,7 @@ def _render_file_result(name: str, violations: list[Violation]) -> None:
     # pandas обычно идёт в зависимостях streamlit; используем её, если доступна,
     # иначе передаём список словарей — st.dataframe умеет и так.
     try:
-        import pandas as pd  # type: ignore[import-not-found, import-untyped]
+        import pandas as pd  # type: ignore[import-untyped]
 
         df: Any = pd.DataFrame(rows)
     except ImportError:  # pragma: no cover - pandas есть в зависимостях streamlit

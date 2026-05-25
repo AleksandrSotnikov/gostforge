@@ -1,4 +1,4 @@
-# ruff: noqa: RUF001, RUF002
+# ruff: noqa: RUF002
 
 """Веб-интерфейс gostforge на Streamlit.
 
