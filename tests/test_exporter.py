@@ -341,3 +341,61 @@ def test_export_roundtrip_paper_size_and_orientation(tmp_path: Path) -> None:
     page = reparsed.page_sections[0].page
     assert page.paper == "A3"
     assert page.orientation == "landscape"
+
+
+def test_export_writes_listblock_paragraphs(tmp_path: Path) -> None:
+    """ListBlock пишется как параграфы со стилем List Number или префиксами."""
+    from gostforge.model import ListBlock
+    from gostforge.profile import load_profile
+
+    doc = Document()
+    block = ListBlock(
+        id="l1",
+        ordered=True,
+        items=[[TextRun(text="первый")], [TextRun(text="второй")]],
+    )
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", content=[block])
+    )
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    raw = python_docx.Document(str(out))
+    texts = [p.text for p in raw.paragraphs]
+    # либо чистый текст элементов (если стиль есть), либо с префиксом «1. »
+    assert any("первый" in t for t in texts)
+    assert any("второй" in t for t in texts)
+
+
+def test_export_inserts_real_picture_when_image_exists(tmp_path: Path) -> None:
+    """Если Figure.image_path указывает на существующий файл, вставляется <w:drawing>."""
+    from gostforge.model import Figure
+    from gostforge.profile import load_profile
+
+    try:
+        from PIL import Image  # type: ignore[import-not-found]
+    except ImportError:
+        import pytest
+        pytest.skip("Pillow не установлен — тест требует генерации PNG")
+    img = tmp_path / "pixel.png"
+    Image.new("RGB", (10, 10), color="red").save(img)
+
+    doc = Document()
+    fig = Figure(
+        id="fig-1",
+        image_path=str(img),
+        caption=[TextRun(text="Рисунок 1 — Пиксель")],
+    )
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", content=[fig])
+    )
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    # В document.xml должен быть w:drawing
+    import zipfile
+    with zipfile.ZipFile(str(out)) as z:
+        document_xml = z.read("word/document.xml").decode("utf-8")
+    assert "w:drawing" in document_xml

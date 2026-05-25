@@ -434,6 +434,34 @@ def stats(path: Path) -> None:
 
 
 @main.command()
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить .docx с inline-пометками.",
+)
+@click.option("--profile", "-p", default="gost-7.32-2017", help="ID профиля.")
+def annotate(path: Path, output: Path, profile: str) -> None:
+    """Создать .docx с inline-пометками о нарушениях.
+
+    Для каждого Violation в начало проблемного параграфа вставляется
+    маркер вида ``[F.01: <текст ошибки>]`` курсивом, красным цветом.
+    Пометки уровня документа уходят в первый параграф.
+    """
+    from gostforge.annotator import annotate_docx
+    try:
+        prof = load_profile(profile)
+    except FileNotFoundError as e:
+        click.echo(f"Ошибка: {e}", err=True)
+        sys.exit(2)
+    n = annotate_docx(path, output, prof)
+    click.echo(f"Создано пометок: {n}")
+    click.echo(f"Аннотированный документ сохранён: {output}")
+
+
+@main.command()
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option(
     "--template",

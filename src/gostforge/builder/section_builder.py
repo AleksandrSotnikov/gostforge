@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from gostforge.model import (
     Document,
     Figure,
+    ListBlock,
     LogicalSection,
     Paragraph,
     Table,
@@ -69,7 +70,11 @@ class SectionBuilder:
         return self
 
     def figure(self, image_path: str, caption: str) -> SectionBuilder:
-        """Добавить рисунок с подписью (нумерация проставится экспортёром)."""
+        """Добавить рисунок с подписью (нумерация проставится автоматически).
+
+        Если `image_path` указывает на существующий файл, экспортёр вставит
+        реальное изображение; иначе — placeholder-параграф `[Рисунок: id]`.
+        """
         number = self._root._next_figure_number()
         fig = Figure(
             id=self._root._next_id("fig"),
@@ -78,6 +83,33 @@ class SectionBuilder:
             number=number,
         )
         self._section.children.append(fig)
+        return self
+
+    # `image` — синоним `figure` с расширенной сигнатурой; на Фазе 1 параметр
+    # width_cm пока не пробрасывается в модель (не хранится), но принимается
+    # для совместимости с будущей версией API.
+    def image(
+        self,
+        image_path: str,
+        caption: str,
+        *,
+        width_cm: float | None = None,  # noqa: ARG002
+    ) -> SectionBuilder:
+        """Добавить рисунок (синоним `figure` с дополнительным параметром width_cm)."""
+        return self.figure(image_path, caption)
+
+    def list(self, items: list[str], *, ordered: bool = False) -> SectionBuilder:
+        """Добавить маркированный или нумерованный список.
+
+        Экспортёр использует Word-стили `List Number` / `List Bullet`,
+        если они есть в шаблоне, иначе — fallback на префиксы «1. » / «• ».
+        """
+        block = ListBlock(
+            id=self._root._next_id("list"),
+            ordered=ordered,
+            items=[[TextRun(text=item)] for item in items],
+        )
+        self._section.children.append(block)
         return self
 
     def table(

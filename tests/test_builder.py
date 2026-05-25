@@ -284,3 +284,51 @@ def test_reference_outside_bibliography_section_raises() -> None:
 def test_work_factory_returns_work_builder() -> None:
     builder = work("Some")
     assert isinstance(builder, WorkBuilder)
+
+
+def test_section_image_creates_figure_with_auto_caption() -> None:
+    """`image()` создаёт Figure с автонумерованной подписью."""
+    from gostforge.model import Figure
+    doc = (
+        work("Test")
+        .section("Глава")
+        .image("/tmp/x.png", "Схема архитектуры")
+        .build()
+    )
+    section = doc.page_sections[0].content[0]
+    figs = [c for c in section.children if isinstance(c, Figure)]
+    assert len(figs) == 1
+    assert figs[0].image_path == "/tmp/x.png"
+    caption_text = "".join(r.text for r in figs[0].caption)
+    assert "Рисунок 1" in caption_text
+    assert "Схема архитектуры" in caption_text
+
+
+def test_section_list_ordered() -> None:
+    """`list(items, ordered=True)` создаёт ListBlock с ordered=True."""
+    from gostforge.model import ListBlock
+    doc = (
+        work("Test")
+        .section("Глава")
+        .list(["один", "два", "три"], ordered=True)
+        .build()
+    )
+    section = doc.page_sections[0].content[0]
+    lists = [c for c in section.children if isinstance(c, ListBlock)]
+    assert len(lists) == 1
+    assert lists[0].ordered is True
+    assert len(lists[0].items) == 3
+
+
+def test_section_list_bulleted() -> None:
+    from gostforge.model import ListBlock
+    doc = (
+        work("Test")
+        .section("Глава")
+        .list(["A", "B"])
+        .build()
+    )
+    section = doc.page_sections[0].content[0]
+    lists = [c for c in section.children if isinstance(c, ListBlock)]
+    assert len(lists) == 1
+    assert lists[0].ordered is False

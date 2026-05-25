@@ -32,6 +32,7 @@ from gostforge.model import (
     Document,
     Figure,
     InlineElement,
+    ListBlock,
     LogicalSection,
     PageSection,
     Paragraph,
@@ -217,15 +218,43 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
 
 
 def _write_figure(doc: DocxDocument, figure: Figure) -> None:
-    """Записать рисунок-заглушку и подпись.
+    """Записать рисунок и его подпись.
 
-    На Фазе 1 image_path не материализуется — пишем placeholder-параграф
-    `[Рисунок: <id>]`. Реальная вставка изображений — Фаза 2 (нужно
-    копирование media-файла в docx-архив).
+    Если `figure.image_path` указывает на существующий файл — вставляем
+    реальное изображение через python-docx `add_picture`. Иначе пишем
+    placeholder-параграф `[Рисунок: <id>]`.
     """
-    placeholder = doc.add_paragraph()
-    placeholder.add_run(f"[Рисунок: {figure.id}]").italic = True
+    path = figure.image_path
+    if path and Path(path).is_file():
+        paragraph = doc.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = paragraph.add_run()
+        try:
+            run.add_picture(path)
+        except Exception:  # noqa: BLE001 — fallback на placeholder при любой ошибке
+            paragraph.add_run(f"[Рисунок: {figure.id}]").italic = True
+    else:
+        placeholder = doc.add_paragraph()
+        placeholder.add_run(f"[Рисунок: {figure.id}]").italic = True
     _write_caption_paragraph(doc, figure.caption)
+
+
+def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
+    """Записать список (нумерованный/маркированный).
+
+    Используем Word-стили ``List Number`` / ``List Bullet``, если они
+    доступны в шаблоне. Если стиль недоступен — fallback на обычный
+    параграф с текстовым префиксом «1. » или «• ».
+    """
+    style_name = "List Number" if list_block.ordered else "List Bullet"
+    for idx, item_content in enumerate(list_block.items, start=1):
+        try:
+            paragraph = doc.add_paragraph(style=style_name)
+        except KeyError:
+            paragraph = doc.add_paragraph()
+            prefix = f"{idx}. " if list_block.ordered else "• "
+            paragraph.add_run(prefix)
+        _write_runs(paragraph, item_content)
 
 
 def _write_template_into_footer_paragraph(
@@ -350,6 +379,8 @@ def _write_items(doc: DocxDocument, items: Sequence[LogicalSection | Block]) -> 
             _write_table(doc, item)
         elif isinstance(item, Figure):
             _write_figure(doc, item)
+        elif isinstance(item, ListBlock):
+            _write_list(doc, item)
         # Formula — Фаза 3 (OMML)
 
 
