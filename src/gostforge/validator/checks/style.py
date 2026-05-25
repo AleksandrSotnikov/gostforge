@@ -155,3 +155,21 @@ def check_spelling(document: Document, profile: Profile) -> list[Violation]:
     _ = document
     _ = profile
     return []
+
+
+@register("X.04")
+def check_number_unit_agreement(document: Document, profile: Profile) -> list[Violation]:
+    """X.04 — согласование чисел и единиц измерения (заглушка).
+
+    На Фазе 2 — упрощённо: только для «секунда / минута / час / день /
+    год / месяц». На текущий момент возвращаем пустой список, чтобы
+    проверка была зарегистрирована и видна пользователю.
+
+    TODO Phase 3: полноценная реализация на базе словаря падежных форм
+    единиц и правил согласования числительных с существительными.
+    """
+    _ = document
+    _ = profile
+    return []
+
+

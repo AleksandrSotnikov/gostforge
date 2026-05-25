@@ -153,3 +153,22 @@ def test_x_01_stub_returns_no_violations() -> None:
     profile = load_profile("gost-7.32-2017")
     violations = [v for v in validate(doc, profile) if v.check_code == "X.01"]
     assert violations == []
+
+
+# ----- X.04 (заглушка) ---------------------------------------------------------
+
+
+def test_x_04_registered() -> None:
+    """X.04 пока — заглушка, регистрация обязана быть."""
+    assert "X.04" in registered_checks()
+
+
+def test_x_04_stub_returns_no_violations() -> None:
+    doc = _doc_with_paragraphs(
+        "Эксперимент длился 2 секунд и 5 секунда — реализация заглушки.",
+    )
+    profile = load_profile("gost-7.32-2017")
+    violations = [v for v in validate(doc, profile) if v.check_code == "X.04"]
+    assert violations == []
+
+

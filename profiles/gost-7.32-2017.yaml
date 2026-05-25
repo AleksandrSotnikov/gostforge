@@ -234,3 +234,4 @@ checks:
   X.01: {enabled: true}
   X.02: {enabled: true}
   X.03: {enabled: true}
+  X.04: {enabled: true}
