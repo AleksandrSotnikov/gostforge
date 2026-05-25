@@ -277,6 +277,14 @@ def test_r05_unreferenced_entry_violation() -> None:
     assert found[0].details["entry_id"] == "ref-2"
 
 
+# --- R.06 — alias C.04 --------------------------------------------------
+
+
+def test_r06_registered() -> None:
+    """Заглушка-alias R.06 зарегистрирована (дублирует C.04)."""
+    assert "R.06" in registered_checks()
+
+
 def test_r05_range_reference_counts() -> None:
     """Ссылка [1-3] упоминает источники 1, 2 и 3."""
     para = Paragraph(id="p-1", content=[TextRun(text="См. [1-3].")])

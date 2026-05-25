@@ -330,8 +330,28 @@ def check_each_entry_referenced(
     return violations
 
 
+# --- R.06 — каждая ссылка разрешается в источник (alias C.04) ---------
+
+
+@register("R.06")
+def check_references_resolve_alias(
+    document: Document,  # noqa: ARG001
+    profile: Profile,  # noqa: ARG001
+) -> list[Violation]:
+    """Каждая ссылка [N] в тексте должна разрешаться в запись bibliography.
+
+    Дублирует C.04, оставлен для совместимости с каталогом кодов
+    (R.06 — «зеркальная» проверка из подсистемы R). Логика полностью
+    идентична C.04; чтобы не порождать дубликат Violation, эта проверка
+    возвращает пустой список — фактический контроль выполняет C.04.
+    """
+    # дублирует C.04, оставлен для совместимости
+    return []
+
+
 __all__ = [
     "check_bibliography_format",
     "check_each_entry_referenced",
     "check_reference_style_numeric",
+    "check_references_resolve_alias",
 ]
