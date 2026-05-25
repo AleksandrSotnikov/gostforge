@@ -113,12 +113,39 @@ def _extract_page_section(docx_doc: DocxDocument) -> PageSection:
         page=PageGeometry(margins_mm=margins_mm),
     )
 
+    # Стартовая страница нумерации: <w:pgNumType w:start="N"/> в sectPr.
+    # Если атрибут задан — это эквивалентно start_mode = "start_at".
+    start_value = _extract_page_number_start(sect)
+    if start_value is not None:
+        page_section.page_numbering.start_mode = "start_at"
+        page_section.page_numbering.start_value = start_value
+
     footer_config = _extract_footer(sect)
     if footer_config is not None:
         page_section.footer = footer_config
         page_section.page_numbering.visible = True
 
     return page_section
+
+
+def _extract_page_number_start(sect: DocxSection) -> int | None:
+    """Прочитать <w:pgNumType w:start="N"/> из sectPr секции и вернуть N.
+
+    Возвращает None, если элемент отсутствует или значение не парсится.
+    """
+    sect_pr = getattr(sect, "_sectPr", None)
+    if sect_pr is None:
+        return None
+    pg_num_type = sect_pr.find(f"{{{W_NS}}}pgNumType")
+    if pg_num_type is None:
+        return None
+    start_attr = pg_num_type.get(f"{{{W_NS}}}start")
+    if start_attr is None:
+        return None
+    try:
+        return int(start_attr)
+    except (TypeError, ValueError):
+        return None
 
 
 def _length_to_mm(length: object | None) -> float:

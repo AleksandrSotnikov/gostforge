@@ -82,6 +82,12 @@ class Paragraph(Block):
     alignment: ParagraphAlignment | None = None
     line_spacing: float | None = None
     first_line_indent_cm: float | None = None
+    # Принудительный разрыв страницы перед параграфом.
+    # None — наследуется (значение не задано явно ни на параграфе, ни в стиле,
+    # либо парсер не смог его установить).
+    # True/False — задано явно (через w:pPr/w:pageBreakBefore у параграфа или
+    # унаследовано от Word-стиля).
+    page_break_before: bool | None = None
 
 
 @dataclass
