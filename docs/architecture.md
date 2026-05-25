@@ -4,121 +4,232 @@
 
 `gostforge` — двухрежимная система с общим ядром:
 
-- **Режим «Конструктор»** для студентов: визуальный редактор структуры документа.
-- **Режим «Нормоконтроль»** для проверяющих: автоматическая проверка чужих `.docx`.
+- **Режим «Нормоконтроль»** для проверяющих: автоматическая проверка
+  чужих `.docx` против профиля ГОСТ или методички кафедры. Реализовано.
+- **Режим «Конструктор»** для студентов: программный API (а позже —
+  визуальный редактор) для написания работ с нуля, с гарантией
+  соответствия выбранному профилю. API стартует в Фазе 1, GUI — Фаза 2.
 
-Оба режима работают через единые компоненты ядра: `Model`, `Profile`, `Parser`, `Validator`, `Exporter`.
+Оба режима работают через единые компоненты: `Model`, `Profile`,
+`Parser`, `Exporter`, `Validator`, `Fixer`.
 
-## Компоненты
+## Компоненты (текущая реализация)
 
 ### Model (`src/gostforge/model/`)
 
-Внутреннее представление документа, независимое от Word/OOXML. Иерархия:
+Внутреннее представление документа, **независимое** от Word/OOXML —
+никаких ссылок на python-docx/lxml внутри. Dataclass-ы:
 
 ```
 Document
-├─ PageSection[]      # секции вёрстки (титул, основная часть, приложения...)
-│  ├─ header/footer config
-│  ├─ page numbering config
-│  └─ logical_sections: LogicalSection[]
-│     ├─ Section (раздел)
-│     │  ├─ heading
-│     │  ├─ level
-│     │  └─ blocks: Block[]
-│     │     ├─ Paragraph
-│     │     ├─ Table
-│     │     ├─ Figure
-│     │     ├─ Formula
-│     │     ├─ List
-│     │     ├─ CodeBlock
-│     │     └─ Footnote
-│     └─ Appendix
-├─ FrontMatter        # титул, реферат, содержание...
-├─ Bibliography       # список литературы
-└─ AbbreviationDict   # словарь сокращений
+├─ metadata: DocumentMetadata        # title, author, supervisor, year, work_type
+├─ page_sections: PageSection[]      # секции вёрстки
+│  ├─ id, name, type (title/frontmatter/main/appendix)
+│  ├─ page: PageGeometry             # paper (A4..), orientation, margins_mm
+│  ├─ header / footer: HeaderConfig  # ContentTemplate(left/center/right)
+│  ├─ page_numbering: PageNumberingConfig
+│  │  └─ visible, format (arabic/roman/letter), start_mode, start_value
+│  └─ content: (LogicalSection | Block)[]
+│     ├─ LogicalSection               # раздел: heading, level, children
+│     ├─ Paragraph                    # style_name, alignment, line_spacing,
+│     │                                # first_line_indent_cm, page_break_before,
+│     │                                # content: (TextRun | CrossRef)[]
+│     ├─ Table                        # caption, headers, rows
+│     ├─ Figure                       # image_path, caption
+│     ├─ Formula                      # latex (Фаза 3)
+│     └─ ListBlock / CodeBlock        # роадмап
+├─ bibliography: BibliographyEntry[] # id, type, fields
+└─ abbreviations: dict[str, str]
 ```
 
-**Ключевая идея:** `PageSection` (секция вёрстки с колонтитулами) отделён от `Section` (логический раздел работы). Одна PageSection может содержать много LogicalSection (вся основная часть — одна PageSection), и наоборот одно приложение — отдельная PageSection.
+**Ключевое разделение:** `PageSection` ≠ `LogicalSection`.
+PageSection — вёрстка (поля, колонтитулы); LogicalSection — содержание
+(введение, глава 1). Одна PageSection обычно содержит много
+LogicalSection. См. [page-sections.md](page-sections.md).
+
+`SCHEMA_VERSION` фиксирует версию модели — при изменении нужна миграция.
 
 ### Profile (`src/gostforge/profile/`)
 
-Профиль = YAML-файл, описывающий:
-1. **Стили** (для экспортёра): шрифты, поля, межстрочные интервалы, форматы заголовков, подписей, таблиц.
-2. **Шаблон секций** (для экспортёра): какие PageSection создавать по умолчанию (титул, frontmatter, main, appendices), с какими колонтитулами.
-3. **Правила проверок** (для валидатора): какие проверки включены, с какими параметрами.
+YAML-файл, объединяющий три аспекта стандарта:
 
-Профили поддерживают **наследование**: `extends: gost-7.32-2017` — дочерний профиль переопределяет только нужные поля.
+1. **Стили** (`styles.page`, `styles.body`, `styles.extra.heading_1`...) —
+   для экспортёра.
+2. **Шаблон секций** (`sections_template`) — какие PageSection создавать
+   по умолчанию, с какими колонтитулами и нумерацией.
+3. **Правила проверок** (`checks.X.NN: {enabled, params}`) — реестр и
+   параметры для валидатора.
 
-Подробнее: [profiles.md](profiles.md).
+**Наследование через deep-merge:** `extends: gost-7.32-2017` подгружает
+родителя и сливает по ключам (любой словарный уровень). Ребёнок
+переопределяет только то, что отличается.
+
+Загрузка: `gostforge.profile.load_profile(id)` ищет в `profiles/`
+репозитория и в `~/.gostforge/profiles/`.
+
+Подробнее: [profiles.md](profiles.md) — пошаговый гайд по созданию
+профиля кафедры.
 
 ### Parser (`src/gostforge/parser/`)
 
-Преобразует `.docx` → `Document`. Работает эвристически:
-- Разбор OOXML через python-docx + lxml.
-- Определение типа блока по стилю, форматированию, содержимому.
-- Распознавание подписей рисунков/таблиц по паттерну («Рисунок N — ...»).
-- Парсинг списка литературы в структурированные `BibliographyEntry`.
-- Извлечение структуры PageSection из `sectPr`.
+Преобразует `.docx → Document`. python-docx для базы, lxml — для
+нестандартных случаев (поля PAGE в колонтитулах, w:pgNumType,
+w:pageBreakBefore через цепочку стилей).
 
-Парсер изначально работает на 60–70% документов; покрытие растёт от фикстур.
+Текущее покрытие:
+- Поля страницы, формат бумаги (A4/A3/A5/Letter/Legal), ориентация.
+- Метаданные из `docProps`.
+- Параграфы со стилями и runs (font, size, bold, italic).
+- Заголовки `Heading 1..4` → LogicalSection с вложением.
+- Таблицы и рисунки со склейкой подписей (Caption-стиль или regex).
+- Header/footer с полем PAGE (`<w:fldSimple>` и `fldChar+instrText`).
+- `<w:pgNumType>` с `w:start` и `w:fmt`.
+- `<w:pageBreakBefore>` (включая наследование от Word-стиля).
+- Раздел «Список использованных источников» → `BibliographyEntry`.
 
-### Validator (`src/gostforge/validator/`)
-
-Прогоняет `Model` через набор проверок, заданных профилем. Каждая проверка — отдельная функция:
-
-```python
-def check(model: Document, profile: Profile) -> list[Violation]:
-    ...
-```
-
-`Violation` содержит: код проверки, серьёзность, путь к проблемному узлу в модели, текст замечания, предложение по исправлению (если возможно).
-
-Каталог проверок: [checks-catalog.md](checks-catalog.md).
+Не покрыто: формулы (OMML), перекрёстные ссылки, реальные растровые
+изображения (только метаданные `<w:drawing>`).
 
 ### Exporter (`src/gostforge/exporter/`)
 
-Преобразует `Document` → `.docx`. Применяет стили из профиля. Особое внимание — корректной генерации:
-- `sectPr` с правильными ссылками на колонтитулы.
-- Полей PAGE/NUMPAGES/STYLEREF для динамических элементов колонтитулов.
-- Перекрёстных ссылок (как готовый текст или как OOXML-поля).
+Преобразует `Document → .docx`. python-docx + lxml для записи
+sectPr/footer/pgNumType. Round-trip parse → export → parse сохраняет
+все поддерживаемые атрибуты.
 
-Подробнее по колонтитулам: [page-sections.md](page-sections.md).
+Покрытие зеркалит парсер: поля, формат бумаги, ориентация, стиль Normal,
+параграфы (включая alignment / line_spacing / first_line_indent / break),
+заголовки, таблицы с подписями, рисунки как placeholder-параграфы (на
+Фазе 1 без реальных изображений), footer с полем PAGE, pgNumType.
+
+### Validator (`src/gostforge/validator/`)
+
+Прогоняет Document через включённые в профиле проверки.
+
+```
+@register("F.01")
+def check_margins(doc: Document, profile: Profile) -> list[Violation]:
+    ...
+```
+
+`Violation`: `check_code`, `severity` (error/warning/info), `message`,
+`location` (путь в модели), `suggestion`, `details` (для отчётов).
+
+Категории: F (страница), T (текст), S (структура), H (заголовки),
+I (рисунки), B (таблицы), R (литература), плюс зарезервированы C, A,
+P, K, V, X. Каталог со статусом: [checks-catalog.md](checks-catalog.md).
+Команда `gostforge checks` показывает актуально реализованные коды.
+
+### Fixer (`src/gostforge/fixer/`)
+
+Симметричен валидатору, но **мутирует Document** — применяет безопасные
+правки и возвращает `list[FixApplied]`. Безопасные = не меняют смысл
+текста.
+
+```
+@register("T.08")
+def fix_double_spaces(doc: Document, profile: Profile) -> list[FixApplied]:
+    ...
+```
+
+Текущие фиксеры: T.08, T.09, T.10, T.11, H.03, H.08.
+
+Команда `gostforge fix work.docx -o fixed.docx` парсит → фиксит →
+экспортирует. Поддерживает `--only` для выборки кодов и `--dry-run`.
+
+### Builder (`src/gostforge/builder/`) — в активной разработке
+
+Конструктор работ: fluent API для программного построения Document.
+
+```python
+from gostforge.builder import work
+
+(
+    work("Курсовая", author="Иван Иванов", year=2026)
+    .section("Введение").paragraph("Актуальность ...")
+    .section("Заключение").paragraph("Выводы ...")
+    .section("Список использованных источников")
+        .reference("Иванов И. И. ... — М. : Наука, 2023. — 320 с.")
+    .save("coursework.docx")
+)
+```
+
+Builder автоматически расставляет `page_break_before` у разделов уровня
+1, footer с PAGE, `pgNumType.start = 3` — собранный документ проходит
+проверки без нарушений из коробки.
+
+Шаблоны: `coursework_template`, `bachelor_thesis_template`,
+`research_report_template`. CLI-команда: `gostforge new my-coursework.docx
+--template coursework --title "..."`.
+
+### CLI (`src/gostforge/cli.py`)
+
+```bash
+gostforge check work.docx --profile gost-7.32-2017 [--report file.xlsx|.md] [--quiet]
+gostforge fix work.docx -o fixed.docx [--only T.08] [--dry-run]
+gostforge stats work.docx
+gostforge new out.docx --template coursework --title "..." --year 2026
+gostforge profiles list|show <id>
+gostforge checks
+gostforge ui
+```
+
+Exit codes: `0` — нарушений нет; `1` — найдены error; `2` — ошибка
+загрузки профиля.
+
+### Web (`src/gostforge/web/`)
+
+Streamlit-приложение. Drag-and-drop загрузка `.docx`, выбор профиля в
+sidebar, три вкладки на каждый файл:
+- **Проверка** — таблица нарушений.
+- **Статистика** — метрики через `gostforge.stats.compute_stats`.
+- **Автоисправление** — кнопка скачивания исправленного `.docx`.
+
+Плюс кнопки скачивания Markdown / Excel-отчётов внизу. Запуск:
+`gostforge ui` (требует extra `gostforge[ui]`).
 
 ## Потоки данных
 
-### Конструктор
+### Нормоконтроль (готов)
 ```
-Пользовательский ввод → Model (in-memory) → JSON-файл проекта (сохранение)
-                              ↓
-                          Exporter + Profile → .docx
-```
-
-### Нормоконтроль
-```
-Чужой .docx → Parser → Model → Validator + Profile → list[Violation] → Reporter → .xlsx / аннотированный .docx
+.docx → Parser → Document ─┬─→ Validator + Profile ─→ list[Violation] ─→ CLI/UI/Report
+                            └─→ Stats             ─→ DocumentStats
 ```
 
-### Импорт (фаза 3)
+### Автоисправление (готов)
 ```
-Чужой .docx → Parser → Model → JSON-файл проекта → редактирование в конструкторе
+.docx → Parser → Document ─→ Fixer + Profile (мутирует) ─→ Exporter + Profile ─→ fixed.docx
+                                              ↓
+                                     list[FixApplied] ─→ CLI/UI
+```
+
+### Конструктор (в разработке)
+```
+WorkBuilder.section()/paragraph()/... → Document ─→ Exporter + Profile ─→ .docx
+```
+
+### Импорт (Фаза 3+)
+```
+Чужой .docx → Parser → Document → JSON-файл проекта → редактирование в Builder
 ```
 
 ## Расширяемость
 
-### Плагины проверок
-Папка `~/.gostforge/plugins/` сканируется при старте. Любой `.py` с функцией `register(registry)` подключается. См. [plugins.md] (TBD, фаза 3).
+- **Новые проверки** — функция с `@register("X.NN")` в любом модуле
+  `validator/checks/*.py` плюс запись в профиле. Без изменения движка.
+- **Новые фиксеры** — то же самое в `fixer/fixers/*.py`.
+- **Новые форматы отчётов** — функция `_write_X_report` в `cli.py` +
+  ветка в `_write_report` (диспетчер по расширению файла).
+- **Новые профили** — YAML в `profiles/` или `~/.gostforge/profiles/`,
+  через `extends:` от родителя.
 
-### Плагины экспортёра
-Тот же механизм, но для переопределения рендера конкретных типов блоков (например, нестандартный рендер списка литературы под локальную методичку).
+## Что в roadmap
 
-### CLI и API
-- CLI: `src/gostforge/cli.py` — точка входа `gostforge`.
-- REST API (фаза 2): отдельный модуль `src/gostforge/api/`, FastAPI.
+- Парсер: формулы (OMML), реальные изображения, перекрёстные ссылки.
+- Builder: визуальный редактор (PyQt/Web) поверх API.
+- Аннотация `.docx` комментариями Word для проверяющих.
+- REST API (FastAPI) для интеграций с LMS.
+- SQLite-хранилище для истории прогонов и архива работ.
+- Плагинная система (`~/.gostforge/plugins/`).
+- Маркетплейс профилей кафедр.
 
-## Хранилище
-
-Локально SQLite через SQLAlchemy:
-- `projects` — пользовательские проекты конструктора (мета + путь к JSON).
-- `profiles` — установленные профили с версиями.
-- `checks_runs` — история прогонов нормоконтроля (файл → профиль → дата → найденные нарушения).
-- `archive` — анонимизированный архив проверенных работ для статистики.
+См. [roadmap.md](roadmap.md) для детального плана фаз.
