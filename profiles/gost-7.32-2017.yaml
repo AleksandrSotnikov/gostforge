@@ -187,6 +187,7 @@ checks:
   R.06: {enabled: true}
   R.07: {enabled: true}
   R.08: {enabled: true}
+  R.09: {enabled: true, params: {modern_year: 2020}}
   C.01: {enabled: true}
   C.02: {enabled: true}
   C.03: {enabled: true}

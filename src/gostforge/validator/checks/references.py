@@ -612,11 +612,61 @@ def check_access_date_for_web(
     return violations
 
 
+# --- R.09 — DOI/URL для современных источников --------------------------
+
+
+@register("R.09")
+def check_doi_or_url_for_modern(document: Document, profile: Profile) -> list[Violation]:
+    """У современных источников (год ≥ modern_year) ожидается DOI или URL.
+
+    Параметр `checks.R.09.params.modern_year` (по умолчанию 2020).
+    Severity = info — это рекомендация, не жёсткое требование.
+    """
+    violations: list[Violation] = []
+    params = _check_params(profile, "R.09")
+    modern_year = _int_param(params, "modern_year", 2020)
+
+    for entry in document.bibliography:
+        year_str = entry.fields.get("year")
+        if not year_str:
+            continue
+        try:
+            year = int(year_str)
+        except ValueError:
+            continue
+        if year < modern_year:
+            continue
+        if entry.fields.get("doi") or entry.fields.get("url"):
+            continue
+        violations.append(
+            Violation(
+                check_code="R.09",
+                severity="info",
+                message=(
+                    f"Запись {entry.id} ({year}) не содержит DOI или URL — "
+                    "для современных источников желательно указывать ссылку"
+                ),
+                location=f"bibliography[{entry.id}]",
+                suggestion=(
+                    "Добавить DOI (формат «10.NNNN/...») или URL "
+                    "к электронной версии источника"
+                ),
+                details={
+                    "entry_id": entry.id,
+                    "year": year_str,
+                    "modern_year": str(modern_year),
+                },
+            )
+        )
+    return violations
+
+
 __all__ = [
     "check_access_date_for_web",
     "check_bibliography_format",
     "check_bibliography_order",
     "check_citations_have_pages",
+    "check_doi_or_url_for_modern",
     "check_each_entry_referenced",
     "check_reference_style_numeric",
     "check_references_resolve_alias",

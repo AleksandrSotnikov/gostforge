@@ -522,3 +522,57 @@ def test_r08_book_without_url_no_violation() -> None:
         ]
     )
     assert _violations(doc, profile, "R.08") == []
+
+
+# --- R.09 — DOI/URL для современных источников --------------------------
+
+
+def test_r09_registered() -> None:
+    assert "R.09" in registered_checks()
+
+
+def test_r09_modern_with_doi_no_violation() -> None:
+    """Современная запись с DOI — нарушения нет."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"year": "2022", "doi": "10.1000/abc"},
+                type_="article",
+            ),
+        ]
+    )
+    assert _violations(doc, profile, "R.09") == []
+
+
+def test_r09_modern_without_doi_or_url_violation() -> None:
+    """Современная запись без DOI и URL — info-Violation."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"year": "2023"},
+                type_="article",
+            ),
+        ]
+    )
+    found = _violations(doc, profile, "R.09")
+    assert len(found) == 1
+    assert found[0].severity == "info"
+
+
+def test_r09_old_entry_no_violation() -> None:
+    """Старая запись (год < modern_year) не проверяется R.09."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"year": "2010"},
+                type_="article",
+            ),
+        ]
+    )
+    assert _violations(doc, profile, "R.09") == []
