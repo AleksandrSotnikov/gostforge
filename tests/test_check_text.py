@@ -436,3 +436,76 @@ def test_t07_custom_limit_via_profile_params() -> None:
     bad = [v for v in validate(bad_doc, profile) if v.check_code == "T.07"]
     assert len(bad) == 1
     assert bad[0].details["count"] == "3"
+
+
+# --- T.08 (нет двойных пробелов) -------------------------------------------
+
+
+def test_t08_registered() -> None:
+    assert "T.08" in registered_checks()
+
+
+def test_t08_single_spaces_no_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Это нормальный текст без двойных пробелов.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.08"]
+    assert found == []
+
+
+def test_t08_double_space_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Двойной  пробел внутри.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.08"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "Двойной пробел" in found[0].message
+
+
+def test_t08_triple_space_also_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Тройной   пробел.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.08"]
+    assert len(found) == 1
+
+
+def test_t08_one_violation_per_paragraph_even_if_multiple_doubles() -> None:
+    """Не должно быть N Violation на N двойных пробелов — только один на параграф."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[
+            TextRun(text="Первый  двойной."),
+            TextRun(text="Второй  двойной  в том же абзаце."),
+        ],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.08"]
+    assert len(found) == 1
+
+
+def test_t08_skips_headers_and_footers() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Колонтитул  с двойным пробелом")],
+        style_name="Header",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.08"]
+    assert found == []

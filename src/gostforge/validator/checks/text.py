@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator, Sequence
 
 from gostforge.model import (
@@ -357,6 +358,49 @@ def check_no_consecutive_empty_paragraphs(
     return violations
 
 
+_DOUBLE_SPACE_RE = re.compile(r"  +")
+
+
+def _paragraph_text(paragraph: Paragraph) -> str:
+    """Склеить текст всех TextRun абзаца."""
+    return "".join(el.text for el in paragraph.content if isinstance(el, TextRun))
+
+
+@register("T.08")
+def check_no_double_spaces(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """В абзаце не должно быть двух и более пробелов подряд внутри run-а.
+
+    Проверяет только текст внутри отдельного TextRun (не склеивает соседние:
+    при склейке у нас потерялся бы оригинал пробельных границ). Один
+    Violation на параграф, даже если двойной пробел встречается в нескольких
+    run-ах. Стили колонтитулов (`Header`/`Footer`) пропускаются — это
+    отдельная категория K.*.
+    """
+    violations: list[Violation] = []
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) == "header_footer":
+            continue
+        for el in paragraph.content:
+            if not isinstance(el, TextRun) or not el.text:
+                continue
+            if _DOUBLE_SPACE_RE.search(el.text):
+                violations.append(
+                    Violation(
+                        check_code="T.08",
+                        severity="warning",
+                        message=(
+                            f"Двойной пробел в абзаце «{_preview(paragraph.content)}»"
+                        ),
+                        location=f"page_sections.*.paragraph[{paragraph.id}]",
+                        suggestion="Заменить множественные пробелы на одинарный",
+                    )
+                )
+                break  # один Violation на параграф
+    return violations
+
+
 def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violation:
     location = (
         f"page_sections.*.paragraph[{location_id}]"
@@ -382,4 +426,5 @@ __all__ = [
     "check_font_size",
     "check_line_spacing",
     "check_no_consecutive_empty_paragraphs",
+    "check_no_double_spaces",
 ]
