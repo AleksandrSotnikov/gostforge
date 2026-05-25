@@ -576,3 +576,53 @@ def test_r09_old_entry_no_violation() -> None:
         ]
     )
     assert _violations(doc, profile, "R.09") == []
+
+
+# --- R.10 — доля свежих источников --------------------------------------
+
+
+def test_r10_registered() -> None:
+    assert "R.10" in registered_checks()
+
+
+def test_r10_enough_fresh_no_violation() -> None:
+    """Если ≥ 50% записей свежее threshold — нарушения нет."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {"year": "2020"}),
+            _entry_with_fields("ref-2", {"year": "2022"}),
+            _entry_with_fields("ref-3", {"year": "2010"}),
+        ]
+    )
+    assert _violations(doc, profile, "R.10") == []
+
+
+def test_r10_too_few_fresh_violation() -> None:
+    """Если только 1 из 4 источников свежий — Violation."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {"year": "2020"}),
+            _entry_with_fields("ref-2", {"year": "2005"}),
+            _entry_with_fields("ref-3", {"year": "2008"}),
+            _entry_with_fields("ref-4", {"year": "2010"}),
+        ]
+    )
+    found = _violations(doc, profile, "R.10")
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert found[0].details["fresh_count"] == "1"
+    assert found[0].details["dated_count"] == "4"
+
+
+def test_r10_no_year_records_no_violation() -> None:
+    """Если ни у одной записи нет года — нарушения нет (нечего считать)."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {}),
+            _entry_with_fields("ref-2", {}),
+        ]
+    )
+    assert _violations(doc, profile, "R.10") == []

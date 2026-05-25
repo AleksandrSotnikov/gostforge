@@ -661,6 +661,76 @@ def check_doi_or_url_for_modern(document: Document, profile: Profile) -> list[Vi
     return violations
 
 
+# --- R.10 — доля свежих источников ≥ N% ---------------------------------
+
+
+@register("R.10")
+def check_fresh_sources_share(document: Document, profile: Profile) -> list[Violation]:
+    """Не менее заданной доли источников должны быть «свежими».
+
+    Параметры:
+      - `fresh_year_threshold` (по умолчанию текущий_год − 10)
+      - `min_fresh_share` (по умолчанию 0.5 — половина)
+
+    Источники без года не учитываются ни в числителе, ни в знаменателе
+    (мы знаем только про датируемые записи). Если bibliography пустая или
+    нет ни одной записи с годом — нарушения нет.
+    """
+    if not document.bibliography:
+        return []
+
+    params = _check_params(profile, "R.10")
+    # По умолчанию используем границу «10 лет назад» от условной точки
+    # 2025 (актуальная дата проекта); параметр fresh_year_threshold
+    # должен задаваться явно в профиле.
+    fresh_year_threshold = _int_param(params, "fresh_year_threshold", 2015)
+    min_fresh_share = _float_param(params, "min_fresh_share", 0.5)
+
+    dated: list[int] = []
+    fresh = 0
+    for entry in document.bibliography:
+        year_str = entry.fields.get("year")
+        if not year_str:
+            continue
+        try:
+            year = int(year_str)
+        except ValueError:
+            continue
+        dated.append(year)
+        if year >= fresh_year_threshold:
+            fresh += 1
+
+    if not dated:
+        return []
+
+    share = fresh / len(dated)
+    if share >= min_fresh_share:
+        return []
+
+    return [
+        Violation(
+            check_code="R.10",
+            severity="warning",
+            message=(
+                f"Только {share * 100:.0f}% источников от {fresh_year_threshold} "
+                f"года и новее, ожидается ≥ {min_fresh_share * 100:.0f}%"
+            ),
+            location="bibliography",
+            suggestion=(
+                "Добавить более свежие источники (научные публикации "
+                "за последние годы)"
+            ),
+            details={
+                "fresh_count": str(fresh),
+                "dated_count": str(len(dated)),
+                "share": f"{share:.3f}",
+                "min_fresh_share": f"{min_fresh_share:.3f}",
+                "fresh_year_threshold": str(fresh_year_threshold),
+            },
+        )
+    ]
+
+
 __all__ = [
     "check_access_date_for_web",
     "check_bibliography_format",
@@ -668,6 +738,7 @@ __all__ = [
     "check_citations_have_pages",
     "check_doi_or_url_for_modern",
     "check_each_entry_referenced",
+    "check_fresh_sources_share",
     "check_reference_style_numeric",
     "check_references_resolve_alias",
     "check_required_fields_by_type",
