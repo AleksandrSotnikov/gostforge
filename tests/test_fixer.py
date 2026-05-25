@@ -477,3 +477,62 @@ def test_t07_keeps_single_empty_paragraph() -> None:
     profile = load_profile("gost-7.32-2017")
     fixes = run_fix(doc, profile, codes=["T.07"])
     assert fixes == []
+
+
+# --- T.06 fix_disable_auto_hyphenation -------------------------------------
+
+
+def test_t06_fix_registered() -> None:
+    from gostforge.fixer.engine import registered_fixers
+    assert "T.06" in registered_fixers()
+
+
+def test_t06_disables_auto_hyphenation() -> None:
+    """auto_hyphenation=True → False после фиксера."""
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document
+    from gostforge.profile import load_profile
+
+    doc = Document(auto_hyphenation=True)
+    profile = load_profile("gost-7.32-2017")
+    applied = run_fix(doc, profile, codes=["T.06"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "T.06"
+    assert doc.auto_hyphenation is False
+
+
+def test_t06_noop_when_already_disabled() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document
+    from gostforge.profile import load_profile
+
+    doc = Document(auto_hyphenation=False)
+    profile = load_profile("gost-7.32-2017")
+    assert run_fix(doc, profile, codes=["T.06"]) == []
+
+
+def test_t06_noop_when_unset() -> None:
+    """None означает «не определено», фиксер не трогает."""
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document
+    from gostforge.profile import load_profile
+
+    doc = Document(auto_hyphenation=None)
+    profile = load_profile("gost-7.32-2017")
+    assert run_fix(doc, profile, codes=["T.06"]) == []
+
+
+def test_export_writes_auto_hyphenation_setting(tmp_path: Path) -> None:
+    """Round-trip: auto_hyphenation=True сохраняется через экспорт."""
+    from gostforge.exporter import export_docx
+    from gostforge.model import Document, PageSection
+    from gostforge.parser import parse_docx
+    from gostforge.profile import load_profile
+
+    doc = Document(auto_hyphenation=True)
+    doc.page_sections.append(PageSection(id="main", name="m", type="main"))
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+    reparsed = parse_docx(out)
+    assert reparsed.auto_hyphenation is True

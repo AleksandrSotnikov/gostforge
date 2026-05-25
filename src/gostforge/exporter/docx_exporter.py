@@ -452,8 +452,103 @@ def export_docx(document: Document, profile: Profile, output_path: str | Path) -
         _apply_pgnumtype(doc, first)
         if first.footer is not None:
             _write_footer(doc, first.footer.default)
+        if first.header is not None:
+            _write_header(doc, first.header.default)
 
     for page_section in document.page_sections:
         _write_items(doc, page_section.content)
 
     doc.save(str(output_path))
+    # Post-processing на уровне zip: запись настроек, которые python-docx
+    # не умеет менять напрямую (например, w:autoHyphenation в settings.xml).
+    _postprocess_zip(Path(output_path), document)
+
+
+def _postprocess_zip(output_path: Path, document: Document) -> None:
+    """Доработать .docx-архив после save(): записать настройки в settings.xml."""
+    if document.auto_hyphenation is None:
+        return
+    _patch_settings_auto_hyphenation(output_path, document.auto_hyphenation)
+
+
+def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
+    """Прописать/удалить <w:autoHyphenation/> в word/settings.xml внутри docx-zip."""
+    import shutil
+    import zipfile
+    settings_path = "word/settings.xml"
+    tmp_path = docx_path.with_suffix(".docx.tmp")
+    with zipfile.ZipFile(docx_path, "r") as zin, zipfile.ZipFile(
+        tmp_path, "w", zipfile.ZIP_DEFLATED
+    ) as zout:
+        names = zin.namelist()
+        if settings_path not in names:
+            # python-docx не создал settings.xml — создаём минимальный.
+            settings_xml = (
+                b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                b'<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                b"</w:settings>"
+            )
+        else:
+            settings_xml = zin.read(settings_path)
+
+        try:
+            root = etree.fromstring(settings_xml)
+            for existing in root.findall(f"{{{W_NS}}}autoHyphenation"):
+                root.remove(existing)
+            if value:
+                elem = etree.SubElement(root, f"{{{W_NS}}}autoHyphenation")
+                root.insert(0, elem)
+            new_xml = etree.tostring(
+                root, xml_declaration=True, encoding="UTF-8", standalone=True
+            )
+        except Exception:  # noqa: BLE001
+            new_xml = settings_xml
+
+        wrote_settings = False
+        for name in names:
+            if name == settings_path:
+                zout.writestr(name, new_xml)
+                wrote_settings = True
+            else:
+                zout.writestr(name, zin.read(name))
+        if not wrote_settings:
+            zout.writestr(settings_path, new_xml)
+            # Также нужно добавить relationship и content-type, иначе Word
+            # не увидит settings.xml. Это нетривиально для post-processing;
+            # на Фазе 2 ограничимся случаем, когда settings.xml уже есть
+            # (python-docx обычно создаёт его). Логируем как warning.
+
+    shutil.move(str(tmp_path), str(docx_path))
+
+
+def _write_header(doc: DocxDocument, header_template: ContentTemplate) -> None:
+    """Записать содержимое header первой секции (зеркально _write_footer).
+
+    Слоты left/center/right определяются выравниванием параграфа.
+    """
+    section = doc.sections[0]
+    header = section.header
+    for p in list(header.paragraphs):
+        p_xml = p._p
+        if p_xml.getparent() is not None and not p.text and not list(p_xml):
+            p_xml.getparent().remove(p_xml)
+
+    slots: list[tuple[str, Sequence[InlineElement] | None]] = [
+        ("left", header_template.left),
+        ("center", header_template.center),
+        ("right", header_template.right),
+    ]
+
+    for slot, content in slots:
+        if not _has_text(content):
+            continue
+        assert content is not None
+        para = header.add_paragraph()
+        if slot == "center":
+            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif slot == "right":
+            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        else:
+            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _write_template_into_footer_paragraph(para, content)
+

@@ -293,6 +293,27 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
     return applied
 
 
+@register("T.06")
+def fix_disable_auto_hyphenation(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[FixApplied]:
+    """Отключить автоматический перенос слов (`Document.auto_hyphenation = False`).
+
+    Эта правка безопасна: запрет автопереносов не меняет видимый текст,
+    только разбивку строк, которая по ГОСТ должна делаться вручную.
+    """
+    if document.auto_hyphenation is True:
+        document.auto_hyphenation = False
+        return [
+            FixApplied(
+                fixer_code="T.06",
+                location="document.auto_hyphenation",
+                description="Автоматический перенос слов отключён",
+            )
+        ]
+    return []
+
+
 @register("T.07")
 def fix_consecutive_empty_paragraphs(
     document: Document, profile: Profile
@@ -353,6 +374,7 @@ def fix_consecutive_empty_paragraphs(
 
 __all__ = [
     "fix_consecutive_empty_paragraphs",
+    "fix_disable_auto_hyphenation",
     "fix_double_spaces",
     "fix_hyphen_to_dash",
     "fix_initials_nbsp",

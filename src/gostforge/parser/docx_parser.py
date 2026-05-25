@@ -247,11 +247,12 @@ def _extract_auto_hyphenation(docx_doc: DocxDocument) -> bool | None:
     автоматический перенос. Отсутствие = выключен. На Фазе 1
     интерпретируем строго: элемент найден → True, иначе False.
     """
-    try:
-        settings_part = docx_doc.part.package.part_related_by(
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings"
-        )
-    except Exception:  # noqa: BLE001 — settings.xml не обязательная часть
+    settings_part = None
+    for rel in docx_doc.part.rels.values():
+        if rel.reltype.endswith("/relationships/settings"):
+            settings_part = rel.target_part
+            break
+    if settings_part is None:
         return None
     settings_xml = settings_part.blob
     try:
