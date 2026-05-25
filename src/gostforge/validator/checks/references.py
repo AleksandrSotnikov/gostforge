@@ -731,6 +731,40 @@ def check_fresh_sources_share(document: Document, profile: Profile) -> list[Viol
     ]
 
 
+# --- R.11 — минимальное число источников --------------------------------
+
+
+@register("R.11")
+def check_min_sources(document: Document, profile: Profile) -> list[Violation]:
+    """В bibliography должно быть не менее `min_sources` записей.
+
+    Параметр `checks.R.11.params.min_sources` (по умолчанию 20).
+    """
+    params = _check_params(profile, "R.11")
+    min_sources = _int_param(params, "min_sources", 20)
+    actual = len(document.bibliography)
+    if actual >= min_sources:
+        return []
+    return [
+        Violation(
+            check_code="R.11",
+            severity="warning",
+            message=(
+                f"В списке литературы {actual} источников, ожидается "
+                f"не менее {min_sources}"
+            ),
+            location="bibliography",
+            suggestion=(
+                f"Дополнить список литературы до {min_sources} источников"
+            ),
+            details={
+                "actual": str(actual),
+                "min_sources": str(min_sources),
+            },
+        )
+    ]
+
+
 __all__ = [
     "check_access_date_for_web",
     "check_bibliography_format",
@@ -739,6 +773,7 @@ __all__ = [
     "check_doi_or_url_for_modern",
     "check_each_entry_referenced",
     "check_fresh_sources_share",
+    "check_min_sources",
     "check_reference_style_numeric",
     "check_references_resolve_alias",
     "check_required_fields_by_type",

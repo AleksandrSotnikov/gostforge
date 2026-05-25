@@ -189,6 +189,7 @@ checks:
   R.08: {enabled: true}
   R.09: {enabled: true, params: {modern_year: 2020}}
   R.10: {enabled: true, params: {fresh_year_threshold: 2015, min_fresh_share: 0.5}}
+  R.11: {enabled: true, params: {min_sources: 20}}
   C.01: {enabled: true}
   C.02: {enabled: true}
   C.03: {enabled: true}

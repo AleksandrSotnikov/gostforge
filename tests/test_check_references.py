@@ -626,3 +626,48 @@ def test_r10_no_year_records_no_violation() -> None:
         ]
     )
     assert _violations(doc, profile, "R.10") == []
+
+
+# --- R.11 — минимальное число источников --------------------------------
+
+
+def test_r11_registered() -> None:
+    assert "R.11" in registered_checks()
+
+
+def test_r11_enough_sources_no_violation() -> None:
+    """Источников ≥ min_sources — нарушений нет."""
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["R.11"] = CheckConfig(enabled=True, params={"min_sources": 2})
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {}),
+            _entry_with_fields("ref-2", {}),
+        ]
+    )
+    assert _violations(doc, profile, "R.11") == []
+
+
+def test_r11_too_few_sources_violation() -> None:
+    """Источников меньше min_sources — Violation."""
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["R.11"] = CheckConfig(enabled=True, params={"min_sources": 5})
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {}),
+            _entry_with_fields("ref-2", {}),
+        ]
+    )
+    found = _violations(doc, profile, "R.11")
+    assert len(found) == 1
+    assert found[0].details["actual"] == "2"
+    assert found[0].details["min_sources"] == "5"
+
+
+def test_r11_empty_bibliography_violation() -> None:
+    """Пустой список литературы — тоже Violation."""
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["R.11"] = CheckConfig(enabled=True, params={"min_sources": 1})
+    found = _violations(Document(), profile, "R.11")
+    assert len(found) == 1
+    assert found[0].details["actual"] == "0"
