@@ -471,7 +471,70 @@ def check_appendix_heading_format(
     return violations
 
 
+# --- P.05 ------------------------------------------------------------------
+
+
+def _is_meaningful_title_paragraph(paragraph: Paragraph) -> bool:
+    """Эвристика: является ли параграф «содержательным заголовком».
+
+    Признаки:
+    - style_name начинается с "Heading" (Heading 1..9, Heading 2 и т.п.);
+    - либо хотя бы один TextRun имеет bold=True.
+    """
+    style = paragraph.style_name or ""
+    if style.startswith("Heading"):
+        return True
+    return any(
+        isinstance(el, TextRun) and el.bold is True for el in paragraph.content
+    )
+
+
+@register("P.05")
+def check_appendix_has_content_title(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """У каждого приложения второй строкой должен идти содержательный заголовок.
+
+    Эвристика: первый Paragraph в children должен либо иметь
+    style_name, начинающийся с "Heading", либо содержать хотя бы один
+    TextRun с bold=True.
+
+    Если параграфов в приложении вообще нет — пропускаем (Violation
+    в P.03 обычно).
+    """
+    _ = profile
+    violations: list[Violation] = []
+    appendices = _appendix_sections(document)
+    for section in appendices:
+        first_para = _first_paragraph_of_section(section)
+        if first_para is None:
+            continue
+        if _is_meaningful_title_paragraph(first_para):
+            continue
+        heading = _heading_text(section.heading).strip()
+        violations.append(
+            Violation(
+                check_code="P.05",
+                severity="warning",
+                message=(
+                    f"У приложения «{heading}» отсутствует содержательный "
+                    f"заголовок (вторая строка должна быть в стиле "
+                    f"«Заголовок 2» или с полужирным начертанием)"
+                ),
+                location=f"page_sections.*.logical_section[{section.id}]",
+                suggestion=(
+                    "Добавить второй строкой содержательный заголовок (например, "
+                    "«ПРИМЕР МЕТОДИКИ РАСЧЁТА») в стиле Heading 2 или полужирным"
+                ),
+                details={"section_id": section.id},
+            )
+        )
+    return violations
+
+
 __all__ = [
+    "check_appendix_has_content_title",
     "check_appendix_heading_format",
     "check_appendix_letter_marking",
     "check_appendix_page_break",

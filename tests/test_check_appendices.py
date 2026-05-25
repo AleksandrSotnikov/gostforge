@@ -308,3 +308,64 @@ def test_p04_lowercase_format_violation() -> None:
     assert len(found) == 1
 
 
+# --- P.05 -----------------------------------------------------------------
+
+
+def test_p05_registered() -> None:
+    assert "P.05" in registered_checks()
+
+
+def test_p05_heading_style_no_violation() -> None:
+    """Первый параграф приложения в стиле Heading 2 — нет нарушения."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="ПРИМЕР МЕТОДИКИ РАСЧЁТА")],
+        style_name="Heading 2",
+    )
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А")],
+        children=[para, Paragraph(id="p-2", content=[TextRun(text="...")])],
+    )
+    doc = _doc_with_content([app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.05"]
+    assert found == []
+
+
+def test_p05_bold_no_violation() -> None:
+    """Первый параграф с bold-runом — нет нарушения."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="ПРИМЕР МЕТОДИКИ", bold=True)],
+    )
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А")],
+        children=[para, Paragraph(id="p-2", content=[TextRun(text="...")])],
+    )
+    doc = _doc_with_content([app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.05"]
+    assert found == []
+
+
+def test_p05_plain_paragraph_violation() -> None:
+    """Первый параграф приложения — обычный (не bold, не Heading) — нарушение."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="обычный текст")],
+    )
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А")],
+        children=[para],
+    )
+    doc = _doc_with_content([app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.05"]
+    assert len(found) == 1
+    assert found[0].details["section_id"] == "app-a"
