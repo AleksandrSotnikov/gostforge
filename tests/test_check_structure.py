@@ -4,9 +4,11 @@
 
 from gostforge.model import (
     Document,
+    Figure,
     LogicalSection,
     PageSection,
     Paragraph,
+    Table,
     TextRun,
 )
 from gostforge.profile import load_profile
@@ -377,3 +379,113 @@ def test_s02_single_matched_section_no_violation() -> None:
     assert found == []
 
 
+# --- S.07 -------------------------------------------------------------------
+
+
+def test_s07_registered() -> None:
+    assert "S.07" in registered_checks()
+
+
+def test_s07_non_empty_section_no_violation() -> None:
+    section = LogicalSection(
+        id="sec-1",
+        level=1,
+        heading=[TextRun(text="Введение")],
+        children=[Paragraph(id="p-1", content=[TextRun(text="Текст введения.")])],
+    )
+    doc = _doc([section])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.07"]
+    assert found == []
+
+
+def test_s07_section_without_children_violation() -> None:
+    """Раздел без children — пустой."""
+    empty = LogicalSection(
+        id="sec-empty",
+        level=1,
+        heading=[TextRun(text="Введение")],
+    )
+    doc = _doc([empty])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.07"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "Введение" in found[0].message
+
+
+def test_s07_section_with_only_empty_paragraphs_violation() -> None:
+    """Раздел, у которого все Paragraph пусты — пустой."""
+    section = LogicalSection(
+        id="sec-1",
+        level=1,
+        heading=[TextRun(text="Глава 1")],
+        children=[
+            Paragraph(id="p-1", content=[]),
+            Paragraph(id="p-2", content=[TextRun(text="   ")]),
+        ],
+    )
+    doc = _doc([section])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.07"]
+    assert len(found) == 1
+
+
+def test_s07_section_with_only_table_not_empty() -> None:
+    """Раздел с одной таблицей (без Paragraph) — не пустой."""
+    section = LogicalSection(
+        id="sec-1",
+        level=1,
+        heading=[TextRun(text="Глава 1")],
+        children=[Table(id="t-1", caption=[TextRun(text="Таблица 1 — X")])],
+    )
+    doc = _doc([section])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.07"]
+    assert found == []
+
+
+def test_s07_section_with_only_figure_not_empty() -> None:
+    section = LogicalSection(
+        id="sec-1",
+        level=1,
+        heading=[TextRun(text="Глава 1")],
+        children=[Figure(id="fig-1", caption=[TextRun(text="Рисунок 1 — X")])],
+    )
+    doc = _doc([section])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.07"]
+    assert found == []
+
+
+def test_s07_technical_section_skipped() -> None:
+    """Раздел «Содержание» без содержимого — не нарушение (генерируется автоматически)."""
+    empty_toc = LogicalSection(
+        id="sec-toc",
+        level=1,
+        heading=[TextRun(text="Содержание")],
+    )
+    doc = _doc([empty_toc])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.07"]
+    assert found == []
+
+
+def test_s07_section_with_nested_subsection_not_empty() -> None:
+    """Раздел, содержащий подраздел — не пустой."""
+    inner = LogicalSection(
+        id="sec-2",
+        level=2,
+        heading=[TextRun(text="1.1 Подраздел")],
+        children=[Paragraph(id="p-2", content=[TextRun(text="Текст")])],
+    )
+    section = LogicalSection(
+        id="sec-1",
+        level=1,
+        heading=[TextRun(text="Глава 1")],
+        children=[inner],
+    )
+    doc = _doc([section])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.07"]
+    assert found == []

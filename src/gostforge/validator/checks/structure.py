@@ -9,9 +9,11 @@ from collections.abc import Sequence
 from gostforge.model import (
     Block,
     Document,
+    Figure,
     InlineElement,
     LogicalSection,
     Paragraph,
+    Table,
     TextRun,
 )
 from gostforge.profile import Profile
@@ -317,7 +319,78 @@ def check_sections_order(document: Document, profile: Profile) -> list[Violation
     return violations
 
 
+def _is_section_empty(section: LogicalSection) -> bool:
+    """Раздел считается пустым, если:
+
+    - у него вообще нет содержательных детей (Paragraph/Table/Figure/
+      LogicalSection), ИЛИ
+    - все Paragraph пусты (без TextRun с непустым text.strip()) и нет
+      иных блоков (Table/Figure/LogicalSection).
+    """
+    meaningful_children = [
+        c
+        for c in section.children
+        if isinstance(c, (Paragraph, Table, Figure, LogicalSection))
+    ]
+    if not meaningful_children:
+        return True
+
+    has_other = any(
+        isinstance(c, (Table, Figure, LogicalSection)) for c in meaningful_children
+    )
+    if has_other:
+        return False
+
+    # Только Paragraph-ы — проверим, есть ли хоть один с непустым текстом
+    for c in meaningful_children:
+        if isinstance(c, Paragraph):
+            for el in c.content:
+                if isinstance(el, TextRun) and el.text and el.text.strip():
+                    return False
+    return True
+
+
+# Заголовки технических разделов, для которых пустое содержимое уровня 1
+# нормально (заголовок — единственное содержимое). Сравниваем по
+# нормализованному значению.
+_TECHNICAL_HEADINGS_NORMALIZED: set[str] = {
+    "содержание",
+    "перечень сокращений",
+    "реферат",
+}
+
+
+@register("S.07")
+def check_no_empty_sections(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Не должно быть «пустых» разделов уровня 1 (только заголовок, без текста)."""
+    violations: list[Violation] = []
+    sections: list[LogicalSection] = []
+    for ps in document.page_sections:
+        sections.extend(_all_level1_sections(ps.content))
+
+    for section in sections:
+        heading = _heading_text(section.heading)
+        if _normalize(heading) in _TECHNICAL_HEADINGS_NORMALIZED:
+            continue
+        if _is_section_empty(section):
+            violations.append(
+                Violation(
+                    check_code="S.07",
+                    severity="warning",
+                    message=f"Раздел «{heading}» пуст — нет содержательного текста",
+                    location=f"page_sections.*.logical_section[{section.id}]",
+                    suggestion="Добавьте содержимое раздела или удалите пустой заголовок",
+                    details={"section_id": section.id, "heading": heading},
+                )
+            )
+    return violations
+
+
 __all__ = [
+    "check_no_empty_sections",
     "check_required_sections",
     "check_section_page_break",
     "check_sections_order",
