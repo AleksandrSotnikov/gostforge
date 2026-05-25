@@ -131,6 +131,10 @@ checks:
     enabled: true
     params:
       required_elements: [актуальность, цель, задач, объект, предмет]
+  S.05:
+    enabled: true
+    params:
+      min_paragraphs: 3
   S.06: {enabled: true, params: {required_for_level: 1}}
   S.07: {enabled: true}
   H.01: {enabled: true}

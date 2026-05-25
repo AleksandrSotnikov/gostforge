@@ -590,7 +590,78 @@ def check_introduction_required_elements(document: Document, profile: Profile) -
     return violations
 
 
+# --- S.05 — заключение содержит N+ параграфов -------------------------------
+
+
+def _count_meaningful_paragraphs(section: LogicalSection) -> int:
+    """Количество непустых параграфов раздела (включая вложенные).
+
+    Пустыми считаются параграфы без TextRun или у которых все TextRun
+    после strip() пусты.
+    """
+    count = 0
+
+    def visit(items: Sequence[LogicalSection | Block]) -> None:
+        nonlocal count
+        for item in items:
+            if isinstance(item, Paragraph):
+                text = "".join(el.text for el in item.content if isinstance(el, TextRun))
+                if text.strip():
+                    count += 1
+            elif isinstance(item, LogicalSection):
+                visit(item.children)
+
+    visit(section.children)
+    return count
+
+
+@register("S.05")
+def check_conclusion_min_paragraphs(document: Document, profile: Profile) -> list[Violation]:
+    """Заключение должно содержать не менее N непустых параграфов.
+
+    На Фазе 1 — простая эвристика. Параметр
+    `checks.S.05.params.min_paragraphs` (по умолчанию 3).
+    """
+    config = profile.checks.get("S.05")
+    min_paragraphs = 3
+    if config and config.params.get("min_paragraphs") is not None:
+        try:
+            min_paragraphs = int(config.params["min_paragraphs"])
+        except (TypeError, ValueError):
+            min_paragraphs = 3
+
+    conclusion = _find_section_by_heading(document, "заключение")
+    if conclusion is None:
+        # Нет «Заключения» — зафиксирует S.01.
+        return []
+
+    actual = _count_meaningful_paragraphs(conclusion)
+    if actual >= min_paragraphs:
+        return []
+    return [
+        Violation(
+            check_code="S.05",
+            severity="warning",
+            message=(
+                f"«Заключение» содержит {actual} непустых параграфов, "
+                f"ожидается не менее {min_paragraphs}"
+            ),
+            location=f"page_sections.*.logical_section[{conclusion.id}]",
+            suggestion=(
+                "Заключение должно содержать выводы по каждой задаче "
+                "из введения — добавьте недостающие параграфы"
+            ),
+            details={
+                "section_id": conclusion.id,
+                "actual": str(actual),
+                "expected_min": str(min_paragraphs),
+            },
+        )
+    ]
+
+
 __all__ = [
+    "check_conclusion_min_paragraphs",
     "check_introduction_required_elements",
     "check_no_empty_sections",
     "check_required_sections",

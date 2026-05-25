@@ -631,3 +631,62 @@ def test_s04_custom_required_elements_via_params() -> None:
     assert "гипотеза" in found[0].message
 
 
+# --- S.05 -------------------------------------------------------------------
+
+
+def test_s05_registered() -> None:
+    assert "S.05" in registered_checks()
+
+
+def test_s05_enough_paragraphs_no_violation() -> None:
+    conclusion = LogicalSection(
+        id="sec-concl",
+        level=1,
+        heading=[TextRun(text="Заключение")],
+        children=[
+            Paragraph(id="p-1", content=[TextRun(text="Вывод 1.")]),
+            Paragraph(id="p-2", content=[TextRun(text="Вывод 2.")]),
+            Paragraph(id="p-3", content=[TextRun(text="Вывод 3.")]),
+        ],
+    )
+    doc = _doc([conclusion])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.05"]
+    assert found == []
+
+
+def test_s05_too_few_paragraphs_violation() -> None:
+    """Заключение с одним параграфом — нарушение (min=3)."""
+    conclusion = LogicalSection(
+        id="sec-concl",
+        level=1,
+        heading=[TextRun(text="Заключение")],
+        children=[
+            Paragraph(id="p-1", content=[TextRun(text="Единственный вывод.")]),
+        ],
+    )
+    doc = _doc([conclusion])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.05"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "1" in found[0].message
+
+
+def test_s05_custom_min_paragraphs_param() -> None:
+    """min_paragraphs=2 — три параграфа достаточно, один — нарушение."""
+    conclusion = LogicalSection(
+        id="sec-concl",
+        level=1,
+        heading=[TextRun(text="Заключение")],
+        children=[
+            Paragraph(id="p-1", content=[TextRun(text="Один.")]),
+        ],
+    )
+    doc = _doc([conclusion])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["S.05"].params["min_paragraphs"] = 2
+    found = [v for v in validate(doc, profile) if v.check_code == "S.05"]
+    assert len(found) == 1
+
+
