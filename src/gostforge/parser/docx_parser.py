@@ -277,6 +277,7 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
     alignment = _alignment_to_literal(pf.alignment)
     line_spacing = _line_spacing_value(pf.line_spacing)
     indent_cm = _indent_cm(pf.first_line_indent)
+    page_break_before = _page_break_before(p)
 
     content: list[InlineElement] = []
     style_font_name = _style_font_name(p)
@@ -305,7 +306,70 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
         alignment=alignment,
         line_spacing=line_spacing,
         first_line_indent_cm=indent_cm,
+        page_break_before=page_break_before,
     )
+
+
+def _page_break_before(p: DocxParagraph) -> bool | None:
+    """Узнать, выставлен ли у параграфа разрыв страницы перед ним.
+
+    Проверяем сам параграф (w:pPr/w:pageBreakBefore) и цепочку стилей
+    (Word-стили могут наследовать pageBreakBefore от base_style). Возвращаем:
+      - True, если флаг найден явно;
+      - None, если не найден ни на параграфе, ни в стиле (наследуется/
+        не задан).
+
+    Возможный False в текущей реализации не выдаём — w:pageBreakBefore
+    в OOXML по умолчанию означает True; снятие флага через `w:val="0"`
+    встречается редко, но мы его учитываем.
+    """
+    # 1) Прямое свойство параграфа: w:pPr/w:pageBreakBefore
+    direct = _paragraph_break_flag(p._p)
+    if direct is not None:
+        return direct
+
+    # 2) Свойство, унаследованное от стиля абзаца (с обходом base_style)
+    style = p.style
+    while style is not None:
+        style_element = getattr(style, "element", None)
+        if style_element is not None:
+            inherited = _style_break_flag(style_element)
+            if inherited is not None:
+                return inherited
+        style = getattr(style, "base_style", None)
+    return None
+
+
+def _paragraph_break_flag(p_elem: object) -> bool | None:
+    """Найти w:pageBreakBefore в w:pPr заданного <w:p>."""
+    p_pr = p_elem.find(f"{{{W_NS}}}pPr")  # type: ignore[attr-defined]
+    if p_pr is None:
+        return None
+    return _read_break_flag(p_pr)
+
+
+def _style_break_flag(style_elem: object) -> bool | None:
+    """Найти w:pageBreakBefore в w:pPr стилей (<w:style>/<w:docDefaults>)."""
+    p_pr = style_elem.find(f"{{{W_NS}}}pPr")  # type: ignore[attr-defined]
+    if p_pr is None:
+        return None
+    return _read_break_flag(p_pr)
+
+
+def _read_break_flag(p_pr_elem: object) -> bool | None:
+    """Прочитать <w:pageBreakBefore> внутри <w:pPr>.
+
+    OOXML toggle-семантика: элемент без атрибута w:val или со значением
+    "true"/"1"/"on" — True; "false"/"0"/"off" — False; отсутствие
+    элемента — None.
+    """
+    elem = p_pr_elem.find(f"{{{W_NS}}}pageBreakBefore")  # type: ignore[attr-defined]
+    if elem is None:
+        return None
+    val = elem.get(f"{{{W_NS}}}val")
+    if val is None:
+        return True
+    return val.lower() not in {"false", "0", "off"}
 
 
 def _alignment_to_literal(value: object | None) -> ParagraphAlignment | None:

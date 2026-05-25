@@ -32,6 +32,8 @@ def make_docx(
     paragraphs: list[str] | None = None,
     headings: list[tuple[int, str]] | None = None,
     page_number: bool = True,
+    page_number_start: int | None = None,
+    headings_break_before: bool = False,
     title: str | None = None,
     author: str | None = None,
 ) -> Path:
@@ -46,6 +48,10 @@ def make_docx(
       paragraphs:  список обычных абзацев.
       headings:    список (level, text) — порождают doc.add_heading.
       page_number: добавить ли поле PAGE в центральный параграф footer.
+      page_number_start: если задано, в sectPr пишется <w:pgNumType w:start="N"/>
+                          — стартовое значение нумерации страниц.
+      headings_break_before: если True, у каждого заголовка ставим
+                          paragraph_format.page_break_before = True.
       title/author: записать в docProps.core (если заданы).
     """
     document = docx.Document()
@@ -76,13 +82,19 @@ def make_docx(
 
     # --- заголовки и абзацы ---
     for level, text in headings or []:
-        document.add_heading(text, level=level)
+        heading = document.add_heading(text, level=level)
+        if headings_break_before:
+            heading.paragraph_format.page_break_before = True
     for text in paragraphs or []:
         document.add_paragraph(text)
 
     # --- номер страницы в footer (поле PAGE) ---
     if page_number:
         _inject_page_field_in_footer(section)
+
+    # --- стартовая страница нумерации: <w:pgNumType w:start="N"/> в sectPr ---
+    if page_number_start is not None:
+        _inject_page_number_start(section, page_number_start)
 
     document.save(str(path))
     return path
@@ -99,6 +111,19 @@ def _inject_page_field_in_footer(section: object) -> None:
     r = etree.SubElement(fld, f"{{{W_NS}}}r")
     t = etree.SubElement(r, f"{{{W_NS}}}t")
     t.text = "1"
+
+
+def _inject_page_number_start(section: object, start_value: int) -> None:
+    """Записать <w:pgNumType w:start="N"/> в sectPr секции.
+
+    python-docx не даёт прямого API к pgNumType, поэтому работаем через lxml.
+    Если элемент уже есть — обновляем атрибут w:start.
+    """
+    sect_pr = section._sectPr  # type: ignore[attr-defined]
+    pg_num_type = sect_pr.find(f"{{{W_NS}}}pgNumType")
+    if pg_num_type is None:
+        pg_num_type = etree.SubElement(sect_pr, f"{{{W_NS}}}pgNumType")
+    pg_num_type.set(f"{{{W_NS}}}start", str(start_value))
 
 
 # --- готовые фикстуры под типичные кейсы -------------------------------------
@@ -126,6 +151,8 @@ def _build_default(
     body_size: float = 14,
     headings: Iterable[tuple[int, str]] | None = None,
     page_number: bool = True,
+    page_number_start: int | None = None,
+    headings_break_before: bool = False,
 ) -> Path:
     """Внутренний helper: документ по ГОСТу с разумными дефолтами."""
     return make_docx(
@@ -136,6 +163,8 @@ def _build_default(
         paragraphs=DEFAULT_PARAGRAPHS,
         headings=list(headings) if headings is not None else list(DEFAULT_HEADINGS),
         page_number=page_number,
+        page_number_start=page_number_start,
+        headings_break_before=headings_break_before,
     )
 
 
@@ -176,3 +205,36 @@ def missing_intro_docx(tmp_path: Path) -> Path:
 def no_page_number_docx(tmp_path: Path) -> Path:
     """Документ без поля PAGE в footer — нарушение F.04."""
     return _build_default(tmp_path / "no_page_number.docx", page_number=False)
+
+
+@pytest.fixture
+def correct_numbering_docx(tmp_path: Path) -> Path:
+    """Документ с корректной стартовой страницей нумерации (3) и разрывами перед разделами."""
+    return _build_default(
+        tmp_path / "correct_numbering.docx",
+        page_number=True,
+        page_number_start=3,
+        headings_break_before=True,
+    )
+
+
+@pytest.fixture
+def wrong_numbering_start_docx(tmp_path: Path) -> Path:
+    """Старт нумерации 5 вместо ожидаемой 3 — нарушение F.06."""
+    return _build_default(
+        tmp_path / "wrong_numbering_start.docx",
+        page_number=True,
+        page_number_start=5,
+        headings_break_before=True,
+    )
+
+
+@pytest.fixture
+def no_page_break_docx(tmp_path: Path) -> Path:
+    """Разделы 1 уровня без page_break_before — потенциальное нарушение S.06."""
+    return _build_default(
+        tmp_path / "no_page_break.docx",
+        page_number=True,
+        page_number_start=3,
+        headings_break_before=False,
+    )

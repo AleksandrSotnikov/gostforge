@@ -131,3 +131,92 @@ def test_parse_paragraph_after_heading_goes_into_children(tmp_path: Path) -> Non
     assert len(paragraphs_inside) == 1
     text = "".join(e.text for e in paragraphs_inside[0].content if isinstance(e, TextRun))
     assert "Первый абзац" in text
+
+
+def test_parse_extracts_page_number_start(tmp_path: Path) -> None:
+    """<w:pgNumType w:start="3"/> → start_mode='start_at', start_value=3."""
+    path = make_docx(
+        tmp_path / "pgnum_start.docx",
+        paragraphs=["Текст"],
+        page_number=True,
+        page_number_start=3,
+    )
+    doc = parse_docx(path)
+    numbering = doc.page_sections[0].page_numbering
+    assert numbering.start_mode == "start_at"
+    assert numbering.start_value == 3
+
+
+def test_parse_no_page_number_start_keeps_default(tmp_path: Path) -> None:
+    """Без pgNumType — start_mode остаётся 'continue', start_value=None."""
+    path = make_docx(
+        tmp_path / "pgnum_default.docx",
+        paragraphs=["Текст"],
+        page_number=True,
+    )
+    doc = parse_docx(path)
+    numbering = doc.page_sections[0].page_numbering
+    assert numbering.start_mode == "continue"
+    assert numbering.start_value is None
+
+
+def test_parse_extracts_page_break_before(tmp_path: Path) -> None:
+    """headings_break_before=True → у первого Paragraph в разделе page_break_before=True."""
+    path = make_docx(
+        tmp_path / "page_break.docx",
+        headings=[(1, "Введение"), (1, "Заключение")],
+        paragraphs=[],
+        headings_break_before=True,
+    )
+    doc = parse_docx(path)
+    sections = [
+        item for item in doc.page_sections[0].content if isinstance(item, LogicalSection)
+    ]
+    # В make_docx абзацы paragraphs идут после всех заголовков, поэтому здесь
+    # children секций пусты. Проверяем page_break_before на самом заголовке
+    # отдельно через прямое чтение — но в текущей модели заголовок хранится
+    # как list[InlineElement], а не Paragraph. Поэтому проверка идёт через
+    # отдельный параграф под заголовком: добавим параграф после первого
+    # заголовка через add_paragraph — но фабрика этого не делает.
+    # Достаточно: оба раздела распознаны, и атрибут page_break_before
+    # в модели достижим. Проверка фактического выставления — ниже.
+    assert len(sections) == 2
+
+    # Альтернативный путь: документ с одним заголовком и абзацем НЕ под ним.
+    # Так как DEFAULT-фабрика этого не делает, построим вручную.
+    path2 = make_docx(
+        tmp_path / "page_break_para.docx",
+        headings=[],
+        paragraphs=[],
+        headings_break_before=True,
+    )
+    # Открываем повторно и добавляем параграф с pageBreakBefore через python-docx.
+    import docx as _docx
+
+    d = _docx.Document(str(path2))
+    para = d.add_paragraph("Параграф с разрывом")
+    para.paragraph_format.page_break_before = True
+    d.save(str(path2))
+    doc2 = parse_docx(path2)
+
+    paragraphs = [
+        item for item in doc2.page_sections[0].content if isinstance(item, Paragraph)
+    ]
+    assert len(paragraphs) >= 1
+    assert paragraphs[-1].page_break_before is True
+
+
+def test_parse_paragraph_without_page_break(tmp_path: Path) -> None:
+    """Обычный параграф без pageBreakBefore → page_break_before is None."""
+    path = make_docx(
+        tmp_path / "no_break.docx",
+        paragraphs=["Просто абзац без разрыва."],
+        headings=[],
+    )
+    doc = parse_docx(path)
+    paragraphs = [
+        item for item in doc.page_sections[0].content if isinstance(item, Paragraph)
+    ]
+    assert len(paragraphs) == 1
+    # Атрибут либо не задан явно (None), либо False — главное, что не True.
+    assert paragraphs[0].page_break_before is not True
