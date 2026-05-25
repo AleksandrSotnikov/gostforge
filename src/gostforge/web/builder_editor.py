@@ -146,12 +146,113 @@ def _ensure_state() -> None:
     """Положить в session_state дефолтный state, если его ещё нет."""
     if "builder_state" not in st.session_state:
         st.session_state["builder_state"] = _default_state()
+    # Phase 2.5: ленивая инициализация истории для undo/redo.
+    if "builder_history" not in st.session_state:
+        st.session_state["builder_history"] = []
+    if "builder_history_cursor" not in st.session_state:
+        st.session_state["builder_history_cursor"] = -1
 
 
 def _get_state() -> dict[str, Any]:
     """Вернуть текущий builder_state. Перед использованием — _ensure_state()."""
     state: dict[str, Any] = st.session_state["builder_state"]
     return state
+
+
+# --- Undo / Redo (Фаза 2.5) -------------------------------------------------
+
+
+# Размер кольцевого буфера snapshot-ов. 50 шагов — компромисс между
+# памятью (deepcopy на каждой мутации) и пользовательскими ожиданиями.
+_HISTORY_LIMIT = 50
+
+
+def _push_history_snapshot() -> None:
+    """Сохранить текущий state в стек истории перед мутацией.
+
+    Стек обрезается до cursor+1 (если ранее был сделан undo, любая
+    новая мутация уничтожает «будущие» snapshot-ы — классический
+    branch-and-truncate из текстовых редакторов). При переполнении
+    стек смещается слева — старейший snapshot выпадает.
+    """
+    import copy
+
+    history = st.session_state.get("builder_history") or []
+    cursor = st.session_state.get("builder_history_cursor", -1)
+    state = st.session_state.get("builder_state")
+    if state is None:
+        return
+    snapshot = copy.deepcopy(state)
+    # Обрезаем «redo-будущее» после cursor-а.
+    truncated = list(history[: cursor + 1])
+    truncated.append(snapshot)
+    # Сдвигаем слева, если переполнили лимит.
+    if len(truncated) > _HISTORY_LIMIT:
+        truncated = truncated[-_HISTORY_LIMIT:]
+    st.session_state["builder_history"] = truncated
+    st.session_state["builder_history_cursor"] = len(truncated) - 1
+
+
+def _undo_state() -> bool:
+    """Откатиться к предыдущему snapshot. Возвращает True, если откат успешен."""
+    import copy
+
+    history = st.session_state.get("builder_history") or []
+    cursor = st.session_state.get("builder_history_cursor", -1)
+    if cursor <= 0:
+        return False
+    cursor -= 1
+    st.session_state["builder_history_cursor"] = cursor
+    st.session_state["builder_state"] = copy.deepcopy(history[cursor])
+    return True
+
+
+def _redo_state() -> bool:
+    """Перейти к следующему snapshot. Возвращает True, если переход успешен."""
+    import copy
+
+    history = st.session_state.get("builder_history") or []
+    cursor = st.session_state.get("builder_history_cursor", -1)
+    if cursor + 1 >= len(history):
+        return False
+    cursor += 1
+    st.session_state["builder_history_cursor"] = cursor
+    st.session_state["builder_state"] = copy.deepcopy(history[cursor])
+    return True
+
+
+def _can_undo() -> bool:
+    """Доступен ли откат назад."""
+    return int(st.session_state.get("builder_history_cursor", -1)) > 0
+
+
+def _can_redo() -> bool:
+    """Доступен ли переход вперёд."""
+    history = st.session_state.get("builder_history") or []
+    cursor = int(st.session_state.get("builder_history_cursor", -1))
+    return cursor + 1 < len(history)
+
+
+def _auto_snapshot_if_changed() -> None:
+    """Записать snapshot, если state отличается от текущего в истории.
+
+    Вызывается в начале каждого rerun. Снапшот в позиции cursor
+    представляет «текущее» состояние; если state не совпал — значит
+    в предыдущем rerun была мутация, и пора зафиксировать её.
+
+    После undo/redo state выставляется равным history[cursor],
+    поэтому эта функция не сделает лишнего snapshot — undo/redo
+    остаются обратимыми.
+    """
+    state = _get_state()
+    history = st.session_state.get("builder_history") or []
+    cursor = int(st.session_state.get("builder_history_cursor", -1))
+    if not history or cursor < 0 or cursor >= len(history):
+        _push_history_snapshot()
+        return
+    if history[cursor] == state:
+        return
+    _push_history_snapshot()
 
 
 # --- Шаблоны → state ---------------------------------------------------------
@@ -940,6 +1041,21 @@ def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
     ``sections``, отклоняется с понятной ошибкой.
     """
     st.sidebar.divider()
+    st.sidebar.subheader("История")
+    undo_col, redo_col = st.sidebar.columns(2)
+    undo_disabled = not _can_undo()
+    redo_disabled = not _can_redo()
+    if undo_col.button("⟲ Отменить", disabled=undo_disabled, key="builder_undo"):
+        if _undo_state():
+            st.rerun()
+    if redo_col.button("⟳ Повторить", disabled=redo_disabled, key="builder_redo"):
+        if _redo_state():
+            st.rerun()
+    history = st.session_state.get("builder_history") or []
+    cursor = int(st.session_state.get("builder_history_cursor", -1))
+    st.sidebar.caption(f"Snapshot {cursor + 1} из {len(history)}")
+
+    st.sidebar.divider()
     st.sidebar.subheader("Сохранение / загрузка")
 
     # Скачать текущий state как JSON.
@@ -1577,6 +1693,9 @@ def render_interactive_builder() -> None:
     5. Кнопка генерации и live-preview нарушений.
     """
     _ensure_state()
+    # Phase 2.5: фиксируем snapshot до рендера sidebar, чтобы кнопки
+    # undo/redo там же опирались на актуальный cursor.
+    _auto_snapshot_if_changed()
     _render_sidebar_metadata()
 
     st.title("gostforge — конструктор работ")
