@@ -1,0 +1,26 @@
+# Пример пользовательского профиля кафедры, наследующего от базового.
+# Имя файла = ID профиля. Чтобы использовать: gostforge check work.docx -p example-department.
+
+id: example-department
+name: Кафедра-пример (методичка 2026)
+version: "1.0"
+extends: gost-7.32-2017
+description: |
+  Пример переопределений: на этой кафедре используется кегль 12 вместо 14
+  и требуется минимум 30 источников в списке литературы.
+
+styles:
+  body:
+    size_pt: 12
+
+checks:
+  T.02:
+    enabled: true
+    params:
+      body_size: 12
+      caption_size: 11
+      footnote_size: 10
+  R.11:
+    enabled: true
+    params:
+      min_sources: 30

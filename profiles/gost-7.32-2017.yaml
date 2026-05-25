@@ -1,0 +1,148 @@
+id: gost-7.32-2017
+name: ГОСТ 7.32-2017 (базовый)
+version: "1.0"
+based_on:
+  - "ГОСТ 7.32-2017"
+  - "ГОСТ Р 2.105-2019"
+  - "ГОСТ Р 7.0.100-2018"
+effective_from: "2018-07-01"
+description: |
+  Базовый профиль для отчётов о научно-исследовательской работе, курсовых
+  и дипломных работ. Параметры — общие требования ГОСТ 7.32-2017.
+  Кафедры наследуют от этого профиля и переопределяют отдельные поля
+  в соответствии со своими методичками.
+
+styles:
+  page:
+    size: A4
+    margins_mm:
+      top: 20
+      right: 15
+      bottom: 20
+      left: 30
+  body:
+    font: Times New Roman
+    size_pt: 14
+    line_spacing: 1.5
+    first_line_indent_cm: 1.25
+    alignment: justify
+    hyphenation: false
+  extra:
+    caption_size_pt: 12
+    footnote_size_pt: 10
+    heading_1:
+      font: Times New Roman
+      size_pt: 14
+      bold: true
+      uppercase: true
+      alignment: center
+      spacing_before_pt: 18
+      spacing_after_pt: 12
+      page_break_before: true
+    heading_2:
+      font: Times New Roman
+      size_pt: 14
+      bold: true
+      uppercase: false
+      alignment: left
+      first_line_indent_cm: 1.25
+      spacing_before_pt: 12
+      spacing_after_pt: 6
+    figure_caption:
+      position: below
+      format: "Рисунок {num} — {title}"
+      alignment: center
+      size_pt: 12
+    table_caption:
+      position: above
+      format: "Таблица {num} — {title}"
+      alignment: left
+      size_pt: 12
+
+sections_template:
+  - name: Титульный лист
+    type: title
+    page_numbering:
+      visible: false
+
+  - name: Задание и реферат
+    type: frontmatter
+    page_numbering:
+      visible: false
+
+  - name: Содержание и список сокращений
+    type: frontmatter
+    page_numbering:
+      visible: true
+      format: arabic
+      start_mode: start_at
+      start_value: 3
+    footer:
+      default:
+        center: "{page}"
+
+  - name: Основная часть
+    type: main
+    page_numbering:
+      visible: true
+      format: arabic
+      start_mode: continue
+    footer:
+      default:
+        center: "{page}"
+
+  - name: Приложения
+    type: appendix
+    page_numbering:
+      visible: true
+      format: arabic
+      start_mode: continue
+    header:
+      default:
+        center: "ПРИЛОЖЕНИЕ {appendix_letter}"
+    footer:
+      default:
+        center: "{page}"
+
+checks:
+  F.01: {enabled: true}
+  F.02: {enabled: true}
+  F.04: {enabled: true, params: {position: bottom_center}}
+  F.05: {enabled: true}
+  F.06: {enabled: true}
+  T.01: {enabled: true, params: {font: "Times New Roman"}}
+  T.02: {enabled: true, params: {body_size: 14, caption_size: 12, footnote_size: 10}}
+  T.03: {enabled: true, params: {line_spacing: 1.5}}
+  T.04: {enabled: true, params: {first_line_indent_cm: 1.25}}
+  T.05: {enabled: true, params: {alignment: justify}}
+  T.06: {enabled: true}
+  T.07: {enabled: true}
+  T.08: {enabled: true}
+  S.01: {enabled: true}
+  S.02: {enabled: true}
+  S.06: {enabled: true}
+  H.01: {enabled: true}
+  H.03: {enabled: true}
+  H.04: {enabled: true}
+  H.05: {enabled: true}
+  I.01: {enabled: true}
+  I.02: {enabled: true}
+  I.03: {enabled: true}
+  I.05: {enabled: true}
+  I.06: {enabled: true}
+  B.01: {enabled: true}
+  B.02: {enabled: true}
+  B.03: {enabled: true}
+  B.08: {enabled: true}
+  B.09: {enabled: true}
+  R.04: {enabled: true}
+  R.06: {enabled: true}
+  R.08: {enabled: true}
+  C.01: {enabled: true}
+  C.02: {enabled: true}
+  C.04: {enabled: true}
+  P.01: {enabled: true}
+  P.03: {enabled: true}
+  K.01: {enabled: true}
+  K.02: {enabled: true}
+  K.03: {enabled: true}
