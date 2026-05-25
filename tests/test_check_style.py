@@ -172,3 +172,18 @@ def test_x_04_stub_returns_no_violations() -> None:
     assert violations == []
 
 
+# ----- X.05 (заглушка) ---------------------------------------------------------
+
+
+def test_x_05_registered() -> None:
+    """X.05 пока — заглушка, регистрация обязана быть."""
+    assert "X.05" in registered_checks()
+
+
+def test_x_05_stub_returns_no_violations() -> None:
+    doc = _doc_with_paragraphs(
+        "База данных и БД — заглушка не должна сравнивать термины.",
+    )
+    profile = load_profile("gost-7.32-2017")
+    violations = [v for v in validate(doc, profile) if v.check_code == "X.05"]
+    assert violations == []

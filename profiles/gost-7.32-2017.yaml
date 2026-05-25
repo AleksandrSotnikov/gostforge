@@ -235,3 +235,4 @@ checks:
   X.02: {enabled: true}
   X.03: {enabled: true}
   X.04: {enabled: true}
+  X.05: {enabled: true}

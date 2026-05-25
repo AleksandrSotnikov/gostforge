@@ -173,3 +173,18 @@ def check_number_unit_agreement(document: Document, profile: Profile) -> list[Vi
     return []
 
 
+@register("X.05")
+def check_term_consistency(document: Document, profile: Profile) -> list[Violation]:
+    """X.05 — единообразие терминов (заглушка).
+
+    На Фазе 2 — заглушка: для полноценной реализации нужен NLP-словарь
+    синонимов или явный список правил в params. На текущий момент
+    возвращаем пустой список.
+
+    TODO Phase 3: либо явное правило вида
+    `params.terms: [{canonical: "база данных", aliases: ["БД", "DB"]}]`,
+    либо NLP-нормализация лемм.
+    """
+    _ = document
+    _ = profile
+    return []
