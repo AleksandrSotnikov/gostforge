@@ -21,12 +21,16 @@ from typing import TYPE_CHECKING, Any, cast
 
 import docx  # type: ignore[import-not-found]
 from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-not-found]
+from docx.table import Table as DocxTableCls  # type: ignore[import-not-found]
+from docx.text.paragraph import Paragraph as DocxParagraphCls  # type: ignore[import-not-found]
 from lxml import etree  # type: ignore[import-untyped]
 
 from gostforge.model import (
+    Block,
     ContentTemplate,
     Document,
     DocumentMetadata,
+    Figure,
     HeaderConfig,
     InlineElement,
     LogicalSection,
@@ -34,6 +38,7 @@ from gostforge.model import (
     PageSection,
     Paragraph,
     ParagraphAlignment,
+    Table,
     TextRun,
 )
 
@@ -41,6 +46,8 @@ if TYPE_CHECKING:
     DocxDocument = Any
     DocxSection = Any
     DocxParagraph = Any
+    DocxTable = Any
+    DocxCell = Any
 
 
 # Пространство имён OOXML wordprocessingml
@@ -57,6 +64,13 @@ _ALIGN_MAP: dict[int, ParagraphAlignment] = {
 
 # Регэксп заголовков Word: "Heading 1", "Heading 2" и т.д.
 _HEADING_RE = re.compile(r"^Heading\s+(\d+)$")
+
+# Шаблоны подписей по тексту: «Рисунок 1 — ...», «Рис. 1 ...»; «Таблица 1 — ...».
+_FIGURE_CAPTION_TEXT_RE = re.compile(r"^Рис(?:унок)?\.?\s+\d")
+_TABLE_CAPTION_TEXT_RE = re.compile(r"^Таблица\s+\d")
+
+# Множество имён Word-стилей подписи (нормализуется в lowercase).
+_CAPTION_STYLE_NAMES = {"caption", "image caption", "figure caption", "table caption"}
 
 
 def parse_docx(path: str | Path) -> Document:
@@ -225,38 +239,206 @@ def _instr_is_page(instr: str) -> bool:
 # --- контент: параграфы и заголовки ------------------------------------------
 
 
-def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None:
-    """Пройти по абзацам документа и распределить их по PageSection / LogicalSection.
+class _Counters:
+    """Сквозные счётчики id блоков (общие на весь документ)."""
 
-    Стратегия Фазы 0: плоская иерархия. Заголовок (Heading N) создаёт новую
-    LogicalSection и кладётся в `page_section.content`. Последующие
-    не-заголовочные абзацы кладутся в `children` текущей LogicalSection
-    (до следующего заголовка любого уровня). Если документ начинается
-    с обычных абзацев — они идут прямо в `page_section.content`.
+    def __init__(self) -> None:
+        self.heading = 0
+        self.paragraph = 0
+        self.figure = 0
+        self.table = 0
+
+
+def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None:
+    """Пройти по телу документа в порядке появления и наполнить PageSection.
+
+    Алгоритм Фазы 1:
+    1. Итерируемся по `body.iterchildren()` и обрабатываем каждый элемент
+       по тегу: `<w:p>` — параграф/заголовок/рисунок, `<w:tbl>` — таблица.
+       `<w:sectPr>` и прочие служебные элементы — пропускаем.
+    2. Заголовок (Heading N) открывает новую LogicalSection.
+    3. Параграфы и таблицы кладутся либо в текущую LogicalSection, либо
+       прямо в `page_section.content` (если ни одного раздела ещё не было).
+    4. После того как линейная последовательность собрана, делается
+       единый проход «склейки подписей»: рисункам подпись прикрепляется
+       снизу, таблицам — сверху; параграфы-подписи удаляются.
     """
     current_section: LogicalSection | None = None
-    heading_counter = 0
-    para_counter = 0
+    counters = _Counters()
+    body = docx_doc.element.body
 
-    for p in docx_doc.paragraphs:
-        heading_level = _heading_level(p)
-        if heading_level is not None:
-            heading_counter += 1
-            section = LogicalSection(
-                id=f"sec-{heading_counter}",
-                level=heading_level,
-                heading=[TextRun(text=p.text)],
-            )
-            page_section.content.append(section)
-            current_section = section
+    for child in body.iterchildren():
+        tag = etree.QName(child.tag).localname
+        if tag == "p":
+            dp = DocxParagraphCls(child, docx_doc)
+            heading_level = _heading_level(dp)
+            if heading_level is not None:
+                counters.heading += 1
+                section = LogicalSection(
+                    id=f"sec-{counters.heading}",
+                    level=heading_level,
+                    heading=[TextRun(text=dp.text)],
+                )
+                page_section.content.append(section)
+                current_section = section
+                continue
+
+            block = _block_from_paragraph(dp, counters)
+            _append_block(block, page_section, current_section)
+        elif tag == "tbl":
+            counters.table += 1
+            table = _build_table(DocxTableCls(child, docx_doc), idx=counters.table)
+            _append_block(table, page_section, current_section)
+        # sectPr и прочие — игнорируем.
+
+    # Склейка подписей: для content страницы и для каждой LogicalSection.
+    _glue_captions(page_section.content)
+    for section in _iter_logical_sections(page_section.content):
+        _glue_captions(section.children)
+
+
+def _append_block(
+    block: Block,
+    page_section: PageSection,
+    current_section: LogicalSection | None,
+) -> None:
+    """Положить блок в текущую LogicalSection либо прямо в content страницы."""
+    if current_section is not None:
+        current_section.children.append(block)
+    else:
+        page_section.content.append(block)
+
+
+def _iter_logical_sections(
+    items: list[LogicalSection | Block],
+) -> list[LogicalSection]:
+    """Рекурсивно собрать все LogicalSection (всех уровней) — для склейки."""
+    result: list[LogicalSection] = []
+    for item in items:
+        if isinstance(item, LogicalSection):
+            result.append(item)
+            result.extend(_iter_logical_sections(item.children))
+    return result
+
+
+def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
+    """Конвертировать <w:p> в Figure (если внутри есть <w:drawing>) либо Paragraph."""
+    drawings = dp._p.findall(f".//{{{W_NS}}}drawing")
+    if drawings:
+        counters.figure += 1
+        return Figure(id=f"fig-{counters.figure}", image_path="", caption=[])
+    counters.paragraph += 1
+    return _build_paragraph(dp, idx=counters.paragraph)
+
+
+def _build_table(dtable: DocxTable, *, idx: int) -> Table:
+    """Сконвертировать docx-таблицу в модель Table.
+
+    Headers — первый ряд cells; rows — остальные ряды. Каждая ячейка
+    хранится как list[InlineElement] из текста первого параграфа
+    ячейки (без атрибутов форматирования — Фаза 1).
+    """
+    rows_raw = list(dtable.rows)
+    headers: list[list[InlineElement]] = []
+    body_rows: list[list[list[InlineElement]]] = []
+
+    if rows_raw:
+        headers = [_cell_inline(cell) for cell in rows_raw[0].cells]
+        for row in rows_raw[1:]:
+            body_rows.append([_cell_inline(cell) for cell in row.cells])
+
+    return Table(
+        id=f"t-{idx}",
+        caption=[],
+        headers=headers,
+        rows=body_rows,
+    )
+
+
+def _cell_inline(cell: DocxCell) -> list[InlineElement]:
+    """Извлечь inline-содержимое первого параграфа ячейки (только текст)."""
+    paragraphs = cell.paragraphs
+    if not paragraphs:
+        return []
+    text = paragraphs[0].text or ""
+    if not text:
+        return []
+    return [TextRun(text=text)]
+
+
+def _glue_captions(items: list[LogicalSection | Block]) -> None:
+    """Эвристика склейки подписей.
+
+    Один проход по списку блоков:
+    - параграф-подпись СВЕРХУ присоединяется к следующей таблице;
+    - параграф-подпись СНИЗУ присоединяется к предыдущему рисунку;
+    - параграфы-подписи удаляются из списка.
+
+    Параграф, ставший подписью таблицы, не должен также считаться
+    подписью рисунка — поэтому таблица обрабатывается раньше рисунка
+    при проверке предыдущего элемента в `result`.
+    """
+    if not items:
+        return
+
+    result: list[LogicalSection | Block] = []
+    i = 0
+    n = len(items)
+    while i < n:
+        item = items[i]
+        if isinstance(item, Table):
+            if result and isinstance(result[-1], Paragraph) and _is_table_caption(result[-1]):
+                cap = result.pop()
+                assert isinstance(cap, Paragraph)
+                item.caption = list(cap.content)
+            result.append(item)
+            i += 1
             continue
 
-        para_counter += 1
-        paragraph = _build_paragraph(p, idx=para_counter)
-        if current_section is not None:
-            current_section.children.append(paragraph)
-        else:
-            page_section.content.append(paragraph)
+        if isinstance(item, Figure):
+            result.append(item)
+            j = i + 1
+            if j < n:
+                nxt = items[j]
+                if isinstance(nxt, Paragraph) and _is_figure_caption(nxt):
+                    item.caption = list(nxt.content)
+                    i = j + 1
+                    continue
+            i += 1
+            continue
+
+        result.append(item)
+        i += 1
+
+    items[:] = result
+
+
+def _is_figure_caption(paragraph: Paragraph) -> bool:
+    """Параграф похож на подпись рисунка: стиль Caption или текст «Рисунок N ...»."""
+    if _has_caption_style(paragraph):
+        return True
+    text = _paragraph_plain_text(paragraph).strip()
+    return bool(_FIGURE_CAPTION_TEXT_RE.match(text))
+
+
+def _is_table_caption(paragraph: Paragraph) -> bool:
+    """Параграф похож на подпись таблицы: стиль Caption или текст «Таблица N ...»."""
+    if _has_caption_style(paragraph):
+        return True
+    text = _paragraph_plain_text(paragraph).strip()
+    return bool(_TABLE_CAPTION_TEXT_RE.match(text))
+
+
+def _has_caption_style(paragraph: Paragraph) -> bool:
+    """Проверить, что style_name похож на «Caption» (с учётом регистра/вариантов)."""
+    if paragraph.style_name is None:
+        return False
+    return paragraph.style_name.strip().lower() in _CAPTION_STYLE_NAMES
+
+
+def _paragraph_plain_text(paragraph: Paragraph) -> str:
+    """Склейка text всех TextRun параграфа."""
+    return "".join(el.text for el in paragraph.content if isinstance(el, TextRun))
 
 
 def _heading_level(p: DocxParagraph) -> int | None:

@@ -1,12 +1,12 @@
 """Тесты парсера .docx → Document."""
 
-# ruff: noqa: RUF001, RUF002
+# ruff: noqa: RUF001, RUF002, RUF003
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from gostforge.model import LogicalSection, Paragraph, TextRun
+from gostforge.model import Figure, LogicalSection, Paragraph, Table, TextRun
 from gostforge.parser.docx_parser import parse_docx
 
 from .conftest import make_docx
@@ -220,3 +220,91 @@ def test_parse_paragraph_without_page_break(tmp_path: Path) -> None:
     assert len(paragraphs) == 1
     # Атрибут либо не задан явно (None), либо False — главное, что не True.
     assert paragraphs[0].page_break_before is not True
+
+
+def test_parse_extracts_table_with_caption(tmp_path: Path) -> None:
+    """Таблица с подписью «Таблица N — ...»: parser создаёт Table с caption."""
+    path = make_docx(
+        tmp_path / "table.docx",
+        paragraphs=[],
+        tables=[
+            {
+                "caption": "Таблица 1 — Результаты",
+                "headers": ["Показатель", "Значение"],
+                "rows": [["A", "1"], ["B", "2"]],
+            }
+        ],
+    )
+    doc = parse_docx(path)
+    content = doc.page_sections[0].content
+    tables = [b for b in content if isinstance(b, Table)]
+    assert len(tables) == 1
+    table = tables[0]
+
+    cap_text = "".join(e.text for e in table.caption if isinstance(e, TextRun))
+    assert "Таблица 1" in cap_text
+
+    # Подпись-параграф НЕ должен остаться отдельным элементом.
+    paragraphs_left = [b for b in content if isinstance(b, Paragraph)]
+    assert all("Таблица 1" not in _para_text(p) for p in paragraphs_left)
+
+    # Заголовки и строки разложены.
+    assert len(table.headers) == 2
+    header_texts = ["".join(e.text for e in cell if isinstance(e, TextRun)) for cell in table.headers]
+    assert header_texts == ["Показатель", "Значение"]
+    assert len(table.rows) == 2
+    first_row = ["".join(e.text for e in cell if isinstance(e, TextRun)) for cell in table.rows[0]]
+    assert first_row == ["A", "1"]
+
+
+def test_parse_extracts_figure_with_caption(tmp_path: Path) -> None:
+    """Рисунок с подписью «Рисунок N — ...»: parser создаёт Figure с caption."""
+    path = make_docx(
+        tmp_path / "figure.docx",
+        paragraphs=[],
+        figures=[{"caption": "Рисунок 1 — Схема алгоритма"}],
+    )
+    doc = parse_docx(path)
+    content = doc.page_sections[0].content
+    figures = [b for b in content if isinstance(b, Figure)]
+    assert len(figures) == 1
+    figure = figures[0]
+    cap_text = "".join(e.text for e in figure.caption if isinstance(e, TextRun))
+    assert "Рисунок 1" in cap_text
+
+    # Подпись-параграф НЕ должен остаться отдельным элементом.
+    paragraphs_left = [b for b in content if isinstance(b, Paragraph)]
+    assert all("Рисунок 1" not in _para_text(p) for p in paragraphs_left)
+
+
+def test_parse_figure_without_caption(tmp_path: Path) -> None:
+    """Рисунок без подписи — Figure создаётся, caption пуст."""
+    path = make_docx(
+        tmp_path / "figure_no_caption.docx",
+        paragraphs=[],
+        figures=[{}],
+    )
+    doc = parse_docx(path)
+    figures = [b for b in doc.page_sections[0].content if isinstance(b, Figure)]
+    assert len(figures) == 1
+    assert figures[0].caption == []
+
+
+def test_parse_keeps_order_of_paragraphs_and_tables(tmp_path: Path) -> None:
+    """Порядок paragraphs + tables в исходнике сохраняется в content."""
+    path = make_docx(
+        tmp_path / "order.docx",
+        paragraphs=["alpha", "beta"],
+        tables=[{"headers": ["X"], "rows": [["1"]]}],
+    )
+    doc = parse_docx(path)
+    content = doc.page_sections[0].content
+    # Ожидаем: Paragraph(alpha), Paragraph(beta), Table.
+    types = [type(b).__name__ for b in content]
+    assert types == ["Paragraph", "Paragraph", "Table"]
+    assert _para_text(content[0]) == "alpha"  # type: ignore[arg-type]
+    assert _para_text(content[1]) == "beta"  # type: ignore[arg-type]
+
+
+def _para_text(p: Paragraph) -> str:
+    return "".join(e.text for e in p.content if isinstance(e, TextRun))

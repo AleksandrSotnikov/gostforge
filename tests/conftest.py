@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -36,6 +37,8 @@ def make_docx(
     headings_break_before: bool = False,
     title: str | None = None,
     author: str | None = None,
+    tables: list[dict[str, object]] | None = None,
+    figures: list[dict[str, object]] | None = None,
 ) -> Path:
     """Сгенерировать .docx по заданным параметрам и вернуть путь.
 
@@ -53,6 +56,14 @@ def make_docx(
       headings_break_before: если True, у каждого заголовка ставим
                           paragraph_format.page_break_before = True.
       title/author: записать в docProps.core (если заданы).
+      tables:      список таблиц вида
+        {"caption": "Таблица 1 — ...", "headers": [...], "rows": [[...]]}.
+        Caption (если задан) добавляется отдельным параграфом со стилем
+        Caption НАД таблицей.
+      figures:     список «рисунков» вида {"caption": "Рисунок 1 — ..."}.
+        Имитируется через вставку пустого <w:drawing/> в run, чтобы парсер
+        распознал параграф как рисунок. Caption (если задан) — отдельный
+        параграф со стилем Caption под рисунком.
     """
     document = docx.Document()
 
@@ -88,6 +99,14 @@ def make_docx(
     for text in paragraphs or []:
         document.add_paragraph(text)
 
+    # --- таблицы (caption сверху, если задан) ---
+    for table_spec in tables or []:
+        _append_table(document, table_spec)
+
+    # --- рисунки (caption снизу, если задан) ---
+    for figure_spec in figures or []:
+        _append_figure(document, figure_spec)
+
     # --- номер страницы в footer (поле PAGE) ---
     if page_number:
         _inject_page_field_in_footer(section)
@@ -98,6 +117,52 @@ def make_docx(
 
     document.save(str(path))
     return path
+
+
+def _append_table(document: object, spec: dict[str, object]) -> None:
+    """Добавить таблицу в документ, опционально вставив подпись сверху со стилем Caption."""
+    caption = spec.get("caption")
+    headers_obj = spec.get("headers") or []
+    rows_obj = spec.get("rows") or []
+    if not isinstance(headers_obj, list) or not isinstance(rows_obj, list):
+        raise TypeError("tables[*].headers и tables[*].rows должны быть list")
+
+    if isinstance(caption, str) and caption:
+        cap_para = document.add_paragraph(caption)  # type: ignore[attr-defined]
+        with contextlib.suppress(KeyError):
+            cap_para.style = document.styles["Caption"]  # type: ignore[attr-defined]
+
+    n_cols = len(headers_obj) if headers_obj else (len(rows_obj[0]) if rows_obj else 0)
+    n_rows = (1 if headers_obj else 0) + len(rows_obj)
+    if n_rows == 0 or n_cols == 0:
+        return
+
+    table = document.add_table(rows=n_rows, cols=n_cols)  # type: ignore[attr-defined]
+    row_idx = 0
+    if headers_obj:
+        for c, value in enumerate(headers_obj):
+            table.rows[row_idx].cells[c].text = str(value)
+        row_idx += 1
+    for row in rows_obj:
+        if not isinstance(row, list):
+            raise TypeError("tables[*].rows[*] должен быть list")
+        for c, value in enumerate(row):
+            table.rows[row_idx].cells[c].text = str(value)
+        row_idx += 1
+
+
+def _append_figure(document: object, spec: dict[str, object]) -> None:
+    """Добавить «рисунок»: параграф с пустым <w:drawing/> + опциональная подпись снизу."""
+    para = document.add_paragraph()  # type: ignore[attr-defined]
+    run = para.add_run()
+    # Минимальный <w:drawing/> — парсеру достаточно факта присутствия тега.
+    etree.SubElement(run._r, f"{{{W_NS}}}drawing")
+
+    caption = spec.get("caption")
+    if isinstance(caption, str) and caption:
+        cap_para = document.add_paragraph(caption)  # type: ignore[attr-defined]
+        with contextlib.suppress(KeyError):
+            cap_para.style = document.styles["Caption"]  # type: ignore[attr-defined]
 
 
 def _inject_page_field_in_footer(section: object) -> None:
@@ -237,4 +302,63 @@ def no_page_break_docx(tmp_path: Path) -> Path:
         page_number=True,
         page_number_start=3,
         headings_break_before=False,
+    )
+
+
+@pytest.fixture
+def table_with_caption_docx(tmp_path: Path) -> Path:
+    """Таблица с подписью «Таблица 1 — ...» (стиль Caption) — для B.01."""
+    return make_docx(
+        tmp_path / "table_with_caption.docx",
+        margins_mm=dict(GOST_MARGINS),
+        paragraphs=["Текст перед таблицей."],
+        tables=[
+            {
+                "caption": "Таблица 1 — Результаты эксперимента",
+                "headers": ["Показатель", "Значение"],
+                "rows": [["A", "1"], ["B", "2"]],
+            }
+        ],
+        page_number=True,
+    )
+
+
+@pytest.fixture
+def table_without_caption_docx(tmp_path: Path) -> Path:
+    """Таблица без подписи — нарушение B.01."""
+    return make_docx(
+        tmp_path / "table_without_caption.docx",
+        margins_mm=dict(GOST_MARGINS),
+        paragraphs=["Текст перед таблицей."],
+        tables=[
+            {
+                "headers": ["Показатель", "Значение"],
+                "rows": [["A", "1"]],
+            }
+        ],
+        page_number=True,
+    )
+
+
+@pytest.fixture
+def figure_with_caption_docx(tmp_path: Path) -> Path:
+    """Рисунок с подписью «Рисунок 1 — ...» (стиль Caption) — для I.01."""
+    return make_docx(
+        tmp_path / "figure_with_caption.docx",
+        margins_mm=dict(GOST_MARGINS),
+        paragraphs=["Текст перед рисунком."],
+        figures=[{"caption": "Рисунок 1 — Схема алгоритма"}],
+        page_number=True,
+    )
+
+
+@pytest.fixture
+def figure_without_caption_docx(tmp_path: Path) -> Path:
+    """Рисунок без подписи — нарушение I.01."""
+    return make_docx(
+        tmp_path / "figure_without_caption.docx",
+        margins_mm=dict(GOST_MARGINS),
+        paragraphs=["Текст перед рисунком."],
+        figures=[{}],
+        page_number=True,
     )
