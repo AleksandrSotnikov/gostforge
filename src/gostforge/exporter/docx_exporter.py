@@ -26,16 +26,21 @@ from typing import Any
 import docx  # type: ignore[import-not-found]
 from docx.document import Document as DocxDocument  # type: ignore[import-not-found]
 from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-not-found]
-from docx.shared import Cm, Mm, Pt  # type: ignore[import-not-found]
+from docx.oxml import OxmlElement  # type: ignore[import-not-found]
+from docx.oxml.ns import qn  # type: ignore[import-not-found]
+from docx.shared import Cm, Mm, Pt, RGBColor  # type: ignore[import-not-found]
 from docx.text.paragraph import Paragraph as DocxParagraph  # type: ignore[import-not-found]
 
 from gostforge.model import (
     Block,
+    Citation,
     ContentTemplate,
+    CrossRef,
     Document,
     Figure,
     Formula,
     InlineElement,
+    InlineFormula,
     ListBlock,
     LogicalSection,
     PageSection,
@@ -61,6 +66,11 @@ logger = logging.getLogger(__name__)
 # для CLI и тестов достаточно; при необходимости можно перенести в
 # ContextVar.
 _current_source_docx: Any | None = None
+
+# Контекст одной операции экспорта: 1-based индексы записей библиографии
+# по их id. Используется в `_write_runs` для рендеринга Citation. Сбрасывается
+# в `export_docx()` через try/finally, чтобы состояние не утекало между вызовами.
+_current_bibliography_index: dict[str, int] | None = None
 
 _ALIGNMENT_MAP = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
@@ -130,23 +140,105 @@ def _apply_normal_style(doc: DocxDocument, profile: Profile) -> None:
 
 
 def _write_runs(docx_paragraph: DocxParagraph, content: Sequence[InlineElement]) -> None:
-    """Записать список InlineElement как набор run-ов в docx-параграф."""
+    """Записать список InlineElement как набор run-ов в docx-параграф.
+
+    Поддерживаются 4 типа inline-элементов (см. `gostforge.model.InlineElement`):
+
+    * `TextRun` — обычный run с inline-форматированием.
+    * `CrossRef` — OOXML-поле `<w:fldSimple w:instr=" REF target_id \\h "/>`;
+      опциональный текст `prefix` добавляется как соседний run перед полем.
+    * `InlineFormula` — `<m:oMath>` внутри `<w:r>` того же параграфа.
+    * `Citation` — текстовый run «[N]» / «[N, с. P]», где N — 1-based индекс
+      `source_id` в `Document.bibliography` (берётся из модуля).
+    """
     for element in content:
         if isinstance(element, TextRun):
-            run = docx_paragraph.add_run(element.text)
-            if element.bold:
-                run.bold = True
-            if element.italic:
-                run.italic = True
-            if element.superscript:
-                run.font.superscript = True
-            if element.subscript:
-                run.font.subscript = True
-            if element.font:
-                run.font.name = element.font
-            if element.size_pt is not None:
-                run.font.size = Pt(element.size_pt)
-        # CrossRef в Фазе 0 не экспортируется — пропускаем
+            _write_text_run(docx_paragraph, element)
+        elif isinstance(element, CrossRef):
+            _write_cross_ref(docx_paragraph, element)
+        elif isinstance(element, InlineFormula):
+            _write_inline_formula(docx_paragraph, element)
+        elif isinstance(element, Citation):
+            _write_citation(docx_paragraph, element)
+
+
+def _write_text_run(docx_paragraph: DocxParagraph, element: TextRun) -> None:
+    """Записать TextRun со всеми его inline-атрибутами форматирования."""
+    run = docx_paragraph.add_run(element.text)
+    if element.bold:
+        run.bold = True
+    if element.italic:
+        run.italic = True
+    if element.underline:
+        run.underline = True
+    if element.superscript:
+        run.font.superscript = True
+    if element.subscript:
+        run.font.subscript = True
+    if element.font:
+        run.font.name = element.font
+    if element.size_pt is not None:
+        run.font.size = Pt(element.size_pt)
+    if element.color_hex:
+        # color_hex в модели хранится как "#RRGGBB"; RGBColor ждёт hex без "#".
+        hex_value = element.color_hex.lstrip("#")
+        try:
+            run.font.color.rgb = RGBColor.from_string(hex_value)
+        except (ValueError, TypeError):
+            # Невалидный цвет — игнорируем, не ломаем экспорт ради одного run.
+            logger.debug("Невалидный color_hex=%r, пропускаем", element.color_hex)
+
+
+def _write_cross_ref(docx_paragraph: DocxParagraph, element: CrossRef) -> None:
+    """Записать CrossRef как опциональный prefix-run + `<w:fldSimple>` с REF.
+
+    Display-текст внутри fldSimple — placeholder «[?]»: Word подменит его
+    реальной автонумерацией при первом пересчёте полей. Для проверок C.*
+    важно наличие правильного `w:instr` в OOXML.
+    """
+    if element.prefix:
+        docx_paragraph.add_run(element.prefix)
+    fld = OxmlElement("w:fldSimple")
+    # Стандартный синтаксис Word: REF <bookmark> \h (гиперссылка). Пробелы
+    # вокруг target_id критичны — без них Word не распарсит инструкцию.
+    fld.set(qn("w:instr"), f" REF {element.target_id} \\h ")
+    # Word рендерит fldSimple только при наличии хотя бы одного <w:r> внутри.
+    inner_run = OxmlElement("w:r")
+    inner_t = OxmlElement("w:t")
+    inner_t.text = "[?]"
+    inner_run.append(inner_t)
+    fld.append(inner_run)
+    docx_paragraph._p.append(fld)
+
+
+def _write_inline_formula(docx_paragraph: DocxParagraph, element: InlineFormula) -> None:
+    """Записать InlineFormula как `<m:oMath>` ВНУТРИ `<w:r>` параграфа.
+
+    В отличие от блочной `Formula`, inline-формула не оборачивается в
+    `<m:oMathPara>` и идёт в потоке текста. На Фазе 2.5 используется
+    простейший fallback: LaTeX-строка кладётся в `<m:t>` как обычный текст;
+    парсер уже умеет читать такой формат.
+    """
+    w_run = OxmlElement("w:r")
+    omath = etree.SubElement(w_run, f"{{{M_NS}}}oMath")
+    m_r = etree.SubElement(omath, f"{{{M_NS}}}r")
+    m_t = etree.SubElement(m_r, f"{{{M_NS}}}t")
+    m_t.text = element.latex
+    docx_paragraph._p.append(w_run)
+
+
+def _write_citation(docx_paragraph: DocxParagraph, element: Citation) -> None:
+    """Записать Citation как текстовый run «[N]» / «[N, с. P]».
+
+    Номер N вычисляется из модуль-level карты `_current_bibliography_index`,
+    проставленной `export_docx()`. Если карта пуста или источник не найден,
+    подставляем «?» (это всё ещё корректный текст, но проверка R.04 такой
+    цитаты не пропустит — что и нужно).
+    """
+    index_map = _current_bibliography_index or {}
+    n_value: int | str = index_map.get(element.source_id, "?")
+    text = element.template.format(n=n_value, pages=element.pages or "")
+    docx_paragraph.add_run(text)
 
 
 def _apply_paragraph_format(docx_para: DocxParagraph, paragraph: Paragraph) -> None:
@@ -488,7 +580,7 @@ def export_docx(
         достанет соответствующий media-blob из source_docx и вставит как
         реальное изображение. Иначе на месте картинки будет placeholder.
     """
-    global _current_source_docx
+    global _current_source_docx, _current_bibliography_index
     output_path = Path(output_path)
     doc = docx.Document()
 
@@ -506,6 +598,10 @@ def export_docx(
                 source_docx,
             )
             _current_source_docx = None
+
+    # Карта source_id → 1-based номер для рендеринга Citation. Заполняется
+    # из Document.bibliography; пустая карта → все цитаты получат «?».
+    _current_bibliography_index = {entry.id: i + 1 for i, entry in enumerate(document.bibliography)}
 
     try:
         _apply_page_geometry(doc, profile)
@@ -533,6 +629,7 @@ def export_docx(
         doc.save(str(output_path))
     finally:
         _current_source_docx = None
+        _current_bibliography_index = None
 
     # Post-processing на уровне zip: запись настроек, которые python-docx
     # не умеет менять напрямую (например, w:autoHyphenation в settings.xml).
