@@ -372,12 +372,121 @@ def fix_consecutive_empty_paragraphs(
     return applied
 
 
+# Стили параграфов, которые считаются «телом» и подлежат правкам T.03/T.04/T.05.
+# Заголовки, подписи и колонтитулы имеют свои правила и не трогаются.
+_BODY_EXCLUDE_PREFIXES = ("heading", "caption", "image caption", "table caption",
+                          "figure caption", "title", "subtitle", "footnote",
+                          "header", "footer")
+
+
+def _is_body_paragraph(paragraph: Paragraph) -> bool:
+    """True, если параграф относится к основному тексту (не heading/caption/etc)."""
+    style = (paragraph.style_name or "").strip().lower()
+    if not style or style == "normal" or style.startswith("body"):
+        return True
+    return not any(style.startswith(p) for p in _BODY_EXCLUDE_PREFIXES)
+
+
+@register("T.03")
+def fix_line_spacing(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести межстрочный интервал основного текста к profile.styles.body.line_spacing.
+
+    Безопасно: меняет только визуальное расстояние между строками,
+    не текст. Параграфы с line_spacing=None пропускаются (наследуется
+    от стиля).
+    """
+    expected = float(profile.styles.body.line_spacing)
+    applied: list[FixApplied] = []
+    for p in _all_paragraphs(document):
+        if not _is_body_paragraph(p):
+            continue
+        if p.line_spacing is None:
+            continue
+        if abs(p.line_spacing - expected) <= 0.01:
+            continue
+        old = p.line_spacing
+        p.line_spacing = expected
+        applied.append(
+            FixApplied(
+                fixer_code="T.03",
+                location=_paragraph_location(p),
+                description=(
+                    f"Межстрочный интервал {old} → {expected}"
+                ),
+            )
+        )
+    return applied
+
+
+@register("T.04")
+def fix_first_line_indent(
+    document: Document, profile: Profile
+) -> list[FixApplied]:
+    """Привести отступ красной строки основного текста к
+    profile.styles.body.first_line_indent_cm.
+
+    Параграфы с first_line_indent_cm=None пропускаются (наследуется).
+    """
+    expected = float(profile.styles.body.first_line_indent_cm)
+    applied: list[FixApplied] = []
+    for p in _all_paragraphs(document):
+        if not _is_body_paragraph(p):
+            continue
+        if p.first_line_indent_cm is None:
+            continue
+        if abs(p.first_line_indent_cm - expected) <= 0.05:
+            continue
+        old = p.first_line_indent_cm
+        p.first_line_indent_cm = expected
+        applied.append(
+            FixApplied(
+                fixer_code="T.04",
+                location=_paragraph_location(p),
+                description=f"Отступ красной строки {old} → {expected} см",
+            )
+        )
+    return applied
+
+
+@register("T.05")
+def fix_paragraph_alignment(
+    document: Document, profile: Profile
+) -> list[FixApplied]:
+    """Привести выравнивание основного текста к profile.styles.body.alignment.
+
+    По умолчанию для ГОСТ 7.32 — justify (по ширине). Меняем только
+    body-параграфы; заголовки и подписи имеют свои правила.
+    """
+    expected = profile.styles.body.alignment
+    applied: list[FixApplied] = []
+    for p in _all_paragraphs(document):
+        if not _is_body_paragraph(p):
+            continue
+        if p.alignment is None:
+            continue
+        if p.alignment == expected:
+            continue
+        old = p.alignment
+        p.alignment = expected
+        applied.append(
+            FixApplied(
+                fixer_code="T.05",
+                location=_paragraph_location(p),
+                description=f"Выравнивание «{old}» → «{expected}»",
+            )
+        )
+    return applied
+
+
 __all__ = [
     "fix_consecutive_empty_paragraphs",
     "fix_disable_auto_hyphenation",
     "fix_double_spaces",
+    "fix_first_line_indent",
     "fix_hyphen_to_dash",
     "fix_initials_nbsp",
+    "fix_line_spacing",
+    "fix_paragraph_alignment",
     "fix_straight_quotes",
     "fix_trailing_whitespace",
     "fix_unit_nbsp",

@@ -536,3 +536,77 @@ def test_export_writes_auto_hyphenation_setting(tmp_path: Path) -> None:
     export_docx(doc, profile, out)
     reparsed = parse_docx(out)
     assert reparsed.auto_hyphenation is True
+
+
+# --- T.03 / T.04 / T.05 — выравнивание/интервал/отступ -----------------------
+
+
+def test_t03_fix_registered() -> None:
+    from gostforge.fixer.engine import registered_fixers
+    assert "T.03" in registered_fixers()
+
+
+def test_t03_corrects_line_spacing_to_profile_default() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="Текст")], style_name="Normal", line_spacing=1.0)
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    applied = run_fix(doc, profile, codes=["T.03"])
+    assert len(applied) == 1
+    assert p.line_spacing == 1.5
+
+
+def test_t03_skips_heading() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="Заголовок")], style_name="Heading 1", line_spacing=1.0)
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    assert run_fix(doc, profile, codes=["T.03"]) == []
+
+
+def test_t04_corrects_first_line_indent() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=0.0)
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    applied = run_fix(doc, profile, codes=["T.04"])
+    assert len(applied) == 1
+    assert p.first_line_indent_cm == 1.25
+
+
+def test_t05_corrects_alignment_to_justify() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", alignment="left")
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    applied = run_fix(doc, profile, codes=["T.05"])
+    assert len(applied) == 1
+    assert p.alignment == "justify"
+
+
+def test_t04_noop_when_already_correct() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=1.25)
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    assert run_fix(doc, profile, codes=["T.04"]) == []
