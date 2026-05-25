@@ -347,6 +347,102 @@ def _figure_reference_patterns(num: int) -> list[re.Pattern[str]]:
     ]
 
 
+def _iter_linear_blocks(
+    items: Sequence[LogicalSection | Block],
+) -> list[Block]:
+    """Линейный (в порядке появления) список всех Block-ов.
+
+    Заголовки LogicalSection не возвращаются — только содержательные блоки.
+    Рекурсивно обходит вложенные LogicalSection.
+    """
+    result: list[Block] = []
+    for item in items:
+        if isinstance(item, LogicalSection):
+            result.extend(_iter_linear_blocks(item.children))
+        elif isinstance(item, Block):
+            result.append(item)
+    return result
+
+
+def _document_blocks_linear(document: Document) -> list[Block]:
+    """Все Block-и документа в порядке появления."""
+    blocks: list[Block] = []
+    for ps in document.page_sections:
+        blocks.extend(_iter_linear_blocks(ps.content))
+    return blocks
+
+
+@register("I.07")
+def check_figure_reference_precedes(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """Ссылка на рисунок должна появляться в тексте ДО самого рисунка.
+
+    Алгоритм:
+    1. Собрать все блоки документа в линейном порядке.
+    2. Для каждой Figure с номером N:
+       - искать ссылку «рисунок N»/«рис. N» в Paragraph-ах, идущих ДО
+         этой Figure;
+       - если ссылка найдена до — ok;
+       - если ссылка отсутствует до, но найдена ПОСЛЕ — Violation
+         (порядок нарушен, severity=warning);
+       - если ссылок нет совсем — это случай I.06, не дублируем.
+    """
+    violations: list[Violation] = []
+    blocks = _document_blocks_linear(document)
+
+    # Найдём индексы рисунков и склеим тексты параграфов до/после каждого.
+    for idx, block in enumerate(blocks):
+        if not isinstance(block, Figure):
+            continue
+        text = _caption_text(block.caption)
+        if not text:
+            continue
+        match = _FIGURE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            num = int(match.group(1))
+        except ValueError:
+            continue
+
+        before_text = "\n".join(
+            _paragraph_text(b) for b in blocks[:idx] if isinstance(b, Paragraph)
+        )
+        after_text = "\n".join(
+            _paragraph_text(b) for b in blocks[idx + 1 :] if isinstance(b, Paragraph)
+        )
+
+        patterns = _figure_reference_patterns(num)
+        ref_before = any(p.search(before_text) for p in patterns)
+        if ref_before:
+            continue
+
+        ref_after = any(p.search(after_text) for p in patterns)
+        if not ref_after:
+            # Нет ссылок ни до, ни после — случай I.06, не дублируем.
+            continue
+
+        violations.append(
+            Violation(
+                check_code="I.07",
+                severity="warning",
+                message=(
+                    f"Ссылка на рисунок {num} в тексте идёт после самого "
+                    f"рисунка — она должна предшествовать рисунку"
+                ),
+                location=f"figure[{block.id}]",
+                suggestion=(
+                    f"Перенесите упоминание «рисунок {num}» в текст ДО самого "
+                    f"рисунка (например, «На рисунке {num} показано ...»)"
+                ),
+                details={"figure_id": block.id, "number": str(num)},
+            )
+        )
+
+    return violations
+
+
 @register("I.06")
 def check_figure_referenced_in_text(
     document: Document, profile: Profile  # noqa: ARG001
@@ -403,5 +499,6 @@ __all__ = [
     "check_figure_caption_style",
     "check_figure_has_caption",
     "check_figure_numbering_continuous",
+    "check_figure_reference_precedes",
     "check_figure_referenced_in_text",
 ]

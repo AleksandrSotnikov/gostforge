@@ -480,3 +480,61 @@ def test_i06_reference_in_nested_section() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.06"]
     assert found == []
+
+
+# --- I.07 (ссылка предшествует появлению рисунка) -----------------------
+
+
+def test_i07_registered() -> None:
+    assert "I.07" in registered_checks()
+
+
+def test_i07_reference_before_figure_no_violation() -> None:
+    """Ссылка на рисунок ДО самого рисунка — нарушения нет."""
+    para = Paragraph(
+        id="p-1", content=[TextRun(text="Алгоритм представлен на рисунке 1.")]
+    )
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc = _doc_with_content([para, figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
+    assert found == []
+
+
+def test_i07_reference_after_figure_violation() -> None:
+    """Ссылка ПОСЛЕ рисунка — порядок нарушен, warning."""
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    para = Paragraph(
+        id="p-1", content=[TextRun(text="Как видно на рисунке 1, всё ясно.")]
+    )
+    doc = _doc_with_content([figure, para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert found[0].details["number"] == "1"
+
+
+def test_i07_no_reference_at_all_skipped() -> None:
+    """Если ссылок совсем нет — это случай I.06, не дублируем."""
+    para = Paragraph(id="p-1", content=[TextRun(text="Просто абзац без ссылок.")])
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc = _doc_with_content([para, figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
+    assert found == []
+
+
+def test_i07_reference_before_and_after_no_violation() -> None:
+    """Если есть ссылка и до, и после — порядок не нарушен."""
+    before = Paragraph(
+        id="p-1", content=[TextRun(text="На рисунке 1 показана схема.")]
+    )
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    after = Paragraph(
+        id="p-2", content=[TextRun(text="Из рисунка 1 видно, что ...")]
+    )
+    doc = _doc_with_content([before, figure, after])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
+    assert found == []
