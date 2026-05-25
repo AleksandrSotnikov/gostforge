@@ -33,14 +33,28 @@ Document
 │     ├─ LogicalSection               # раздел: heading, level, children
 │     ├─ Paragraph                    # style_name, alignment, line_spacing,
 │     │                                # first_line_indent_cm, page_break_before,
-│     │                                # content: (TextRun | CrossRef)[]
+│     │                                # content: InlineElement[]
 │     ├─ Table                        # caption, headers, rows
-│     ├─ Figure                       # image_path, caption
-│     ├─ Formula                      # latex (Фаза 3)
-│     └─ ListBlock / CodeBlock        # роадмап
+│     ├─ Figure                       # image_path, caption, dpi, alignment
+│     ├─ Formula                      # latex (блочная, через m:oMathPara)
+│     └─ ListBlock / CodeBlock        # ordered, items
 ├─ bibliography: BibliographyEntry[] # id, type, fields
 └─ abbreviations: dict[str, str]
 ```
+
+**InlineElement** (`Paragraph.content` и `Caption`) — union из 4 типов
+(Фаза 2.5, `SCHEMA_VERSION = 0.3.0`):
+
+| Тип | Поля | OOXML соответствие |
+| --- | --- | --- |
+| `TextRun` | text + bold/italic/underline/sup/sub/font/size/color_hex | `<w:r><w:rPr>…</w:rPr><w:t>…</w:t></w:r>` |
+| `CrossRef` | target_id, display_template, prefix | `<w:fldSimple w:instr=" REF target_id \h "/>` (опц. предшествующий run для prefix) |
+| `InlineFormula` | latex, id | `<w:r><m:oMath>…</m:oMath></w:r>` (inline OMML внутри run) |
+| `Citation` | source_id, pages, template | текстовый run «[N]» / «[N, с. P]» (N = индекс в bibliography) |
+
+Inline-формулы (`InlineFormula`) отличаются от блочных (`Formula`):
+последние идут отдельным абзацем через `<m:oMathPara>`, первые — в
+потоке inline-контента параграфа.
 
 **Ключевое разделение:** `PageSection` ≠ `LogicalSection`.
 PageSection — вёрстка (поля, колонтитулы); LogicalSection — содержание
