@@ -214,3 +214,100 @@ def test_b03_caption_in_nested_section() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
     assert len(found) == 1
     assert found[0].details["table_id"] == "t-deep"
+
+
+# --- B.09 (сквозная нумерация таблиц) ------------------------------------
+
+
+def test_b09_registered() -> None:
+    assert "B.09" in registered_checks()
+
+
+def test_b09_continuous_numbering_no_violation() -> None:
+    """Таблицы 1, 2, 3 — нарушения нет."""
+    tables = [
+        Table(id=f"t-{i}", caption=[TextRun(text=f"Таблица {i} — Имя {i}")])
+        for i in (1, 2, 3)
+    ]
+    doc = _doc_with_content(list(tables))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.09"]
+    assert found == []
+
+
+def test_b09_gap_in_numbering_violation() -> None:
+    """Таблицы 1, 3 — пропуск второго номера."""
+    tables = [
+        Table(id="t-1", caption=[TextRun(text="Таблица 1 — A")]),
+        Table(id="t-3", caption=[TextRun(text="Таблица 3 — C")]),
+    ]
+    doc = _doc_with_content(list(tables))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.09"]
+    assert len(found) == 1
+    assert found[0].details["expected"] == "2"
+    assert found[0].details["found"] == "3"
+
+
+def test_b09_duplicate_number_violation() -> None:
+    """Две таблицы с номером 1 — нарушение «дубликат»."""
+    tables = [
+        Table(id="t-a", caption=[TextRun(text="Таблица 1 — A")]),
+        Table(id="t-b", caption=[TextRun(text="Таблица 1 — B")]),
+    ]
+    doc = _doc_with_content(list(tables))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.09"]
+    assert len(found) == 1
+    assert "встречается у двух" in found[0].message
+    assert found[0].details["duplicate_of"] == "t-a"
+
+
+def test_b09_starts_not_from_one_violation() -> None:
+    """Первая таблица — 2, должна быть 1."""
+    tables = [
+        Table(id="t-2", caption=[TextRun(text="Таблица 2 — B")]),
+        Table(id="t-3", caption=[TextRun(text="Таблица 3 — C")]),
+    ]
+    doc = _doc_with_content(list(tables))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.09"]
+    assert any(v.details.get("expected") == "1" for v in found)
+
+
+def test_b09_empty_caption_skipped() -> None:
+    """Пустые подписи — это случай B.01, не учитываются в B.09."""
+    tables = [
+        Table(id="t-1", caption=[TextRun(text="Таблица 1 — A")]),
+        Table(id="t-2", caption=[]),  # пустая, не считается
+        Table(id="t-2b", caption=[TextRun(text="Таблица 2 — B")]),
+    ]
+    doc = _doc_with_content(list(tables))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.09"]
+    assert found == []
+
+
+def test_b09_nested_logical_sections() -> None:
+    """Таблицы во вложенных секциях тоже участвуют в сквозной нумерации."""
+    t1 = Table(id="t-1", caption=[TextRun(text="Таблица 1 — A")])
+    t3 = Table(id="t-3", caption=[TextRun(text="Таблица 3 — C")])
+    inner = LogicalSection(
+        id="sec-2", level=2, heading=[TextRun(text="Sub")], children=[t3]
+    )
+    outer = LogicalSection(
+        id="sec-1", level=1, heading=[TextRun(text="Main")], children=[t1, inner]
+    )
+    doc = _doc_with_content([outer])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.09"]
+    assert len(found) == 1
+    assert found[0].details["found"] == "3"
+
+
+def test_b09_no_tables_no_violation() -> None:
+    """Документ без таблиц — нет нарушений."""
+    doc = _doc_with_content([])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.09"]
+    assert found == []

@@ -131,4 +131,97 @@ def check_table_caption_format(
     return violations
 
 
-__all__ = ["check_table_caption_format", "check_table_has_caption"]
+# Извлечь номер из подписи таблицы: «Таблица 1 — Название», «Таблица 12».
+_TABLE_NUMBER_RE = re.compile(r"^Таблица\s+(\d+)")
+
+
+@register("B.09")
+def check_table_numbering_continuous(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """Сквозная нумерация таблиц: номера должны идти 1, 2, 3, ...
+
+    Извлекает номер из caption по regex `^Таблица\\s+(\\d+)`. Пустые
+    подписи пропускаются (это случай B.01).
+
+    Возможные нарушения:
+    - пропуск: после таблицы N ожидается N+1, найден M
+    - дубликат: один и тот же номер встречается у двух таблиц
+    """
+    violations: list[Violation] = []
+    numbered: list[tuple[Table, int]] = []
+    for _ps, table in _all_tables(document):
+        text = _caption_text(table.caption)
+        if not text:
+            continue
+        match = _TABLE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            numbered.append((table, int(match.group(1))))
+        except ValueError:
+            continue
+
+    if not numbered:
+        return violations
+
+    seen: dict[int, Table] = {}
+    expected = 1
+    for table, num in numbered:
+        if num in seen:
+            previous = seen[num]
+            violations.append(
+                Violation(
+                    check_code="B.09",
+                    severity="error",
+                    message=(
+                        f"Номер {num} встречается у двух таблиц: "
+                        f"«{previous.id}» и «{table.id}»"
+                    ),
+                    location=f"table[{table.id}]",
+                    suggestion=(
+                        "Перенумеровать таблицы так, чтобы каждая имела "
+                        "уникальный сквозной номер"
+                    ),
+                    details={
+                        "table_id": table.id,
+                        "duplicate_of": previous.id,
+                        "number": str(num),
+                    },
+                )
+            )
+            continue
+        seen[num] = table
+        if num != expected:
+            violations.append(
+                Violation(
+                    check_code="B.09",
+                    severity="error",
+                    message=(
+                        f"После таблицы {expected - 1} ожидается таблица "
+                        f"{expected}, найдено {num}"
+                    ),
+                    location=f"table[{table.id}]",
+                    suggestion=(
+                        f"Перенумеровать таблицу: «Таблица {expected}» вместо "
+                        f"«Таблица {num}»"
+                    ),
+                    details={
+                        "table_id": table.id,
+                        "expected": str(expected),
+                        "found": str(num),
+                    },
+                )
+            )
+            expected = num + 1
+        else:
+            expected += 1
+
+    return violations
+
+
+__all__ = [
+    "check_table_caption_format",
+    "check_table_has_caption",
+    "check_table_numbering_continuous",
+]
