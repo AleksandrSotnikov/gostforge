@@ -765,6 +765,85 @@ def check_min_sources(document: Document, profile: Profile) -> list[Violation]:
     ]
 
 
+# --- R.12 — соотношение русско-/иноязычных источников -------------------
+
+
+@register("R.12")
+def check_language_ratio(document: Document, profile: Profile) -> list[Violation]:
+    """Доля иноязычных источников должна лежать в допустимом диапазоне.
+
+    Параметры:
+      - `max_foreign_share` (по умолчанию 0.5) — верхняя граница доли «en».
+      - `min_foreign_share` (по умолчанию 0.1) — нижняя граница доли «en»
+        (для научных работ; для гуманитарных можно ставить 0).
+
+    Записи без поля language не учитываются.
+    """
+    if not document.bibliography:
+        return []
+
+    params = _check_params(profile, "R.12")
+    max_foreign_share = _float_param(params, "max_foreign_share", 0.5)
+    min_foreign_share = _float_param(params, "min_foreign_share", 0.1)
+
+    languages = [
+        entry.fields.get("language") for entry in document.bibliography
+    ]
+    typed = [lang for lang in languages if lang in {"ru", "en"}]
+    if not typed:
+        return []
+    foreign = sum(1 for lang in typed if lang == "en")
+    share = foreign / len(typed)
+
+    if share > max_foreign_share:
+        return [
+            Violation(
+                check_code="R.12",
+                severity="info",
+                message=(
+                    f"Доля иноязычных источников {share * 100:.0f}% превышает "
+                    f"допустимые {max_foreign_share * 100:.0f}%"
+                ),
+                location="bibliography",
+                suggestion=(
+                    "Увеличить долю русскоязычных источников или скорректировать "
+                    "профиль (`max_foreign_share`)"
+                ),
+                details={
+                    "foreign": str(foreign),
+                    "total": str(len(typed)),
+                    "share": f"{share:.3f}",
+                    "max_foreign_share": f"{max_foreign_share:.3f}",
+                    "bound": "max",
+                },
+            )
+        ]
+    if share < min_foreign_share:
+        return [
+            Violation(
+                check_code="R.12",
+                severity="info",
+                message=(
+                    f"Доля иноязычных источников {share * 100:.0f}% ниже "
+                    f"ожидаемых {min_foreign_share * 100:.0f}%"
+                ),
+                location="bibliography",
+                suggestion=(
+                    "Добавить иностранные источники по теме исследования "
+                    "(монографии, статьи)"
+                ),
+                details={
+                    "foreign": str(foreign),
+                    "total": str(len(typed)),
+                    "share": f"{share:.3f}",
+                    "min_foreign_share": f"{min_foreign_share:.3f}",
+                    "bound": "min",
+                },
+            )
+        ]
+    return []
+
+
 __all__ = [
     "check_access_date_for_web",
     "check_bibliography_format",
@@ -773,6 +852,7 @@ __all__ = [
     "check_doi_or_url_for_modern",
     "check_each_entry_referenced",
     "check_fresh_sources_share",
+    "check_language_ratio",
     "check_min_sources",
     "check_reference_style_numeric",
     "check_references_resolve_alias",

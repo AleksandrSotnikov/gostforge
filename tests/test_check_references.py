@@ -671,3 +671,52 @@ def test_r11_empty_bibliography_violation() -> None:
     found = _violations(Document(), profile, "R.11")
     assert len(found) == 1
     assert found[0].details["actual"] == "0"
+
+
+# --- R.12 — соотношение русско-/иноязычных ------------------------------
+
+
+def test_r12_registered() -> None:
+    assert "R.12" in registered_checks()
+
+
+def test_r12_balanced_no_violation() -> None:
+    """Доля иноязычных в диапазоне 10–50% — нарушений нет."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {"language": "ru"}),
+            _entry_with_fields("ref-2", {"language": "ru"}),
+            _entry_with_fields("ref-3", {"language": "en"}),
+            _entry_with_fields("ref-4", {"language": "ru"}),
+        ]
+    )
+    # 1 из 4 = 25% — в диапазоне [10%, 50%].
+    assert _violations(doc, profile, "R.12") == []
+
+
+def test_r12_too_many_foreign_violation() -> None:
+    """Доля иноязычных > max_foreign_share — Violation с bound=max."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields("ref-1", {"language": "en"}),
+            _entry_with_fields("ref-2", {"language": "en"}),
+            _entry_with_fields("ref-3", {"language": "en"}),
+            _entry_with_fields("ref-4", {"language": "ru"}),
+        ]
+    )
+    found = _violations(doc, profile, "R.12")
+    assert len(found) == 1
+    assert found[0].details["bound"] == "max"
+
+
+def test_r12_too_few_foreign_violation() -> None:
+    """Доля иноязычных < min_foreign_share — Violation с bound=min."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [_entry_with_fields(f"ref-{i}", {"language": "ru"}) for i in range(1, 11)]
+    )
+    found = _violations(doc, profile, "R.12")
+    assert len(found) == 1
+    assert found[0].details["bound"] == "min"
