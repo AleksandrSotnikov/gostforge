@@ -24,6 +24,7 @@ from . import (  # noqa: F401
     figures,
     formatting,
     headings,
+    page_sections,
     references,
     structure,
     tables,
