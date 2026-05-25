@@ -20,4 +20,4 @@
 Импорт здесь нужен, чтобы декоратор @register сработал при загрузке валидатора.
 """
 
-from . import figures, formatting, headings, structure, text  # noqa: F401
+from . import figures, formatting, headings, structure, tables, text  # noqa: F401
