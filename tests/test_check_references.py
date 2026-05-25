@@ -720,3 +720,70 @@ def test_r12_too_few_foreign_violation() -> None:
     found = _violations(doc, profile, "R.12")
     assert len(found) == 1
     assert found[0].details["bound"] == "min"
+
+
+# --- R.13 — подозрительные домены ---------------------------------------
+
+
+def test_r13_registered() -> None:
+    assert "R.13" in registered_checks()
+
+
+def test_r13_clean_urls_no_violation() -> None:
+    """Все URL ведут на нормальные домены — нарушений нет."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1", {"url": "https://elibrary.ru/item/1"}, type_="web"
+            ),
+            _entry_with_fields(
+                "ref-2", {"url": "https://dx.doi.org/10.1000/abc"}, type_="article"
+            ),
+        ]
+    )
+    assert _violations(doc, profile, "R.13") == []
+
+
+def test_r13_wikipedia_violation() -> None:
+    """URL ведёт на Википедию — Violation."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"url": "https://ru.wikipedia.org/wiki/Article"},
+                type_="web",
+            ),
+        ]
+    )
+    found = _violations(doc, profile, "R.13")
+    assert len(found) == 1
+    # Поиск идёт по подстроке, поэтому может сматчиться более общий «wikipedia.org».
+    assert "wikipedia.org" in found[0].details["domain"]
+
+
+def test_r13_studopedia_violation() -> None:
+    """URL ведёт на studopedia.ru — Violation."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [
+            _entry_with_fields(
+                "ref-1",
+                {"url": "https://studopedia.ru/page-123.html"},
+                type_="web",
+            ),
+        ]
+    )
+    found = _violations(doc, profile, "R.13")
+    assert len(found) == 1
+    assert found[0].details["domain"] == "studopedia.ru"
+
+
+def test_r13_entry_without_url_no_violation() -> None:
+    """Запись без url не проверяется R.13."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_bibliography(
+        [_entry_with_fields("ref-1", {"year": "2020"}, type_="book")]
+    )
+    assert _violations(doc, profile, "R.13") == []

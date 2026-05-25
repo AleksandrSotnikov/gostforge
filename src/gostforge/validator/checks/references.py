@@ -844,6 +844,69 @@ def check_language_ratio(document: Document, profile: Profile) -> list[Violation
     return []
 
 
+# --- R.13 — нет источников с подозрительных доменов ---------------------
+
+
+_DEFAULT_SUSPICIOUS_DOMAINS: list[str] = [
+    "wikipedia.org",
+    "ru.wikipedia.org",
+    "answers.com",
+    "otvet.mail.ru",
+    "studopedia.ru",
+    "studwood.net",
+    "studfile.net",
+]
+
+
+@register("R.13")
+def check_suspicious_domains(document: Document, profile: Profile) -> list[Violation]:
+    """В источниках не должно быть ссылок на низкокачественные домены.
+
+    Параметр `checks.R.13.params.suspicious_domains: list[str]` —
+    список доменов, на которые ссылаться не следует (Википедия,
+    студенческие шпаргалки и т.п.).
+    """
+    violations: list[Violation] = []
+    params = _check_params(profile, "R.13")
+    suspicious = _list_str_param(params, "suspicious_domains", _DEFAULT_SUSPICIOUS_DOMAINS)
+    if not suspicious:
+        return []
+
+    for entry in document.bibliography:
+        url = entry.fields.get("url")
+        if not url:
+            continue
+        url_lower = url.lower()
+        matched: str | None = None
+        for domain in suspicious:
+            if domain.lower() in url_lower:
+                matched = domain
+                break
+        if matched is None:
+            continue
+        violations.append(
+            Violation(
+                check_code="R.13",
+                severity="warning",
+                message=(
+                    f"Запись {entry.id} ссылается на подозрительный домен "
+                    f"«{matched}» — не подходит для научной работы"
+                ),
+                location=f"bibliography[{entry.id}]",
+                suggestion=(
+                    "Заменить источник на рецензируемую публикацию: "
+                    "монографию, статью в журнале или сборнике конференции"
+                ),
+                details={
+                    "entry_id": entry.id,
+                    "domain": matched,
+                    "url": url,
+                },
+            )
+        )
+    return violations
+
+
 __all__ = [
     "check_access_date_for_web",
     "check_bibliography_format",
@@ -857,4 +920,5 @@ __all__ = [
     "check_reference_style_numeric",
     "check_references_resolve_alias",
     "check_required_fields_by_type",
+    "check_suspicious_domains",
 ]
