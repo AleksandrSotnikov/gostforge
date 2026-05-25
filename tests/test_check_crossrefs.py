@@ -11,6 +11,7 @@ from gostforge.model import (
     BibliographyEntry,
     Document,
     Figure,
+    Formula,
     LogicalSection,
     PageSection,
     Paragraph,
@@ -313,3 +314,53 @@ def test_c04_no_references_no_violation() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "C.04"]
     assert found == []
+
+
+# --- C.03 -------------------------------------------------------------------
+
+
+def test_c03_registered() -> None:
+    assert "C.03" in registered_checks()
+
+
+def test_c03_reference_resolves_no_violation() -> None:
+    """Ссылка «формула 1» при наличии Formula(number=1) — нет нарушения."""
+    formula = Formula(id="f-1", latex="x = 1", number=1)
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="По формуле 1 получаем значение.")],
+    )
+    doc = _doc_with_content([para, formula])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "C.03"]
+    assert found == []
+
+
+def test_c03_reference_to_missing_formula_violation() -> None:
+    """Ссылка «формуле 5» при отсутствии Formula(number=5) — нарушение."""
+    formula = Formula(id="f-1", latex="x = 1", number=1)
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="По формуле 5 получаем значение.")],
+    )
+    doc = _doc_with_content([para, formula])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "C.03"]
+    assert len(found) == 1
+    assert found[0].details["number"] == "5"
+
+
+def test_c03_paren_reference_violation() -> None:
+    """«(7)» при наличии формулы 1 — нарушение (формулы 7 нет)."""
+    formula = Formula(id="f-1", latex="x = 1", number=1)
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Из выражения (7) следует результат.")],
+    )
+    doc = _doc_with_content([para, formula])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "C.03"]
+    numbers = {v.details["number"] for v in found}
+    assert "7" in numbers
+
+

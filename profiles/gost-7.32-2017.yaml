@@ -178,6 +178,7 @@ checks:
   R.08: {enabled: true}
   C.01: {enabled: true}
   C.02: {enabled: true}
+  C.03: {enabled: true}
   C.04: {enabled: true}
   P.01:
     enabled: true

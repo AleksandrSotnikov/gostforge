@@ -19,6 +19,7 @@ from gostforge.model import (
     Block,
     Document,
     Figure,
+    Formula,
     InlineElement,
     LogicalSection,
     Paragraph,
@@ -366,8 +367,131 @@ def check_bibliography_references_resolve(
     return violations
 
 
+# --- C.03 — ссылки на формулы разрешаются ---------------------------------
+
+
+# Поиск ссылок на формулы в тексте:
+# - «формула 1», «формуле 2», «формулу 3», «формулы 4» и пр.;
+# - «(1)» — стандартный паттерн самой формулы (как Word её нумерует),
+#   но и ссылка на формулу часто оформляется так же.
+_FORMULA_REF_WORD_RE = re.compile(
+    r"\bформул(?:а|е|у|ы|ой|ах|ам)?\s+\(?(\d+)\)?",
+    re.IGNORECASE,
+)
+# Самостоятельная ссылка «(N)» — в скобках только число. Используем
+# отрицательный look-behind по «формула»/«рис.»/«табл.», чтобы не
+# дублировать матчи и не подхватить совсем посторонние числа в скобках.
+_FORMULA_REF_PAREN_RE = re.compile(r"(?<![A-Za-zА-Яа-яЁё])\((\d+)\)")
+
+
+def _iter_formulas(items: Sequence[LogicalSection | Block]) -> list[Formula]:
+    """Рекурсивно собрать все Formula (через LogicalSection.children)."""
+    result: list[Formula] = []
+    for item in items:
+        if isinstance(item, Formula):
+            result.append(item)
+        elif isinstance(item, LogicalSection):
+            result.extend(_iter_formulas(item.children))
+    return result
+
+
+def _all_formulas(document: Document) -> list[Formula]:
+    """Все Formula документа (плоско, со всех PageSection)."""
+    formulas: list[Formula] = []
+    for ps in document.page_sections:
+        formulas.extend(_iter_formulas(ps.content))
+    return formulas
+
+
+def _formula_numbers(document: Document) -> set[int]:
+    """Собрать множество номеров формул (только Formula с непустым number)."""
+    return {f.number for f in _all_formulas(document) if f.number is not None}
+
+
+@register("C.03")
+def check_formula_references_resolve(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Каждая ссылка на формулу N должна указывать на существующую формулу.
+
+    Алгоритм:
+    1. Собрать множество номеров формул из Formula.number (None — формула
+       без номера, игнорируется).
+    2. В каждом Paragraph искать паттерны:
+       - «формула N», «формуле N», «формулу N», «формулы N» и пр.;
+       - «(N)» — стандартный Word-паттерн самой формулы.
+    3. Если N не входит в множество существующих — Violation.
+
+    Если в документе вообще нет нумерованных формул, паттерн «(N)»
+    не проверяется (это, скорее всего, какие-то иные числа в скобках).
+    """
+    _ = profile
+    violations: list[Violation] = []
+    existing = _formula_numbers(document)
+
+    for paragraph in _all_paragraphs(document):
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        # Слово «формула N» — всегда проверяем (это явная ссылка).
+        for match in _FORMULA_REF_WORD_RE.finditer(text):
+            try:
+                num = int(match.group(1))
+            except ValueError:
+                continue
+            if num in existing:
+                continue
+            violations.append(
+                Violation(
+                    check_code="C.03",
+                    severity="error",
+                    message=(
+                        f"Ссылка на формулу {num} в абзаце «{_preview(text)}» "
+                        f"не находит соответствующей формулы"
+                    ),
+                    location=f"paragraph[{paragraph.id}]",
+                    suggestion=(
+                        f"Проверить номер: формулы {num} в документе нет. "
+                        f"Возможно, опечатка или формула не добавлена."
+                    ),
+                    details={"paragraph_id": paragraph.id, "number": str(num)},
+                )
+            )
+
+        # Шаблон «(N)» — проверяем только если в документе вообще есть
+        # нумерованные формулы (иначе слишком много ложных срабатываний).
+        if not existing:
+            continue
+        for match in _FORMULA_REF_PAREN_RE.finditer(text):
+            try:
+                num = int(match.group(1))
+            except ValueError:
+                continue
+            if num in existing:
+                continue
+            violations.append(
+                Violation(
+                    check_code="C.03",
+                    severity="error",
+                    message=(
+                        f"Ссылка «({num})» в абзаце «{_preview(text)}» "
+                        f"не находит соответствующей формулы"
+                    ),
+                    location=f"paragraph[{paragraph.id}]",
+                    suggestion=(
+                        f"Проверить номер: формулы {num} в документе нет"
+                    ),
+                    details={"paragraph_id": paragraph.id, "number": str(num)},
+                )
+            )
+
+    return violations
+
+
 __all__ = [
     "check_bibliography_references_resolve",
     "check_figure_references_resolve",
+    "check_formula_references_resolve",
     "check_table_references_resolve",
 ]
