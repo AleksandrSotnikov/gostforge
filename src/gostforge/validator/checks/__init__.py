@@ -21,6 +21,9 @@
 """
 
 from . import (  # noqa: F401
+    abbreviations,
+    appendices,
+    crossrefs,
     figures,
     formatting,
     formulas,

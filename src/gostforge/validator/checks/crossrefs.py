@@ -1,0 +1,373 @@
+"""C.* — проверки перекрёстных ссылок.
+
+Проверки направления «текст → объект»: каждая ссылка в тексте должна
+указывать на существующий объект (рисунок, таблицу, источник).
+
+Сравнение с I.06/B.08 — там обратное направление: на каждый объект
+должна быть ссылка в тексте; здесь же каждая ссылка должна вести к
+существующему объекту.
+"""
+
+# ruff: noqa: RUF001, RUF002, RUF003
+
+from __future__ import annotations
+
+import re
+from collections.abc import Sequence
+
+from gostforge.model import (
+    Block,
+    Document,
+    Figure,
+    InlineElement,
+    LogicalSection,
+    Paragraph,
+    Table,
+    TextRun,
+)
+from gostforge.profile import Profile
+
+from ..engine import Violation, register
+
+# --- Хелперы ----------------------------------------------------------------
+
+_PREVIEW_LIMIT = 80
+
+
+def _iter_paragraphs(items: Sequence[LogicalSection | Block]) -> list[Paragraph]:
+    """Рекурсивно собрать все Paragraph (через LogicalSection.children).
+
+    Подписи рисунков/таблиц в `Figure.caption` / `Table.caption` сюда не
+    попадают: они хранятся как `list[InlineElement]`, а не Paragraph.
+    """
+    result: list[Paragraph] = []
+    for item in items:
+        if isinstance(item, Paragraph):
+            result.append(item)
+        elif isinstance(item, LogicalSection):
+            result.extend(_iter_paragraphs(item.children))
+    return result
+
+
+def _all_paragraphs(document: Document) -> list[Paragraph]:
+    """Все Paragraph документа (плоско, со всех PageSection)."""
+    paragraphs: list[Paragraph] = []
+    for ps in document.page_sections:
+        paragraphs.extend(_iter_paragraphs(ps.content))
+    return paragraphs
+
+
+def _paragraph_text(paragraph: Paragraph) -> str:
+    """Склеить весь текст параграфа из TextRun-ов."""
+    return "".join(el.text for el in paragraph.content if isinstance(el, TextRun))
+
+
+def _preview(text: str) -> str:
+    """Усечь текст до короткого превью для сообщения."""
+    cleaned = " ".join(text.split())
+    if len(cleaned) <= _PREVIEW_LIMIT:
+        return cleaned
+    return cleaned[: _PREVIEW_LIMIT - 1] + "…"
+
+
+def _caption_text(elements: Sequence[InlineElement]) -> str:
+    """Склеить подпись в строку (только TextRun)."""
+    return "".join(el.text for el in elements if isinstance(el, TextRun)).strip()
+
+
+# --- C.01 — ссылки на рисунки разрешаются ----------------------------------
+
+
+# Извлечь номер из подписи рисунка: «Рисунок 1 — Название», «Рис. 2».
+_FIGURE_NUMBER_RE = re.compile(r"^Рис(?:унок)?\.?\s+(\d+)")
+
+# Поиск в тексте ссылки на рисунок N (case-insensitive).
+# Принимаем: «рисунок 1», «рисунке 1», «рисунков 1», «рисунках 1»,
+# «рис. 1», «рис 1», в т.ч. с предшествующим «см.».
+_FIGURE_REF_RE = re.compile(
+    r"(?:см\.\s+)?рис(?:унок|унке|унков|унках|унка|унку|унком)?\.?\s+(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _iter_figures(items: Sequence[LogicalSection | Block]) -> list[Figure]:
+    """Рекурсивно собрать все Figure (через LogicalSection.children)."""
+    result: list[Figure] = []
+    for item in items:
+        if isinstance(item, Figure):
+            result.append(item)
+        elif isinstance(item, LogicalSection):
+            result.extend(_iter_figures(item.children))
+    return result
+
+
+def _all_figures(document: Document) -> list[Figure]:
+    """Все Figure документа (плоско, со всех PageSection)."""
+    figures: list[Figure] = []
+    for ps in document.page_sections:
+        figures.extend(_iter_figures(ps.content))
+    return figures
+
+
+def _figure_numbers(document: Document) -> set[int]:
+    """Собрать множество номеров рисунков из подписей."""
+    numbers: set[int] = set()
+    for figure in _all_figures(document):
+        text = _caption_text(figure.caption)
+        if not text:
+            continue
+        match = _FIGURE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            numbers.add(int(match.group(1)))
+        except ValueError:
+            continue
+    return numbers
+
+
+@register("C.01")
+def check_figure_references_resolve(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Каждая ссылка «(см.) рисунок N» в тексте должна указывать на существующий рисунок.
+
+    Алгоритм:
+    1. Собрать множество номеров рисунков из их подписей.
+    2. Для каждого Paragraph документа найти все совпадения по шаблону
+       `(?:см\\.\\s+)?рис(?:унок|унке|унков|унках)?\\.?\\s+(\\d+)`
+       (case-insensitive).
+    3. Если номер ссылки не входит в множество существующих — Violation.
+
+    Подписи самих рисунков (Figure.caption) не учитываются, потому что
+    при склейке текста учитываются только Paragraph'ы.
+    """
+    violations: list[Violation] = []
+    existing = _figure_numbers(document)
+
+    for paragraph in _all_paragraphs(document):
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        for match in _FIGURE_REF_RE.finditer(text):
+            try:
+                num = int(match.group(1))
+            except ValueError:
+                continue
+            if num in existing:
+                continue
+            violations.append(
+                Violation(
+                    check_code="C.01",
+                    severity="error",
+                    message=(
+                        f"Ссылка на рисунок {num} в абзаце «{_preview(text)}» "
+                        f"не находит соответствующего рисунка"
+                    ),
+                    location=f"paragraph[{paragraph.id}]",
+                    suggestion=(
+                        f"Проверить номер: рисунка {num} в документе нет. "
+                        f"Возможно, опечатка в номере или забыли добавить рисунок."
+                    ),
+                    details={"paragraph_id": paragraph.id, "number": str(num)},
+                )
+            )
+
+    return violations
+
+
+# --- C.02 — ссылки на таблицы разрешаются ----------------------------------
+
+
+_TABLE_NUMBER_RE = re.compile(r"^Таблица\s+(\d+)")
+
+# Поиск в тексте ссылки на таблицу N (case-insensitive).
+# Принимаем: «таблица 1», «таблице 1», «таблицу 1», «таблиц 1»,
+# «таблицах 1», «табл. 1», «табл 1», в т.ч. с предшествующим «см.».
+_TABLE_REF_RE = re.compile(
+    r"(?:см\.\s+)?табл(?:ица|ице|ицу|иц|ицах|ицы)?\.?\s*(\d+)",
+    re.IGNORECASE,
+)
+
+
+def _iter_tables(items: Sequence[LogicalSection | Block]) -> list[Table]:
+    """Рекурсивно собрать все Table (через LogicalSection.children)."""
+    result: list[Table] = []
+    for item in items:
+        if isinstance(item, Table):
+            result.append(item)
+        elif isinstance(item, LogicalSection):
+            result.extend(_iter_tables(item.children))
+    return result
+
+
+def _all_tables(document: Document) -> list[Table]:
+    """Все Table документа (плоско, со всех PageSection)."""
+    tables: list[Table] = []
+    for ps in document.page_sections:
+        tables.extend(_iter_tables(ps.content))
+    return tables
+
+
+def _table_numbers(document: Document) -> set[int]:
+    """Собрать множество номеров таблиц из подписей."""
+    numbers: set[int] = set()
+    for table in _all_tables(document):
+        text = _caption_text(table.caption)
+        if not text:
+            continue
+        match = _TABLE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            numbers.add(int(match.group(1)))
+        except ValueError:
+            continue
+    return numbers
+
+
+@register("C.02")
+def check_table_references_resolve(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Каждая ссылка «(см.) таблицу N» в тексте должна указывать на существующую таблицу.
+
+    Алгоритм:
+    1. Собрать множество номеров таблиц из их подписей.
+    2. Для каждого Paragraph найти все совпадения по шаблону
+       `(?:см\\.\\s+)?табл(?:ица|.|ице|иц|ицу|ицах)?\\s*(\\d+)`
+       (case-insensitive).
+    3. Если номер ссылки не входит в множество существующих — Violation.
+
+    Подписи самих таблиц (Table.caption) не учитываются, потому что при
+    склейке текста учитываются только Paragraph'ы.
+    """
+    violations: list[Violation] = []
+    existing = _table_numbers(document)
+
+    for paragraph in _all_paragraphs(document):
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        for match in _TABLE_REF_RE.finditer(text):
+            try:
+                num = int(match.group(1))
+            except ValueError:
+                continue
+            if num in existing:
+                continue
+            violations.append(
+                Violation(
+                    check_code="C.02",
+                    severity="error",
+                    message=(
+                        f"Ссылка на таблицу {num} в абзаце «{_preview(text)}» "
+                        f"не находит соответствующей таблицы"
+                    ),
+                    location=f"paragraph[{paragraph.id}]",
+                    suggestion=(
+                        f"Проверить номер: таблицы {num} в документе нет. "
+                        f"Возможно, опечатка в номере или забыли добавить таблицу."
+                    ),
+                    details={"paragraph_id": paragraph.id, "number": str(num)},
+                )
+            )
+
+    return violations
+
+
+# --- C.04 — ссылки [N] разрешаются в bibliography --------------------------
+
+
+# Найти выражение вида «[1]», «[2, 3]», «[1-5]», «[1, 3-5, 7]».
+# Содержимое скобок — одна или несколько групп: число или диапазон,
+# разделённые запятыми. Между числами и разделителями допустимы пробелы.
+_BIB_REF_RE = re.compile(r"\[(\d+(?:\s*[-–]\s*\d+|\s*,\s*\d+)*)\]")
+
+# Внутри захваченной группы — отдельные «токены»: число или диапазон.
+_BIB_TOKEN_RE = re.compile(r"\d+(?:\s*[-–]\s*\d+)?")
+# Разбор одиночного токена на (start, end). Если это просто число — start == end.
+_BIB_RANGE_RE = re.compile(r"(\d+)\s*[-–]\s*(\d+)")
+_BIB_SINGLE_RE = re.compile(r"(\d+)")
+
+
+def _expand_bib_token(token: str) -> list[int]:
+    """Развернуть токен «N» или «N-M» в список чисел [N..M]."""
+    range_match = _BIB_RANGE_RE.fullmatch(token.strip())
+    if range_match:
+        start = int(range_match.group(1))
+        end = int(range_match.group(2))
+        if end < start:
+            return [start, end]
+        return list(range(start, end + 1))
+    single_match = _BIB_SINGLE_RE.fullmatch(token.strip())
+    if single_match:
+        return [int(single_match.group(1))]
+    return []
+
+
+@register("C.04")
+def check_bibliography_references_resolve(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Каждая ссылка `[N]` в тексте должна соответствовать существующей записи bibliography.
+
+    Алгоритм:
+    - Найти все вхождения вида `[N]`, `[N, M]`, `[N-M]` в тексте Paragraph'ов.
+    - Разобрать содержимое скобок на отдельные номера (диапазоны
+      разворачиваются: `[1-3]` → 1, 2, 3).
+    - Каждый номер должен быть в диапазоне `1..len(document.bibliography)`.
+    - Каждый «висячий» номер — отдельный Violation.
+
+    Если bibliography пустой, а в тексте есть `[N]` — все номера нарушают
+    (это явная ошибка, литературы в документе вообще нет).
+    """
+    _ = profile  # пока параметризации нет
+    violations: list[Violation] = []
+    bib_size = len(document.bibliography)
+
+    for paragraph in _all_paragraphs(document):
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        for match in _BIB_REF_RE.finditer(text):
+            inner = match.group(1)
+            tokens = _BIB_TOKEN_RE.findall(inner)
+            for token in tokens:
+                numbers = _expand_bib_token(token)
+                for num in numbers:
+                    if 1 <= num <= bib_size:
+                        continue
+                    violations.append(
+                        Violation(
+                            check_code="C.04",
+                            severity="error",
+                            message=(
+                                f"Ссылка [{num}] в абзаце «{_preview(text)}» "
+                                f"не находит соответствующей записи в списке "
+                                f"литературы"
+                            ),
+                            location=f"paragraph[{paragraph.id}]",
+                            suggestion=(
+                                f"В bibliography всего {bib_size} запис(ь/и/ей); "
+                                f"проверьте номер ссылки [{num}]"
+                            ),
+                            details={
+                                "paragraph_id": paragraph.id,
+                                "number": str(num),
+                                "bibliography_size": str(bib_size),
+                            },
+                        )
+                    )
+
+    return violations
+
+
+__all__ = [
+    "check_bibliography_references_resolve",
+    "check_figure_references_resolve",
+    "check_table_references_resolve",
+]

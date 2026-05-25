@@ -157,7 +157,14 @@ checks:
   C.01: {enabled: true}
   C.02: {enabled: true}
   C.04: {enabled: true}
-  P.01: {enabled: true}
+  P.01:
+    enabled: true
+    params:
+      forbidden_letters: [Ё, З, Й, О, Ч, Ь, Ъ, Ы]
+  A.01:
+    enabled: true
+    params:
+      known_abbreviations: []
   P.03: {enabled: true}
   K.01: {enabled: true}
   K.02: {enabled: true}
