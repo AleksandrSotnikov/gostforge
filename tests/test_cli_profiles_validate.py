@@ -40,3 +40,29 @@ def test_validate_missing_required_field(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["profiles", "validate", str(bad)])
     assert result.exit_code == 2
+
+
+def test_diff_inherited_profile_shows_differences() -> None:
+    """diff показывает переопределения в кафедральном профиле."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["profiles", "diff", "gost-7.32-2017", "example-department"])
+    assert result.exit_code == 0
+    # Должны быть отличия в стилях и параметрах T.02 / T.04
+    assert "Разные параметры" in result.output
+    assert "T.02" in result.output
+    assert "body.size_pt" in result.output
+
+
+def test_diff_same_profile_is_identical() -> None:
+    """diff одного профиля с самим собой — нет различий."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["profiles", "diff", "gost-7.32-2017", "gost-7.32-2017"])
+    assert result.exit_code == 0
+    assert "идентичны" in result.output
+
+
+def test_diff_missing_profile_exit_2() -> None:
+    """Отсутствующий профиль — exit 2."""
+    runner = CliRunner()
+    result = runner.invoke(main, ["profiles", "diff", "gost-7.32-2017", "nonexistent"])
+    assert result.exit_code == 2

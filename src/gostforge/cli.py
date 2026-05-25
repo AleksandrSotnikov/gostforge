@@ -398,6 +398,72 @@ def profiles_validate(path: Path) -> None:
     click.echo(click.style("[OK]", fg="green", bold=True) + " Файл валиден")
 
 
+@profiles.command("diff")
+@click.argument("profile_a")
+@click.argument("profile_b")
+def profiles_diff(profile_a: str, profile_b: str) -> None:
+    """Сравнить два профиля по списку проверок и стилям.
+
+    Выводит:
+    - какие проверки включены только в A, только в B;
+    - различия в параметрах общих проверок;
+    - различия в основных полях styles.page/body.
+    """
+    try:
+        a = load_profile(profile_a)
+        b = load_profile(profile_b)
+    except FileNotFoundError as e:
+        click.echo(f"Ошибка: {e}", err=True)
+        sys.exit(2)
+
+    a_enabled = {c for c, cfg in a.checks.items() if cfg.enabled}
+    b_enabled = {c for c, cfg in b.checks.items() if cfg.enabled}
+
+    only_a = sorted(a_enabled - b_enabled)
+    only_b = sorted(b_enabled - a_enabled)
+    common = sorted(a_enabled & b_enabled)
+
+    click.echo(click.style(f"=== {profile_a} vs {profile_b} ===", bold=True))
+
+    if only_a:
+        click.echo(click.style(f"\nТолько в {profile_a} ({len(only_a)}):", fg="cyan"))
+        click.echo("  " + ", ".join(only_a))
+    if only_b:
+        click.echo(click.style(f"\nТолько в {profile_b} ({len(only_b)}):", fg="cyan"))
+        click.echo("  " + ", ".join(only_b))
+
+    # Отличия в параметрах общих проверок
+    param_diffs = []
+    for code in common:
+        pa = a.checks[code].params
+        pb = b.checks[code].params
+        if pa != pb:
+            param_diffs.append((code, pa, pb))
+    if param_diffs:
+        click.echo(click.style(f"\nРазные параметры ({len(param_diffs)}):", fg="yellow"))
+        for code, pa, pb in param_diffs:
+            click.echo(f"  {code}:")
+            click.echo(f"    {profile_a}: {pa}")
+            click.echo(f"    {profile_b}: {pb}")
+
+    # Стили
+    style_diffs = []
+    if a.styles.page.margins_mm != b.styles.page.margins_mm:
+        style_diffs.append(("margins_mm", a.styles.page.margins_mm, b.styles.page.margins_mm))
+    for attr in ("font", "size_pt", "line_spacing", "first_line_indent_cm", "alignment"):
+        va = getattr(a.styles.body, attr)
+        vb = getattr(b.styles.body, attr)
+        if va != vb:
+            style_diffs.append((f"body.{attr}", va, vb))
+    if style_diffs:
+        click.echo(click.style(f"\nРазные стили ({len(style_diffs)}):", fg="yellow"))
+        for name, va, vb in style_diffs:
+            click.echo(f"  {name}: {profile_a}={va}, {profile_b}={vb}")
+
+    if not only_a and not only_b and not param_diffs and not style_diffs:
+        click.echo(click.style("\n[OK] Профили идентичны", fg="green"))
+
+
 @main.command("checks")
 def checks_list() -> None:
     """Показать список зарегистрированных проверок."""

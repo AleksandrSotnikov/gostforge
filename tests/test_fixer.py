@@ -419,3 +419,61 @@ def test_fix_with_codes_filter() -> None:
     text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
     # T.08 сработал: двойной пробел схлопнулся; T.10 не запускался — кавычки на месте.
     assert text_runs[0].text == '"a b"'
+
+
+# --- T.07 fix_consecutive_empty_paragraphs ---------------------------------
+
+
+def test_t07_fix_registered() -> None:
+    """T.07 фиксер зарегистрирован в реестре."""
+    from gostforge.fixer.engine import registered_fixers
+    assert "T.07" in registered_fixers()
+
+
+def test_t07_removes_extra_empty_paragraphs() -> None:
+    """3 пустых абзаца подряд → останется только 1 (max_consecutive_empty=1)."""
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main", name="m", type="main",
+            content=[
+                Paragraph(id="p1", content=[TextRun(text="Раздел 1")]),
+                Paragraph(id="p2", content=[]),
+                Paragraph(id="p3", content=[TextRun(text="")]),
+                Paragraph(id="p4", content=[TextRun(text="   ")]),
+                Paragraph(id="p5", content=[TextRun(text="Раздел 2")]),
+            ],
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    fixes = run_fix(doc, profile, codes=["T.07"])
+    assert len(fixes) == 2  # удалены 2 лишних пустых
+    assert all(f.fixer_code == "T.07" for f in fixes)
+    # В content остался 1 пустой + 2 непустых = 3 параграфа
+    assert len(doc.page_sections[0].content) == 3
+
+
+def test_t07_keeps_single_empty_paragraph() -> None:
+    """1 пустой абзац подряд при max=1 — не удаляется."""
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main", name="m", type="main",
+            content=[
+                Paragraph(id="p1", content=[TextRun(text="A")]),
+                Paragraph(id="p2", content=[]),
+                Paragraph(id="p3", content=[TextRun(text="B")]),
+            ],
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    fixes = run_fix(doc, profile, codes=["T.07"])
+    assert fixes == []

@@ -293,7 +293,66 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
     return applied
 
 
+@register("T.07")
+def fix_consecutive_empty_paragraphs(
+    document: Document, profile: Profile
+) -> list[FixApplied]:
+    """Удалить лишние подряд идущие пустые абзацы.
+
+    Параметр `checks.T.07.params.max_consecutive_empty: int = 1` —
+    максимально допустимое число пустых абзацев подряд. Лишние удаляются.
+    """
+    config = profile.checks.get("T.07")
+    max_empty = 1
+    if config and config.params.get("max_consecutive_empty") is not None:
+        max_empty = int(config.params["max_consecutive_empty"])
+
+    applied: list[FixApplied] = []
+
+    def _is_empty(p: object) -> bool:
+        if not isinstance(p, Paragraph):
+            return False
+        return not any(
+            isinstance(r, TextRun) and r.text and r.text.strip()
+            for r in p.content
+        )
+
+    def _clean_container(
+        items: list[LogicalSection | Block],
+        container_path: str,
+    ) -> None:
+        new_items: list[LogicalSection | Block] = []
+        empty_streak = 0
+        for item in items:
+            if isinstance(item, LogicalSection):
+                _clean_container(item.children, f"{container_path}.{item.id}")
+                new_items.append(item)
+                empty_streak = 0
+            elif _is_empty(item):
+                empty_streak += 1
+                if empty_streak <= max_empty:
+                    new_items.append(item)
+                else:
+                    applied.append(
+                        FixApplied(
+                            fixer_code="T.07",
+                            location=f"{container_path}.paragraph[{item.id}]",
+                            description="Удалён лишний пустой абзац подряд",
+                        )
+                    )
+            else:
+                new_items.append(item)
+                empty_streak = 0
+        items[:] = new_items
+
+    for ps in document.page_sections:
+        _clean_container(ps.content, f"page_sections.{ps.id}")
+
+    return applied
+
+
 __all__ = [
+    "fix_consecutive_empty_paragraphs",
     "fix_double_spaces",
     "fix_hyphen_to_dash",
     "fix_initials_nbsp",
