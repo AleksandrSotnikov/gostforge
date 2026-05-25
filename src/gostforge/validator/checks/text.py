@@ -499,6 +499,100 @@ def _count_inch_markers(text: str) -> int:
 
 _HYPHEN_BETWEEN_SPACES_RE = re.compile(r" - ")
 
+# T.12: единицы измерения по умолчанию. Между числом и единицей в правильно
+# свёрстанном тексте должен стоять неразрывный пробел (U+00A0), а не
+# обычный.
+_DEFAULT_UNITS: list[str] = [
+    "г", "кг", "мг", "т",
+    "м", "см", "мм", "км",
+    "л", "мл",
+    "ч", "мин", "с",
+    "°C", "%",
+    "шт", "руб",
+    "год", "лет",
+]
+
+
+def _build_number_unit_re(units: list[str]) -> re.Pattern[str]:
+    """Сконструировать regex для T.12 по списку единиц.
+
+    `°C` нельзя ограничивать `\\b` справа (`\\b` — это переход между
+    буквенно-цифровым и не таким символом, а `°` — не буква), поэтому
+    группируем единицы на «нужен `\\b`» и «не нужен».
+    """
+    word_units = [u for u in units if u and u[0].isalnum()]
+    other_units = [u for u in units if u and not u[0].isalnum()]
+
+    parts: list[str] = []
+    if word_units:
+        parts.append("(?:" + "|".join(re.escape(u) for u in word_units) + r")\b")
+    if other_units:
+        parts.append("(?:" + "|".join(re.escape(u) for u in other_units) + ")")
+
+    alt = "|".join(parts)
+    #   — обычный пробел (не NBSP).
+    return re.compile(rf"(?<!\d)(\d+(?:[.,]\d+)?) ({alt})")
+
+
+_DEFAULT_NUMBER_UNIT_RE = _build_number_unit_re(_DEFAULT_UNITS)
+
+
+@register("T.12")
+def check_nbsp_between_number_and_unit(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Между числом и единицей измерения должен стоять неразрывный пробел.
+
+    Эвристика: ищем шаблон «<число><обычный пробел><единица>» в склеенном
+    тексте параграфа. Один Violation на параграф (в `details["count"]` —
+    число совпадений).
+
+    Параметры `checks.T.12.params`:
+    - `units` (list[str]): список единиц измерения. По умолчанию — `_DEFAULT_UNITS`.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("T.12")
+    pattern = _DEFAULT_NUMBER_UNIT_RE
+    if config and config.params.get("units") is not None:
+        units_param = config.params["units"]
+        if isinstance(units_param, list) and units_param:
+            pattern = _build_number_unit_re([str(u) for u in units_param])
+
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) == "header_footer":
+            continue
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        matches = pattern.findall(text)
+        if not matches:
+            continue
+        violations.append(
+            Violation(
+                check_code="T.12",
+                severity="info",
+                message=(
+                    f"В абзаце «{_preview(paragraph.content)}» между числом и "
+                    f"единицей измерения стоит обычный пробел вместо неразрывного "
+                    f"(найдено: {len(matches)})"
+                ),
+                location=f"page_sections.*.paragraph[{paragraph.id}]",
+                suggestion=(
+                    "Заменить обычные пробелы на неразрывные между числом и "
+                    "единицей измерения"
+                ),
+                details={"count": str(len(matches))},
+            )
+        )
+    return violations
+
+
+# T.13: инициалы и фамилия (И. И. Иванов). Между ними должен быть NBSP,
+# а не обычный пробел.
+_INITIALS_SURNAME_RE = re.compile(
+    r"[А-ЯЁ]\. [А-ЯЁ]\. [А-ЯЁ][а-яё]+"
+)
+
 
 @register("T.11")
 def check_em_dash_instead_of_hyphen(
@@ -558,6 +652,7 @@ __all__ = [
     "check_font",
     "check_font_size",
     "check_line_spacing",
+    "check_nbsp_between_number_and_unit",
     "check_no_consecutive_empty_paragraphs",
     "check_no_double_spaces",
     "check_no_trailing_spaces",

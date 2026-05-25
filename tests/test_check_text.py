@@ -1,4 +1,4 @@
-# ruff: noqa: RUF002
+# ruff: noqa: RUF001, RUF002
 
 """Тесты T.01 (шрифт) и T.02 (кегль)."""
 
@@ -741,3 +741,120 @@ def test_t11_skips_headers_and_footers() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.11"]
     assert found == []
+
+
+# --- T.12 (NBSP между числом и единицей) ---------------------------------
+
+
+def test_t12_registered() -> None:
+    assert "T.12" in registered_checks()
+
+
+def test_t12_nbsp_no_violation() -> None:
+    """Неразрывный пробел между числом и единицей — нарушения нет."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Длина составляет 5 м, масса — 3 кг.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.12"]
+    assert found == []
+
+
+def test_t12_regular_space_violation() -> None:
+    """Обычный пробел между числом и единицей — нарушение."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Длина составляет 5 м.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.12"]
+    assert len(found) == 1
+    assert found[0].severity == "info"
+    assert found[0].details["count"] == "1"
+
+
+def test_t12_multiple_occurrences_single_violation() -> None:
+    """Несколько совпадений — один Violation с count в details."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Длина 5 м, масса 3 кг, время 10 с.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.12"]
+    assert len(found) == 1
+    assert found[0].details["count"] == "3"
+
+
+def test_t12_decimal_number() -> None:
+    """Дробные числа также распознаются (1.5 кг, 2,5 м)."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Объём 1,5 л и ещё 2.3 кг.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.12"]
+    assert len(found) == 1
+    assert found[0].details["count"] == "2"
+
+
+def test_t12_percent_and_celsius() -> None:
+    """`%` и `°C` тоже считаются единицами."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Доля 50 %, температура 25 °C.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.12"]
+    assert len(found) == 1
+
+
+def test_t12_does_not_match_random_letters() -> None:
+    """`5 м` сработает, но `5 минут` (полное слово) — нет, так как граница слова."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Прошло 10 минут с момента старта.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.12"]
+    assert found == []
+
+
+def test_t12_skips_headers_and_footers() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Колонтитул 5 м внутри")],
+        style_name="Header",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.12"]
+    assert found == []
+
+
+def test_t12_custom_units_param() -> None:
+    """Параметр `units` в профиле может переопределить список единиц."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Скорость 100 км и масса 5 кг.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    # Сузим до одной единицы — «кг».
+    profile.checks["T.12"].params["units"] = ["кг"]
+    found = [v for v in validate(doc, profile) if v.check_code == "T.12"]
+    assert len(found) == 1
+    assert found[0].details["count"] == "1"
