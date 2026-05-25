@@ -1,6 +1,6 @@
 """Тесты L.* — проверки списков (маркеры, нумерация, пунктуация)."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
+# ruff: noqa: RUF001, RUF002
 
 from gostforge.model import (
     Document,
@@ -174,7 +174,7 @@ def test_l02_uniform_format_no_violation() -> None:
 
 
 def test_l02_mixed_formats_violation() -> None:
-    """«1)» в одном списке и «1.» в другом — нарушение."""
+    """«1)» в одном списке и «1.» в другом — есть нарушение."""
     lb1 = ListBlock(
         id="list-1",
         ordered=True,
@@ -189,9 +189,7 @@ def test_l02_mixed_formats_violation() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "L.02"]
     assert len(found) == 1
-    # Оба формата встречаются по одному разу — какой из них «преобладающий»,
-    # определяется детерминированно, но достаточно проверить, что один из
-    # двух списков помечен.
+    # Один из списков отмечен как отклоняющийся.
     assert found[0].details["list_id"] in {"list-1", "list-2"}
     assert found[0].details["format"] != found[0].details["expected"]
 
@@ -248,4 +246,133 @@ def test_l02_unordered_lists_ignored() -> None:
     doc = _doc_with_content([lb1, lb2])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "L.02"]
+    assert found == []
+
+
+# --- L.03 (отступы пунктов — заглушка Фазы 2) -------------------------------
+
+
+def test_l03_registered() -> None:
+    """L.03 зарегистрирована в реестре, но на Фазе 1 это заглушка."""
+    assert "L.03" in registered_checks()
+
+
+# --- L.04 (единообразие знаков препинания в конце пунктов) ------------------
+
+
+def test_l04_registered() -> None:
+    assert "L.04" in registered_checks()
+
+
+def test_l04_all_semicolons_no_violation() -> None:
+    """Все пункты оканчиваются на «;» — нарушения нет."""
+    lb = ListBlock(
+        id="list-1",
+        ordered=False,
+        items=[
+            [TextRun(text="- первый;")],
+            [TextRun(text="- второй;")],
+            [TextRun(text="- третий;")],
+        ],
+    )
+    doc = _doc_with_content([lb])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.04"]
+    assert found == []
+
+
+def test_l04_all_dots_no_violation() -> None:
+    """Все пункты оканчиваются на «.» — нарушения нет."""
+    lb = ListBlock(
+        id="list-1",
+        ordered=True,
+        items=[
+            [TextRun(text="1) Первое предложение.")],
+            [TextRun(text="2) Второе предложение.")],
+        ],
+    )
+    doc = _doc_with_content([lb])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.04"]
+    assert found == []
+
+
+def test_l04_mixed_punctuation_violation() -> None:
+    """В одном списке есть «;» и «.» — нарушение."""
+    lb = ListBlock(
+        id="list-1",
+        ordered=False,
+        items=[
+            [TextRun(text="- первый;")],
+            [TextRun(text="- второй.")],
+            [TextRun(text="- третий;")],
+        ],
+    )
+    doc = _doc_with_content([lb])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.04"]
+    assert len(found) == 1
+    assert found[0].severity == "info"
+    assert found[0].details["list_id"] == "list-1"
+
+
+def test_l04_punct_and_no_punct_violation() -> None:
+    """Часть пунктов со знаком, часть — без знака."""
+    lb = ListBlock(
+        id="list-1",
+        ordered=False,
+        items=[
+            [TextRun(text="- первый;")],
+            [TextRun(text="- второй без знака")],
+        ],
+    )
+    doc = _doc_with_content([lb])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.04"]
+    assert len(found) == 1
+
+
+def test_l04_single_item_no_violation() -> None:
+    """В списке всего один пункт — сравнивать не с чем."""
+    lb = ListBlock(
+        id="list-1",
+        ordered=False,
+        items=[[TextRun(text="- единственный")]],
+    )
+    doc = _doc_with_content([lb])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.04"]
+    assert found == []
+
+
+def test_l04_all_no_punctuation_no_violation() -> None:
+    """Все пункты без концевого знака — единообразно, нарушения нет."""
+    lb = ListBlock(
+        id="list-1",
+        ordered=False,
+        items=[
+            [TextRun(text="- первый")],
+            [TextRun(text="- второй")],
+            [TextRun(text="- третий")],
+        ],
+    )
+    doc = _doc_with_content([lb])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.04"]
+    assert found == []
+
+
+def test_l04_trailing_spaces_ignored() -> None:
+    """Хвостовые пробелы не влияют — концевой знак определяется после rstrip."""
+    lb = ListBlock(
+        id="list-1",
+        ordered=False,
+        items=[
+            [TextRun(text="- первый;   ")],
+            [TextRun(text="- второй;")],
+        ],
+    )
+    doc = _doc_with_content([lb])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "L.04"]
     assert found == []

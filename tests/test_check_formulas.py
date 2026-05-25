@@ -220,3 +220,70 @@ def test_m04_unnumbered_formula_skipped() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "M.04"]
     assert found == []
+
+
+# --- M.02 (пояснения переменных после формулы) -----------------------------
+
+
+def test_m02_registered() -> None:
+    assert "M.02" in registered_checks()
+
+
+def test_m02_explanation_present_no_violation() -> None:
+    """Параграф «где: a — длина...» сразу после формулы — нарушения нет."""
+    formula = Formula(id="f-1", latex="a+b", number=1)
+    explain = Paragraph(
+        id="p-1",
+        content=[TextRun(text="где: a — длина, b — ширина.")],
+    )
+    doc = _doc_with_content([formula, explain])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "M.02"]
+    assert found == []
+
+
+def test_m02_no_explanation_violation() -> None:
+    """После формулы идёт обычный текст — Violation."""
+    formula = Formula(id="f-1", latex="a+b", number=1)
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Далее рассмотрим следующий пример.")],
+    )
+    doc = _doc_with_content([formula, para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "M.02"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert found[0].details["formula_id"] == "f-1"
+
+
+def test_m02_explanation_within_lookahead_window() -> None:
+    """Параграф «здесь...» через 2 блока после формулы — нарушения нет (look_ahead=3)."""
+    formula = Formula(id="f-1", latex="a+b", number=1)
+    p_after = Paragraph(id="p-x", content=[TextRun(text="Расшифровка ниже.")])
+    explain = Paragraph(
+        id="p-1",
+        content=[TextRun(text="здесь a — длина, b — ширина.")],
+    )
+    doc = _doc_with_content([formula, p_after, explain])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "M.02"]
+    assert found == []
+
+
+def test_m02_unnumbered_formula_skipped() -> None:
+    """Ненумерованные формулы не требуют пояснения переменных."""
+    formula = Formula(id="f-1", latex="a+b", number=None)
+    para = Paragraph(id="p-1", content=[TextRun(text="Обычный абзац.")])
+    doc = _doc_with_content([formula, para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "M.02"]
+    assert found == []
+
+
+# --- M.05 (формула выровнена по центру — заглушка Фазы 2) ------------------
+
+
+def test_m05_registered() -> None:
+    """M.05 зарегистрирована в реестре, но на Фазе 1 это заглушка."""
+    assert "M.05" in registered_checks()

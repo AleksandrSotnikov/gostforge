@@ -190,6 +190,10 @@ checks:
   M.04: {enabled: true}
   L.01: {enabled: true, params: {allowed_markers: ["•", "-", "–"]}}
   L.02: {enabled: true}
+  L.03: {enabled: true}
+  L.04: {enabled: true}
+  M.02: {enabled: true}
+  M.05: {enabled: true}
   V.01:
     enabled: true
     params:

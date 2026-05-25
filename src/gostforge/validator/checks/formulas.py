@@ -243,8 +243,126 @@ def check_formula_referenced_in_text(
     return violations
 
 
+# M.02: распознаём «где: ...» или «здесь: ...» в начале параграфа.
+# Поддерживаем варианты с двоеточием/запятой/тире/пробелом следом.
+_VARIABLES_EXPLAIN_RE = re.compile(
+    r"^\s*(где|здесь)\b", re.IGNORECASE
+)
+
+
+def _flatten_blocks(items: Sequence[LogicalSection | Block]) -> list[Block]:
+    """Собрать линейный список Block-ов из вложенных LogicalSection.
+
+    Используется M.02: после каждой Formula нужно проверить «соседей»
+    в линейном порядке документа — формула в LogicalSection и параграф
+    с пояснениями переменных должны идти один за другим в линейной
+    последовательности блоков.
+    """
+    result: list[Block] = []
+    for item in items:
+        if isinstance(item, Block):
+            result.append(item)
+        elif isinstance(item, LogicalSection):
+            result.extend(_flatten_blocks(item.children))
+    return result
+
+
+def _all_blocks_linear(document: Document) -> list[Block]:
+    """Все Block-и документа, в линейном порядке обхода PageSection.content."""
+    blocks: list[Block] = []
+    for ps in document.page_sections:
+        blocks.extend(_flatten_blocks(ps.content))
+    return blocks
+
+
+@register("M.02")
+def check_formula_variables_explained(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """После нумерованной формулы должны идти пояснения переменных.
+
+    Эвристика Фазы 1: для каждой Formula с `number is not None` смотрим
+    следующие 3 блока в линейной последовательности документа. Если
+    среди них нет Paragraph, начинающегося со слова «где» или «здесь»
+    (case-insensitive) — Violation (severity=warning). Ненумерованные
+    формулы пропускаем — обычно у них нет переменных, требующих
+    пояснения.
+    """
+    _ = profile  # параметров пока нет, но сигнатура единая для всех проверок
+    violations: list[Violation] = []
+    blocks = _all_blocks_linear(document)
+    # Для location нам нужно знать PageSection — построим карту.
+    formula_to_ps: dict[str, PageSection] = {}
+    for ps, formula in _all_formulas(document):
+        formula_to_ps[formula.id] = ps
+
+    look_ahead = 3
+    for idx, block in enumerate(blocks):
+        if not isinstance(block, Formula):
+            continue
+        if block.number is None:
+            continue
+        following = blocks[idx + 1 : idx + 1 + look_ahead]
+        explained = False
+        for nb in following:
+            if not isinstance(nb, Paragraph):
+                continue
+            text = _paragraph_text(nb).lstrip()
+            if _VARIABLES_EXPLAIN_RE.match(text):
+                explained = True
+                break
+        if explained:
+            continue
+        owning_ps = formula_to_ps.get(block.id)
+        location = (
+            f"page_sections.{owning_ps.id}.formula[{block.id}]"
+            if owning_ps is not None
+            else f"formula[{block.id}]"
+        )
+        violations.append(
+            Violation(
+                check_code="M.02",
+                severity="warning",
+                message=(
+                    f"После формулы «{block.id}» (номер {block.number}) "
+                    "не найдено пояснение переменных «где: ...»"
+                ),
+                location=location,
+                suggestion=(
+                    "Добавить после формулы абзац с пояснением переменных, "
+                    "начинающийся словом «где» (или «здесь»)"
+                ),
+                details={
+                    "formula_id": block.id,
+                    "number": str(block.number),
+                },
+            )
+        )
+    return violations
+
+
+@register("M.05")
+def check_formula_centered(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Формула должна быть выровнена по центру.
+
+    На Фазе 1 у Formula нет поля alignment в модели — проверка
+    зарегистрирована «вхолостую», чтобы быть в реестре и в YAML-профиле.
+    Реальная логика появится на Фазе 2, когда в модели Formula появится
+    выравнивание (или когда мы будем знать выравнивание родительского
+    параграфа в OOXML).
+
+    # TODO Phase 2: добавить alignment в модель Formula
+    """
+    _ = (document, profile)  # no-op
+    return []
+
+
 __all__ = [
+    "check_formula_centered",
     "check_formula_has_number",
     "check_formula_numbering_continuous",
     "check_formula_referenced_in_text",
+    "check_formula_variables_explained",
 ]

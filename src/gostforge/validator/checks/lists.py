@@ -215,7 +215,94 @@ def check_ordered_list_uniform_format(
     return violations
 
 
+# L.04: множество знаков, по которым мы оцениваем «концовку» пункта.
+# Любой иной символ (буква/цифра/закрывающая кавычка) трактуется как
+# «без знака» (категория " ").
+_END_PUNCTUATION_MARKS: frozenset[str] = frozenset({".", ";", "?", "!"})
+
+
+def _item_end_marker(item: Sequence[InlineElement]) -> str:
+    """Определить «концовку» пункта списка.
+
+    Возвращает один из символов из `_END_PUNCTUATION_MARKS` (если пункт
+    оканчивается на этот символ), либо `" "` для случая «без знака» /
+    пустой пункт. Используется L.04 для сравнения концовок пунктов внутри
+    одного списка.
+    """
+    text = _item_text(item).rstrip()
+    if not text:
+        return " "
+    last_char = text[-1]
+    if last_char in _END_PUNCTUATION_MARKS:
+        return last_char
+    return " "
+
+
+@register("L.04")
+def check_list_item_punctuation_uniform(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Знаки препинания в конце пунктов списка должны быть единообразны.
+
+    В каждом ListBlock все items[i] должны заканчиваться одинаково:
+    либо все `;`, либо все `.`, либо все без знака. Любой `?`, `!` также
+    учитывается. Если в одном списке встречаются разные концовки — Violation
+    (severity=info).
+    """
+    violations: list[Violation] = []
+    for page_section, lb in _all_list_blocks(document):
+        if len(lb.items) < 2:
+            continue
+        markers = [_item_end_marker(item) for item in lb.items]
+        distinct = set(markers)
+        if len(distinct) <= 1:
+            continue
+        # Превратим " " в человекочитаемое «без знака» только для сообщения.
+        readable = sorted({m if m != " " else "(без знака)" for m in distinct})
+        violations.append(
+            Violation(
+                check_code="L.04",
+                severity="info",
+                message=(
+                    f"В списке «{lb.id}» пункты оканчиваются по-разному: "
+                    f"{', '.join(readable)}"
+                ),
+                location=f"page_sections.{page_section.id}.list[{lb.id}]",
+                suggestion=(
+                    "Привести все пункты к единому стилю окончания: "
+                    "все с «;», все с «.» или все без знака"
+                ),
+                details={
+                    "list_id": lb.id,
+                    "markers": ",".join(sorted(distinct)),
+                },
+            )
+        )
+    return violations
+
+
+@register("L.03")
+def check_list_item_indent_uniform(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Отступы пунктов списка должны быть одинаковыми.
+
+    На Фазе 1 модель не хранит отступы для items внутри ListBlock —
+    `ListBlock.items: list[list[InlineElement]]` без сопровождающих
+    параграфных свойств. Проверка зарегистрирована, чтобы сохранить код
+    в реестре и YAML-профиле; реальная логика появится на Фазе 2,
+    когда в модели будет per-item indent.
+
+    # TODO Phase 2: добавить indent в ListBlock-items model
+    """
+    # На Фазе 1 нет данных для оценки — возвращаем пустой список.
+    _ = (document, profile)  # явный no-op, чтобы не было unused-warning
+    return []
+
+
 __all__ = [
+    "check_list_item_indent_uniform",
+    "check_list_item_punctuation_uniform",
     "check_ordered_list_uniform_format",
     "check_unordered_list_marker",
 ]
