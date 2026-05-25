@@ -103,3 +103,112 @@ def test_i01_nested_logical_sections() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "I.01"]
     assert len(found) == 1
     assert found[0].details["figure_id"] == "fig-deep"
+
+
+# --- I.03 -------------------------------------------------------------------
+
+
+def test_i03_registered() -> None:
+    assert "I.03" in registered_checks()
+
+
+def test_i03_correct_caption_no_violation() -> None:
+    """«Рисунок 1 — Название» — корректная подпись."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема алгоритма")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert found == []
+
+
+def test_i03_dot_after_number_violation() -> None:
+    """«Рисунок 1. Название» — нарушение (нужно длинное тире)."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1. Схема алгоритма")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert len(found) == 1
+    assert "не соответствует формату" in found[0].message
+
+
+def test_i03_hyphen_instead_of_em_dash_allowed_softly() -> None:
+    """ASCII-дефис ‘-’ принимается (regex допускает [—–-])."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 - Схема алгоритма")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert found == []
+
+
+def test_i03_no_number_violation() -> None:
+    """«Рисунок Схема» — без номера — нарушение."""
+    figure = Figure(id="fig-1", caption=[TextRun(text="Рисунок Схема алгоритма")])
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert len(found) == 1
+
+
+def test_i03_multilevel_number_ok() -> None:
+    """«Рисунок 1.2 — Название» — корректно."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1.2 — Анализ")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert found == []
+
+
+def test_i03_empty_caption_not_flagged() -> None:
+    """Пустая подпись — это случай I.01, не дублируем."""
+    figure = Figure(id="fig-1", caption=[])
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert found == []
+
+
+def test_i03_allow_dot_after_number_param() -> None:
+    """С allow_dot_after_number=True «Рисунок 1. Схема» — не нарушение."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1. Схема алгоритма")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["I.03"].params["allow_dot_after_number"] = True
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert found == []
+
+
+def test_i03_caption_in_nested_section() -> None:
+    """I.03 рекурсивно обходит LogicalSection."""
+    fig_bad = Figure(id="fig-deep", caption=[TextRun(text="Рисунок 1. Bad")])
+    inner = LogicalSection(
+        id="sec-2",
+        level=2,
+        heading=[TextRun(text="Подраздел")],
+        children=[fig_bad],
+    )
+    outer = LogicalSection(
+        id="sec-1",
+        level=1,
+        heading=[TextRun(text="Раздел")],
+        children=[inner],
+    )
+    doc = _doc_with_content([outer])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert len(found) == 1
+    assert found[0].details["figure_id"] == "fig-deep"

@@ -133,7 +133,7 @@ checks:
   H.05: {enabled: true}
   I.01: {enabled: true}
   I.02: {enabled: true}
-  I.03: {enabled: true}
+  I.03: {enabled: true, params: {allow_dot_after_number: false}}
   I.05: {enabled: true}
   I.06: {enabled: true}
   B.01: {enabled: true}
