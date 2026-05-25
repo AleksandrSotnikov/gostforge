@@ -106,7 +106,8 @@ sections_template:
 
 checks:
   F.01: {enabled: true}
-  F.02: {enabled: true}
+  F.02: {enabled: true, params: {paper: A4}}
+  F.03: {enabled: true, params: {orientation: portrait}}
   F.04: {enabled: true, params: {position: bottom_center}}
   F.05: {enabled: true, params: {format: arabic}}
   F.06: {enabled: true, params: {start_value: 3}}

@@ -146,11 +146,14 @@ def _extract_page_section(docx_doc: DocxDocument) -> PageSection:
         "left": _length_to_mm(sect.left_margin),
     }
 
+    paper = _detect_paper_size(sect)
+    orientation = _detect_orientation(sect)
+
     page_section = PageSection(
         id="main",
         name="Основная часть",
         type="main",
-        page=PageGeometry(margins_mm=margins_mm),
+        page=PageGeometry(margins_mm=margins_mm, paper=paper, orientation=orientation),
     )
 
     # Стартовая страница нумерации: <w:pgNumType w:start="N"/> в sectPr.
@@ -193,7 +196,6 @@ def _extract_page_number_start(sect: DocxSection) -> int | None:
         return None
 
 
-# Соответствие OOXML w:fmt значениям модели PageNumberingConfig.format.
 # OOXML поддерживает много форматов (decimalZero, hindiNumbers, и т.д.),
 # но в модели мы фиксируем только три обиходных. Остальные значения
 # отображаем в ближайший аналог (decimal → arabic, прочие — None).
@@ -236,6 +238,46 @@ def _length_to_mm(length: object | None) -> float:
         return 0.0
     mm = float(length.mm)  # type: ignore[attr-defined]
     return round(mm, 1)
+
+
+# Известные размеры бумаги в мм. Сравнение с допуском ±2 мм.
+_PAPER_SIZES_MM: dict[str, tuple[float, float]] = {
+    "A4": (210.0, 297.0),
+    "A3": (297.0, 420.0),
+    "A5": (148.0, 210.0),
+    "Letter": (215.9, 279.4),
+    "Legal": (215.9, 355.6),
+}
+
+
+def _detect_paper_size(sect: DocxSection) -> str:
+    """Определить формат бумаги по page_width/page_height.
+
+    Сравнивает с известными размерами (A4, A3, ...) с допуском ±2 мм.
+    Если ничего не подошло — возвращает «Unknown».
+    """
+    width_mm = _length_to_mm(sect.page_width)
+    height_mm = _length_to_mm(sect.page_height)
+    # Нормализуем (короткая сторона — первая), чтобы сравнение не зависело от ориентации
+    short, long = sorted((width_mm, height_mm))
+    for name, (w, h) in _PAPER_SIZES_MM.items():
+        if abs(short - w) <= 2.0 and abs(long - h) <= 2.0:
+            return name
+    return "Unknown"
+
+
+def _detect_orientation(sect: DocxSection) -> Literal["portrait", "landscape"]:
+    """Определить ориентацию страницы по соотношению ширина/высота.
+
+    Если width > height → landscape, иначе portrait. Атрибут sect.orientation
+    бывает None для дефолтных значений, поэтому считаем по фактическим
+    размерам через _length_to_mm.
+    """
+    width_mm = _length_to_mm(sect.page_width)
+    height_mm = _length_to_mm(sect.page_height)
+    if width_mm > height_mm:
+        return "landscape"
+    return "portrait"
 
 
 def _extract_footer(sect: DocxSection) -> HeaderConfig | None:

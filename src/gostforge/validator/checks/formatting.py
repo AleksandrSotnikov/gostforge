@@ -236,5 +236,69 @@ def check_page_number_format(document: Document, profile: Profile) -> list[Viola
     return violations
 
 
-# TODO: F.02 — формат бумаги
-# TODO: F.03 — ориентация
+@register("F.02")
+def check_paper_size(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка формата бумаги (по умолчанию A4).
+
+    Параметр `checks.F.02.params.paper`: ожидаемый формат (по умолчанию из
+    `profile.styles.page.size` или «A4»).
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("F.02")
+    expected = profile.styles.page.size or "A4"
+    if config and config.params.get("paper"):
+        expected = str(config.params["paper"])
+
+    for section in document.page_sections:
+        actual = section.page.paper
+        if actual == expected:
+            continue
+        violations.append(
+            Violation(
+                check_code="F.02",
+                severity="error",
+                message=(
+                    f"Формат бумаги в секции «{section.name}» — «{actual}», "
+                    f"ожидается «{expected}»"
+                ),
+                location=f"page_sections.{section.id}.page.paper",
+                suggestion=f"Установить формат бумаги «{expected}»",
+                details={"expected": expected, "actual": actual},
+            )
+        )
+    return violations
+
+
+@register("F.03")
+def check_orientation(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка ориентации страницы (по умолчанию portrait).
+
+    Параметр `checks.F.03.params.orientation`: portrait | landscape.
+    Секции типа `appendix` пропускаются — у приложений по ГОСТ может быть
+    альбомная ориентация.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("F.03")
+    expected = "portrait"
+    if config and config.params.get("orientation"):
+        expected = str(config.params["orientation"])
+
+    for section in document.page_sections:
+        if section.type == "appendix":
+            continue
+        if section.page.orientation == expected:
+            continue
+        violations.append(
+            Violation(
+                check_code="F.03",
+                severity="warning",
+                message=(
+                    f"Ориентация секции «{section.name}» — «{section.page.orientation}», "
+                    f"ожидается «{expected}»"
+                ),
+                location=f"page_sections.{section.id}.page.orientation",
+                suggestion=f"Установить ориентацию «{expected}»",
+                details={"expected": expected, "actual": section.page.orientation},
+            )
+        )
+    return violations

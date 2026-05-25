@@ -59,6 +59,16 @@ _ALIGNMENT_MAP = {
 _PAGE_PLACEHOLDER = "{page}"
 
 
+# Размеры бумаги в мм (портретная ориентация: short, long).
+_PAPER_SIZES_MM: dict[str, tuple[float, float]] = {
+    "A4": (210.0, 297.0),
+    "A3": (297.0, 420.0),
+    "A5": (148.0, 210.0),
+    "Letter": (215.9, 279.4),
+    "Legal": (215.9, 355.6),
+}
+
+
 def _apply_page_geometry(doc: DocxDocument, profile: Profile) -> None:
     """Применить поля страницы из профиля к первой секции docx."""
     margins = profile.styles.page.margins_mm
@@ -71,6 +81,25 @@ def _apply_page_geometry(doc: DocxDocument, profile: Profile) -> None:
         section.bottom_margin = Mm(margins["bottom"])
     if "left" in margins:
         section.left_margin = Mm(margins["left"])
+
+
+def _apply_page_size(doc: DocxDocument, page_section: PageSection) -> None:
+    """Применить paper size и orientation из PageSection к первой docx-секции.
+
+    Если paper неизвестен — оставляем дефолт Word. Если orientation =
+    landscape — width и height меняются местами относительно portrait.
+    """
+    paper = page_section.page.paper
+    if paper not in _PAPER_SIZES_MM:
+        return
+    short, long_ = _PAPER_SIZES_MM[paper]
+    if page_section.page.orientation == "landscape":
+        width, height = long_, short
+    else:
+        width, height = short, long_
+    sect = doc.sections[0]
+    sect.page_width = Mm(width)
+    sect.page_height = Mm(height)
 
 
 def _apply_normal_style(doc: DocxDocument, profile: Profile) -> None:
@@ -344,6 +373,7 @@ def export_docx(document: Document, profile: Profile, output_path: str | Path) -
     # все PageSection кладутся в одну физическую секцию docx).
     if document.page_sections:
         first = document.page_sections[0]
+        _apply_page_size(doc, first)
         _apply_pgnumtype(doc, first)
         if first.footer is not None:
             _write_footer(doc, first.footer.default)

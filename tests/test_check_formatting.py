@@ -242,3 +242,89 @@ def test_f05_profile_param_overrides_default() -> None:
     profile.checks["F.05"].params["format"] = "roman"
     found = [v for v in validate(doc, profile) if v.check_code == "F.05"]
     assert len(found) == 1
+
+
+# --- F.02 -------------------------------------------------------------------
+
+
+def test_f02_registered() -> None:
+    assert "F.02" in registered_checks()
+
+
+def test_f02_a4_no_violation() -> None:
+    from gostforge.model import PageGeometry
+    section = PageSection(
+        id="main",
+        name="m",
+        type="main",
+        page=PageGeometry(paper="A4"),
+    )
+    doc = _doc(section)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.02"]
+    assert found == []
+
+
+def test_f02_a3_violation() -> None:
+    from gostforge.model import PageGeometry
+    section = PageSection(
+        id="main",
+        name="m",
+        type="main",
+        page=PageGeometry(paper="A3"),
+    )
+    doc = _doc(section)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.02"]
+    assert len(found) == 1
+    assert found[0].details["actual"] == "A3"
+
+
+# --- F.03 -------------------------------------------------------------------
+
+
+def test_f03_registered() -> None:
+    assert "F.03" in registered_checks()
+
+
+def test_f03_portrait_no_violation() -> None:
+    from gostforge.model import PageGeometry
+    section = PageSection(
+        id="main",
+        name="m",
+        type="main",
+        page=PageGeometry(orientation="portrait"),
+    )
+    doc = _doc(section)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.03"]
+    assert found == []
+
+
+def test_f03_landscape_violation() -> None:
+    from gostforge.model import PageGeometry
+    section = PageSection(
+        id="main",
+        name="m",
+        type="main",
+        page=PageGeometry(orientation="landscape"),
+    )
+    doc = _doc(section)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.03"]
+    assert len(found) == 1
+
+
+def test_f03_appendix_landscape_no_violation() -> None:
+    """Альбомная ориентация в приложениях допустима."""
+    from gostforge.model import PageGeometry
+    section = PageSection(
+        id="app",
+        name="Приложение А",
+        type="appendix",
+        page=PageGeometry(orientation="landscape"),
+    )
+    doc = _doc(section)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.03"]
+    assert found == []

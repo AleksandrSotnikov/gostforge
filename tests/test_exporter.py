@@ -318,3 +318,26 @@ def test_export_writes_pgnumtype_format(tmp_path: Path) -> None:
     export_docx(doc, profile, out)
     reparsed = parse_docx(out)
     assert reparsed.page_sections[0].page_numbering.format == "roman"
+
+
+def test_export_roundtrip_paper_size_and_orientation(tmp_path: Path) -> None:
+    """Round-trip: A3 landscape должен восстанавливаться."""
+    from gostforge.model import PageGeometry
+    from gostforge.parser import parse_docx
+    from gostforge.profile import load_profile
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            page=PageGeometry(paper="A3", orientation="landscape"),
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+    reparsed = parse_docx(out)
+    page = reparsed.page_sections[0].page
+    assert page.paper == "A3"
+    assert page.orientation == "landscape"
