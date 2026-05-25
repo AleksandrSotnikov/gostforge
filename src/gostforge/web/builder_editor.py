@@ -48,8 +48,12 @@ from gostforge.builder.templates import (
 )
 from gostforge.exporter import export_docx
 from gostforge.model import (
+    Citation,
+    CrossRef,
     Figure,
     Formula,
+    InlineElement,
+    InlineFormula,
     ListBlock,
     LogicalSection,
     Paragraph,
@@ -123,7 +127,7 @@ def _default_state() -> dict[str, Any]:
             {
                 "id": "intro",
                 "heading": "Введение",
-                "blocks": [{"kind": "paragraph", "text": ""}],
+                "blocks": [{"kind": "paragraph", "runs": []}],
                 "subsections": [],
             },
             {
@@ -254,13 +258,21 @@ def _logical_section_to_state(section: LogicalSection) -> dict[str, Any]:
         if isinstance(child, LogicalSection):
             subsections.append(_logical_section_to_state(child))
         elif isinstance(child, Paragraph):
-            text = _inline_to_text(child.content)
             if is_bib:
                 # В разделе «Список ...» параграфы трактуем как ссылки.
+                text = _inline_to_text(child.content)
                 if text.strip():
                     references.append(text)
             else:
-                blocks.append({"kind": "paragraph", "text": text})
+                # Phase 2.5: сохраняем полную inline-структуру через runs.
+                # Параграф из одного «голого» TextRun сериализуется
+                # одинаково и в Phase 2 (text) и в Phase 2.5 (runs).
+                blocks.append(
+                    {
+                        "kind": "paragraph",
+                        "runs": _runs_from_inline(child.content),
+                    }
+                )
         elif isinstance(child, Table):
             blocks.append(
                 {
@@ -390,6 +402,184 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
     return out_path.read_bytes()
 
 
+# --- Inline-конвертеры (Фаза 2.5) -------------------------------------------
+
+
+def _inline_to_run_dict(element: InlineElement) -> dict[str, Any]:
+    """Сериализовать один InlineElement в run-dict для state.
+
+    Формат run-dict совпадает со схемой, описанной в
+    docs/phase-2.5-spec.md §4.2. Атрибуты со значением None
+    в state не пишутся — это уменьшает шум JSON-save.
+    """
+    if isinstance(element, TextRun):
+        result: dict[str, Any] = {"kind": "text", "text": element.text}
+        for attr in ("bold", "italic", "underline", "superscript", "subscript"):
+            value = getattr(element, attr)
+            if value is not None:
+                result[attr] = value
+        if element.font is not None:
+            result["font"] = element.font
+        if element.size_pt is not None:
+            result["size_pt"] = element.size_pt
+        if element.color_hex is not None:
+            result["color_hex"] = element.color_hex
+        return result
+    if isinstance(element, CrossRef):
+        out: dict[str, Any] = {"kind": "xref", "target_id": element.target_id}
+        if element.display_template != "{kind} {num}":
+            out["display_template"] = element.display_template
+        if element.prefix is not None:
+            out["prefix"] = element.prefix
+        return out
+    if isinstance(element, InlineFormula):
+        out2: dict[str, Any] = {"kind": "formula", "latex": element.latex}
+        if element.id is not None:
+            out2["id"] = element.id
+        return out2
+    if isinstance(element, Citation):
+        out3: dict[str, Any] = {"kind": "citation", "source_id": element.source_id}
+        if element.pages is not None:
+            out3["pages"] = element.pages
+        if element.template != "[{n}]":
+            out3["template"] = element.template
+        return out3
+    # Защита от будущих типов: пишем как text-run с repr.
+    return {"kind": "text", "text": str(element)}
+
+
+def _run_dict_to_inline(run: dict[str, Any]) -> InlineElement | None:
+    """Десериализовать run-dict в InlineElement.
+
+    Возвращает None для невалидных/пустых run-dict-ов (например, text-run
+    без поля "text"). Каллер должен игнорировать None.
+    """
+    kind = run.get("kind", "text")
+    if kind == "text":
+        text = run.get("text")
+        if not isinstance(text, str):
+            return None
+        return TextRun(
+            text=text,
+            bold=_opt_bool(run.get("bold")),
+            italic=_opt_bool(run.get("italic")),
+            underline=_opt_bool(run.get("underline")),
+            superscript=_opt_bool(run.get("superscript")),
+            subscript=_opt_bool(run.get("subscript")),
+            font=run.get("font") if isinstance(run.get("font"), str) else None,
+            size_pt=_opt_float(run.get("size_pt")),
+            color_hex=run.get("color_hex") if isinstance(run.get("color_hex"), str) else None,
+        )
+    if kind == "xref":
+        target = run.get("target_id")
+        if not isinstance(target, str) or not target:
+            return None
+        return CrossRef(
+            target_id=target,
+            display_template=run.get("display_template", "{kind} {num}"),
+            prefix=run.get("prefix") if isinstance(run.get("prefix"), str) else None,
+        )
+    if kind == "formula":
+        latex = run.get("latex")
+        if not isinstance(latex, str):
+            return None
+        return InlineFormula(
+            latex=latex,
+            id=run.get("id") if isinstance(run.get("id"), str) else None,
+        )
+    if kind == "citation":
+        source = run.get("source_id")
+        if not isinstance(source, str) or not source:
+            return None
+        return Citation(
+            source_id=source,
+            pages=run.get("pages") if isinstance(run.get("pages"), str) else None,
+            template=run.get("template", "[{n}]"),
+        )
+    return None
+
+
+def _opt_bool(value: Any) -> bool | None:
+    """Привести значение к bool|None для inline-атрибутов TextRun."""
+    if value is None:
+        return None
+    return bool(value)
+
+
+def _opt_float(value: Any) -> float | None:
+    """Привести значение к float|None для size_pt."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _runs_from_inline(content: list[Any]) -> list[dict[str, Any]]:
+    """Сериализовать Paragraph.content в список run-dict для state."""
+    return [_inline_to_run_dict(el) for el in content if el is not None]
+
+
+def _runs_to_inline(runs: list[dict[str, Any]]) -> list[InlineElement]:
+    """Десериализовать список run-dict в list[InlineElement] для модели."""
+    result: list[InlineElement] = []
+    for run in runs:
+        if not isinstance(run, dict):
+            continue
+        element = _run_dict_to_inline(run)
+        if element is not None:
+            result.append(element)
+    return result
+
+
+def _normalize_paragraph_state(block: dict[str, Any]) -> dict[str, Any]:
+    """Нормализовать paragraph-блок из старого формата (text) в новый (runs).
+
+    Старый формат Фазы 2: ``{"kind": "paragraph", "text": "..."}``
+    Новый формат Фазы 2.5: ``{"kind": "paragraph", "runs": [{...}, ...]}``
+
+    Если в блоке уже есть ``runs`` — оставляет как есть. Если есть только
+    ``text`` — конвертирует его в один TextRun-dict. Если нет ни того
+    ни другого — создаёт пустой ``runs = []``.
+
+    Поле ``text`` после нормализации удаляется, чтобы single source of
+    truth был только один.
+    """
+    if block.get("kind") != "paragraph":
+        return block
+    if "runs" not in block:
+        text = block.get("text", "")
+        if not isinstance(text, str):
+            text = ""
+        block["runs"] = [{"kind": "text", "text": text}] if text else []
+    if "text" in block:
+        del block["text"]
+    return block
+
+
+def _normalize_state_paragraphs(state: dict[str, Any]) -> dict[str, Any]:
+    """Рекурсивно нормализовать все параграфы в state (для loaded JSON).
+
+    Проходит по разделам и подразделам, для каждого paragraph-блока
+    вызывает :func:`_normalize_paragraph_state`. Мутирует state на
+    месте и возвращает его же — удобно для chained-вызовов.
+    """
+    for section in state.get("sections") or []:
+        if not isinstance(section, dict):
+            continue
+        for block in section.get("blocks") or []:
+            if isinstance(block, dict):
+                _normalize_paragraph_state(block)
+        for sub in section.get("subsections") or []:
+            if not isinstance(sub, dict):
+                continue
+            for block in sub.get("blocks") or []:
+                if isinstance(block, dict):
+                    _normalize_paragraph_state(block)
+    return state
+
+
 def _apply_blocks(section_builder: SectionBuilder, blocks: list[dict[str, Any]]) -> None:
     """Применить список блоков из state к SectionBuilder.
 
@@ -399,7 +589,14 @@ def _apply_blocks(section_builder: SectionBuilder, blocks: list[dict[str, Any]])
     for block in blocks:
         kind = block.get("kind")
         if kind == "paragraph":
-            section_builder.paragraph(block.get("text", ""))
+            # Phase 2.5: предпочитаем runs (rich), но поддерживаем
+            # legacy text для обратной совместимости с Phase 2 save-ами.
+            runs = block.get("runs")
+            if isinstance(runs, list) and runs:
+                elements = _runs_to_inline(runs)
+                section_builder.rich_paragraph(elements)
+            else:
+                section_builder.paragraph(block.get("text", ""))
         elif kind == "table":
             headers = list(block.get("headers") or [])
             rows = [list(r) for r in (block.get("rows") or [])]
@@ -647,6 +844,9 @@ def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
             st.sidebar.error(f"Не удалось прочитать JSON: {exc}")
         else:
             if isinstance(new_state, dict) and "sections" in new_state:
+                # Phase 2.5: автоматическая миграция параграфов
+                # старого формата (text → runs).
+                _normalize_state_paragraphs(new_state)
                 st.session_state["builder_state"] = new_state
                 st.sidebar.success("Состояние загружено")
                 st.rerun()
@@ -728,11 +928,72 @@ def _render_blocks_editor(blocks: list[dict[str, Any]], *, key_prefix: str) -> N
             _render_single_block(block, blocks, b_idx, key_prefix=key_prefix)
 
 
+def _paragraph_text_only(block: dict[str, Any]) -> str:
+    """Склеить только text-run-ы параграфа (для редактирования в text_area).
+
+    inline-элементы (xref/formula/citation) намеренно пропускаются —
+    их редактор появится в шаге 6.
+    """
+    runs = block.get("runs")
+    if isinstance(runs, list):
+        return "".join(
+            str(r.get("text", ""))
+            for r in runs
+            if isinstance(r, dict) and r.get("kind", "text") == "text"
+        )
+    text = block.get("text")
+    return str(text) if isinstance(text, str) else ""
+
+
+def _extract_non_text_runs(block: dict[str, Any]) -> list[dict[str, Any]]:
+    """Вернуть все inline-элементы параграфа, кроме text-run-ов.
+
+    Используется в UI, чтобы при редактировании текста не потерять
+    уже существующие xref/formula/citation элементы.
+    """
+    runs = block.get("runs")
+    if not isinstance(runs, list):
+        return []
+    return [
+        r
+        for r in runs
+        if isinstance(r, dict) and r.get("kind", "text") != "text"
+    ]
+
+
+def _paragraph_preview_text(block: dict[str, Any]) -> str:
+    """Вернуть видимый текст параграфа независимо от формата (text vs runs).
+
+    Phase 2.5: для нового формата ``runs`` склеивает текст всех text-run-ов
+    и подставляет placeholder-метки для inline-формул/ссылок/цитат.
+    Phase 2 legacy: возвращает поле ``text`` как есть.
+    """
+    runs = block.get("runs")
+    if isinstance(runs, list):
+        parts: list[str] = []
+        for run in runs:
+            if not isinstance(run, dict):
+                continue
+            kind = run.get("kind", "text")
+            if kind == "text":
+                parts.append(str(run.get("text", "")))
+            elif kind == "xref":
+                prefix = run.get("prefix") or ""
+                parts.append(f"{prefix}[→ {run.get('target_id', '?')}]")
+            elif kind == "formula":
+                parts.append(f"[∫ {run.get('latex', '')}]")
+            elif kind == "citation":
+                parts.append(f"[« {run.get('source_id', '?')}]")
+        return "".join(parts)
+    text = block.get("text")
+    return str(text) if isinstance(text, str) else ""
+
+
 def _block_label(block: dict[str, Any]) -> str:
     """Короткая метка блока для заголовка expander."""
     kind = block.get("kind", "?")
     if kind == "paragraph":
-        text = block.get("text", "").strip()
+        text = _paragraph_preview_text(block).strip()
         snippet = (text[:60] + "…") if len(text) > 60 else text
         return f"Параграф: {snippet or '(пусто)'}"
     if kind == "table":
@@ -760,12 +1021,35 @@ def _render_single_block(
     base = f"{key_prefix}_b{b_idx}"
 
     if kind == "paragraph":
-        block["text"] = st.text_area(
+        # Phase 2.5: до появления полноценного inline-редактора (шаг 6)
+        # параграф редактируется единым text_area; на сохранении text
+        # пересобирается в один TextRun-dict, а имеющиеся inline-элементы
+        # (xref/formula/citation, например, из загруженного docx)
+        # сохраняются в КОНЦЕ runs и показываются readonly. Это
+        # гарантирует, что мы не теряем данные между шагами 5 и 6.
+        non_text_runs = _extract_non_text_runs(block)
+        current_text = _paragraph_text_only(block)
+        new_text = st.text_area(
             "Текст",
-            value=block.get("text", ""),
+            value=current_text,
             key=f"{base}_text",
             height=120,
         )
+        new_runs: list[dict[str, Any]] = []
+        if new_text:
+            new_runs.append({"kind": "text", "text": new_text})
+        new_runs.extend(non_text_runs)
+        block["runs"] = new_runs
+        # Гарантированно убираем legacy-поле text — single source of truth.
+        block.pop("text", None)
+        if non_text_runs:
+            st.caption(
+                "В этом параграфе есть inline-элементы (формулы / ссылки / "
+                "цитаты), которые сейчас не редактируются здесь, но "
+                "сохраняются при пересборке .docx."
+            )
+            for nt in non_text_runs:
+                st.code(json.dumps(nt, ensure_ascii=False), language="json")
     elif kind == "table":
         # Простейший табличный редактор: два text_area — заголовки и строки.
         # Это сознательно низкоуровнево: data_editor в Streamlit требует
@@ -851,7 +1135,10 @@ def _render_add_block_buttons(blocks: list[dict[str, Any]], *, key_prefix: str) 
     """Кнопки «+ Параграф», «+ Таблица», «+ Рисунок», «+ Список», «+ Формула»."""
     cols = st.columns(5)
     if cols[0].button("+ Параграф", key=f"{key_prefix}_add_p"):
-        blocks.append({"kind": "paragraph", "text": ""})
+        # Phase 2.5: новые параграфы создаются в формате runs.
+        # UI-редактор inline-элементов появится в шаге 6; пока
+        # `_render_single_block` толерантно показывает оба формата.
+        blocks.append({"kind": "paragraph", "runs": []})
         st.rerun()
     if cols[1].button("+ Таблица", key=f"{key_prefix}_add_t"):
         blocks.append(
