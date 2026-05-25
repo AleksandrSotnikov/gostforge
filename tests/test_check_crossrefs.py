@@ -364,3 +364,60 @@ def test_c03_paren_reference_violation() -> None:
     assert "7" in numbers
 
 
+# --- C.05 -------------------------------------------------------------------
+
+
+def test_c05_registered() -> None:
+    assert "C.05" in registered_checks()
+
+
+def test_c05_reference_resolves_no_violation() -> None:
+    """Ссылка «приложение А» при наличии приложения А — нет нарушения."""
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А")],
+        children=[Paragraph(id="p-app", content=[TextRun(text="...")])],
+    )
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Подробности см. приложение А.")],
+    )
+    doc = _doc_with_content([para, app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "C.05"]
+    assert found == []
+
+
+def test_c05_reference_to_missing_appendix_violation() -> None:
+    """Ссылка «приложение Б» при отсутствии приложения Б — нарушение."""
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А")],
+        children=[Paragraph(id="p-app", content=[TextRun(text="...")])],
+    )
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="См. приложение Б для деталей.")],
+    )
+    doc = _doc_with_content([para, app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "C.05"]
+    assert len(found) == 1
+    assert found[0].details["letter"] == "Б"
+
+
+def test_c05_abbreviated_form_resolves() -> None:
+    """«прил. А» — корректная разрешаемая ссылка."""
+    app = LogicalSection(
+        id="app-a",
+        level=1,
+        heading=[TextRun(text="Приложение А")],
+        children=[Paragraph(id="p-app", content=[TextRun(text="...")])],
+    )
+    para = Paragraph(id="p-1", content=[TextRun(text="См. прил. А.")])
+    doc = _doc_with_content([para, app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "C.05"]
+    assert found == []

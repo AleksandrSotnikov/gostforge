@@ -180,6 +180,7 @@ checks:
   C.02: {enabled: true}
   C.03: {enabled: true}
   C.04: {enabled: true}
+  C.05: {enabled: true}
   P.01:
     enabled: true
     params:

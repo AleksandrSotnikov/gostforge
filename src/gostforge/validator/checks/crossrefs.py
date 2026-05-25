@@ -489,7 +489,92 @@ def check_formula_references_resolve(
     return violations
 
 
+# --- C.05 — ссылки на приложения разрешаются ------------------------------
+
+
+# Шаблон ссылки на приложение в тексте: «приложение X», «прил. X».
+# X — одна РУССКАЯ ЗАГЛАВНАЯ буква.
+_APPENDIX_REF_RE = re.compile(
+    r"(?:приложени[еияй]|прил\.)\s+([А-Я])\b",
+    re.IGNORECASE,
+)
+# Заголовок секции «Приложение X» — для построения множества существующих.
+_APPENDIX_HEADING_RE = re.compile(r"^\s*Приложение\s+([А-Я])\b")
+
+
+def _iter_logical_sections(
+    items: Sequence[LogicalSection | Block],
+) -> list[LogicalSection]:
+    """Рекурсивно собрать все LogicalSection."""
+    result: list[LogicalSection] = []
+    for item in items:
+        if isinstance(item, LogicalSection):
+            result.append(item)
+            result.extend(_iter_logical_sections(item.children))
+    return result
+
+
+def _existing_appendix_letters(document: Document) -> set[str]:
+    """Множество букв приложений из заголовков LogicalSection."""
+    letters: set[str] = set()
+    for ps in document.page_sections:
+        for section in _iter_logical_sections(ps.content):
+            if section.level != 1:
+                continue
+            heading = "".join(
+                el.text for el in section.heading if isinstance(el, TextRun)
+            )
+            match = _APPENDIX_HEADING_RE.match(heading)
+            if match:
+                letters.add(match.group(1).upper())
+    return letters
+
+
+@register("C.05")
+def check_appendix_references_resolve(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Каждая ссылка «приложение X» / «прил. X» должна указывать на существующее приложение.
+
+    X — русская заглавная буква. Если в документе нет LogicalSection.level==1
+    с заголовком «Приложение X» — Violation на ссылку.
+    """
+    _ = profile
+    violations: list[Violation] = []
+    existing = _existing_appendix_letters(document)
+
+    for paragraph in _all_paragraphs(document):
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        for match in _APPENDIX_REF_RE.finditer(text):
+            letter = match.group(1).upper()
+            if letter in existing:
+                continue
+            violations.append(
+                Violation(
+                    check_code="C.05",
+                    severity="error",
+                    message=(
+                        f"Ссылка на приложение {letter} в абзаце "
+                        f"«{_preview(text)}» не находит соответствующего "
+                        f"приложения"
+                    ),
+                    location=f"paragraph[{paragraph.id}]",
+                    suggestion=(
+                        f"Проверить букву: приложения {letter} в документе нет. "
+                        f"Возможно, опечатка или приложение не добавлено."
+                    ),
+                    details={"paragraph_id": paragraph.id, "letter": letter},
+                )
+            )
+
+    return violations
+
+
 __all__ = [
+    "check_appendix_references_resolve",
     "check_bibliography_references_resolve",
     "check_figure_references_resolve",
     "check_formula_references_resolve",
