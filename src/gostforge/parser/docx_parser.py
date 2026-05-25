@@ -33,6 +33,7 @@ from gostforge.model import (
     Document,
     DocumentMetadata,
     Figure,
+    Formula,
     HeaderConfig,
     InlineElement,
     ListBlock,
@@ -55,7 +56,11 @@ if TYPE_CHECKING:
 
 # Пространство имён OOXML wordprocessingml
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-NSMAP = {"w": W_NS}
+M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+NSMAP = {"w": W_NS, "m": M_NS}
+
+# Шаблон номера формулы в скобках в конце текста параграфа: «(3)» или «(3.1)».
+_FORMULA_NUMBER_RE = re.compile(r"\((\d+(?:\.\d+)?)\)\s*$")
 
 # Соответствие WD_ALIGN_PARAGRAPH → строковая литералка модели
 _ALIGN_MAP: dict[int, ParagraphAlignment] = {
@@ -398,6 +403,7 @@ class _Counters:
         self.figure = 0
         self.table = 0
         self.list = 0
+        self.formula = 0
 
 
 # Имена Word-стилей, обозначающих элемент списка (case-insensitive).
@@ -539,13 +545,58 @@ def _iter_logical_sections(
 
 
 def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
-    """Конвертировать <w:p> в Figure (если внутри есть <w:drawing>) либо Paragraph."""
+    """Конвертировать <w:p> в Figure / Formula / Paragraph.
+
+    Приоритет распознавания:
+    1. <w:drawing> → Figure (рисунок).
+    2. <m:oMath> или <m:oMathPara> → Formula (формула).
+    3. Иначе — обычный Paragraph.
+    """
     drawings = dp._p.findall(f".//{{{W_NS}}}drawing")
     if drawings:
         counters.figure += 1
         return Figure(id=f"fig-{counters.figure}", image_path="", caption=[])
+    omml_text = _extract_omml_text(dp._p)
+    if omml_text is not None:
+        counters.formula += 1
+        return Formula(
+            id=f"formula-{counters.formula}",
+            latex=omml_text,
+            number=_extract_formula_number(dp),
+        )
     counters.paragraph += 1
     return _build_paragraph(dp, idx=counters.paragraph)
+
+
+def _extract_omml_text(p_elem: Any) -> str | None:
+    """Склейка `<m:t>` элементов из всех `<m:oMath>` в параграфе.
+
+    Это не настоящий LaTeX — Фаза 1 ограничивается видимым математическим
+    текстом (операнды и константы). Если ни одного `<m:oMath>` в параграфе
+    нет, возвращаем None.
+    """
+    omath_elements = p_elem.findall(f".//{{{M_NS}}}oMath")
+    if not omath_elements:
+        return None
+    parts: list[str] = []
+    for omath in omath_elements:
+        for t in omath.findall(f".//{{{M_NS}}}t"):
+            if t.text:
+                parts.append(t.text)
+    return "".join(parts)
+
+
+def _extract_formula_number(dp: DocxParagraph) -> int | None:
+    """Извлечь номер формулы из паттерна «(N)» / «(N.M)» в конце параграфа."""
+    text = dp.text or ""
+    match = _FORMULA_NUMBER_RE.search(text)
+    if match is None:
+        return None
+    raw = match.group(1).split(".")[0]
+    try:
+        return int(raw)
+    except ValueError:
+        return None
 
 
 def _build_table(dtable: DocxTable, *, idx: int) -> Table:

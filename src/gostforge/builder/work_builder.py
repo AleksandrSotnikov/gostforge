@@ -78,6 +78,7 @@ class WorkBuilder:
         self._id_counters: dict[str, itertools.count[int]] = {}
         self._figure_counter = itertools.count(1)
         self._table_counter = itertools.count(1)
+        self._formula_counter = itertools.count(1)
 
     # --- Внутренние утилиты для SectionBuilder ------------------------------
 
@@ -90,6 +91,9 @@ class WorkBuilder:
 
     def _next_table_number(self) -> int:
         return next(self._table_counter)
+
+    def _next_formula_number(self) -> int:
+        return next(self._formula_counter)
 
     def _set_active(self, builder: SectionBuilder) -> None:
         self._active = builder

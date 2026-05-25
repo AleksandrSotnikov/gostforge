@@ -164,3 +164,6 @@ checks:
   K.03: {enabled: true, params: {expected_start_value: 3}}
   K.04: {enabled: true, params: {allow_restart_in_appendix: false}}
   K.05: {enabled: true}
+  M.01: {enabled: true, params: {required: false}}
+  M.03: {enabled: true}
+  M.04: {enabled: true}

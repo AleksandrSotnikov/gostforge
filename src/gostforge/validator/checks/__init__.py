@@ -23,6 +23,7 @@
 from . import (  # noqa: F401
     figures,
     formatting,
+    formulas,
     headings,
     page_sections,
     references,
