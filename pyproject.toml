@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gostforge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Конструктор и нормоконтролёр документов по ГОСТу"
 readme = "README.md"
 license = {text = "MIT"}
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["gost", "docx", "normocontrol", "thesis", "coursework"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Education",
     "License :: OSI Approved :: MIT License",
     "Natural Language :: Russian",
