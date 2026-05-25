@@ -431,3 +431,11 @@ def test_b02_registered() -> None:
 def test_b04_registered() -> None:
     """Заглушка B.04 зарегистрирована в реестре."""
     assert "B.04" in registered_checks()
+
+
+# --- B.05 (заглушка) -----------------------------------------------------
+
+
+def test_b05_registered() -> None:
+    """Заглушка B.05 зарегистрирована в реестре."""
+    assert "B.05" in registered_checks()

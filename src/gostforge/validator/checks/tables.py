@@ -92,6 +92,22 @@ def check_table_continuation_header(
     return []
 
 
+@register("B.05")
+def check_table_header_repeats(
+    document: Document,  # noqa: ARG001
+    profile: Profile,  # noqa: ARG001
+) -> list[Violation]:
+    """Шапка таблицы должна повторяться при переносе на новую страницу (заглушка Фазы 2).
+
+    В docx это атрибут `<w:tblHeader/>` у первой строки таблицы. Парсер
+    на Фазе 2 не сохраняет это в модели Table. Когда модель таблицы
+    получит поле `header_repeats: bool`, здесь появится проверка: если
+    таблица потенциально занимает больше страницы и header_repeats != True
+    — Violation.
+    """
+    return []
+
+
 @register("B.01")
 def check_table_has_caption(
     document: Document, profile: Profile  # noqa: ARG001
@@ -349,6 +365,7 @@ __all__ = [
     "check_table_caption_format",
     "check_table_continuation_header",
     "check_table_has_caption",
+    "check_table_header_repeats",
     "check_table_numbering_continuous",
     "check_table_referenced_in_text",
 ]
