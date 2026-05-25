@@ -305,6 +305,52 @@ def check_heading_numbering_continuous(
     return violations
 
 
+@register("H.05")
+def check_heading_hierarchy(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Иерархия заголовков не должна иметь пропусков уровней.
+
+    Например, недопустимо: после level=1 сразу level=3 (минуя level=2).
+    """
+    violations: list[Violation] = []
+    sections: list[LogicalSection] = []
+    for ps in document.page_sections:
+        sections.extend(iter_logical_sections(ps.content))
+
+    prev_section: LogicalSection | None = None
+    for section in sections:
+        if prev_section is not None and section.level > prev_section.level + 1:
+            cur_text = _heading_text(section.heading).strip()
+            prev_text = _heading_text(prev_section.heading).strip()
+            missing = prev_section.level + 1
+            violations.append(
+                Violation(
+                    check_code="H.05",
+                    severity="error",
+                    message=(
+                        f"Заголовок «{cur_text}» (уровень {section.level}) "
+                        f"идёт сразу после заголовка «{prev_text}» "
+                        f"(уровень {prev_section.level}) — пропущен уровень {missing}"
+                    ),
+                    location=f"page_sections.*.logical_section[{section.id}]",
+                    suggestion=(
+                        f"Добавьте промежуточный заголовок уровня {missing} "
+                        f"или понизьте уровень «{cur_text}» до {missing}"
+                    ),
+                    details={
+                        "section_id": section.id,
+                        "level": str(section.level),
+                        "prev_level": str(prev_section.level),
+                    },
+                )
+            )
+        prev_section = section
+
+    return violations
+
+
 def _violation(
     code: str,
     message: str,
@@ -326,6 +372,7 @@ def _violation(
 __all__ = [
     "all_logical_sections",
     "check_heading_1_format",
+    "check_heading_hierarchy",
     "check_heading_no_terminal_punctuation",
     "check_heading_number_no_trailing_dot",
     "check_heading_numbering_continuous",

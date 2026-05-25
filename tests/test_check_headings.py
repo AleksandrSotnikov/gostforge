@@ -314,3 +314,69 @@ def test_h04_sublevels_ignored() -> None:
     assert found == []
 
 
+# --- H.05 (иерархия заголовков не нарушена) -------------------------------
+
+
+def test_h05_registered() -> None:
+    assert "H.05" in registered_checks()
+
+
+def test_h05_correct_hierarchy_no_violation() -> None:
+    inner = _heading("1.1 Подраздел", level=2)
+    outer = LogicalSection(
+        id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[inner]
+    )
+    doc = _doc([outer])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.05"]
+    assert found == []
+
+
+def test_h05_skip_level_violation() -> None:
+    """После level=1 сразу level=3 — нарушение."""
+    deep = _heading("1.1.1 Глубокий", level=3)
+    outer = LogicalSection(
+        id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[deep]
+    )
+    doc = _doc([outer])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.05"]
+    assert len(found) == 1
+    assert "пропущен уровень 2" in found[0].message
+
+
+def test_h05_multiple_skips_violations() -> None:
+    """Каждый перескок — отдельный Violation."""
+    deep_a = _heading("Глубокий A", level=3)
+    deep_b = _heading("Глубокий B", level=3)
+    outer_a = LogicalSection(
+        id="oa", level=1, heading=[TextRun(text="A")], children=[deep_a]
+    )
+    outer_b = LogicalSection(
+        id="ob", level=1, heading=[TextRun(text="B")], children=[deep_b]
+    )
+    doc = _doc([outer_a, outer_b])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.05"]
+    assert len(found) == 2
+
+
+def test_h05_decrease_level_ok() -> None:
+    """Сначала level=2, потом level=1 — это нормально (уменьшение разрешено)."""
+    inner = _heading("1.1 Подраздел", level=2)
+    outer1 = LogicalSection(
+        id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[inner]
+    )
+    outer2 = LogicalSection(id="o2", level=1, heading=[TextRun(text="2 Проект")])
+    doc = _doc([outer1, outer2])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.05"]
+    assert found == []
+
+
+def test_h05_first_section_can_be_level_2() -> None:
+    """Если самый первый раздел — level=2 (без предыдущего), это не нарушение."""
+    doc = _doc([_heading("Подраздел", level=2)])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.05"]
+    assert found == []
