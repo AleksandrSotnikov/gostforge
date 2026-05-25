@@ -199,6 +199,42 @@ def check_page_numbering_start(document: Document, profile: Profile) -> list[Vio
     return violations
 
 
+@register("F.05")
+def check_page_number_format(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка формата нумерации страниц.
+
+    По ГОСТ 7.32-2017 — арабские цифры. Параметр `checks.F.05.params.format`
+    может переопределить ожидание: `arabic` (по умолчанию), `roman`,
+    `uppercase_letter`. Проверка применяется только к секциям, где
+    `page_numbering.visible = True`.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("F.05")
+    expected = "arabic"
+    if config and config.params.get("format"):
+        expected = str(config.params["format"])
+
+    for section in document.page_sections:
+        numbering = section.page_numbering
+        if not numbering.visible:
+            continue
+        if numbering.format == expected:
+            continue
+        violations.append(
+            Violation(
+                check_code="F.05",
+                severity="error",
+                message=(
+                    f"В секции «{section.name}» нумерация в формате "
+                    f"«{numbering.format}», ожидается «{expected}»"
+                ),
+                location=f"page_sections.{section.id}.page_numbering.format",
+                suggestion=f"Установить формат нумерации «{expected}» (арабские цифры)",
+                details={"expected": expected, "actual": numbering.format},
+            )
+        )
+    return violations
+
+
 # TODO: F.02 — формат бумаги
 # TODO: F.03 — ориентация
-# TODO: F.05 — формат номера

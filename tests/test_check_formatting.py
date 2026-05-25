@@ -177,3 +177,68 @@ def test_f06_profile_param_overrides_default() -> None:
     profile.checks["F.06"].params["start_value"] = 2
     found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
     assert found == []
+
+
+# --- F.05 -------------------------------------------------------------------
+
+
+def test_f05_registered() -> None:
+    assert "F.05" in registered_checks()
+
+
+def test_f05_arabic_no_violation() -> None:
+    """arabic — стандарт, нет нарушения."""
+    section = PageSection(
+        id="main",
+        name="m",
+        type="main",
+        page_numbering=PageNumberingConfig(visible=True, format="arabic"),
+    )
+    doc = _doc(section)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.05"]
+    assert found == []
+
+
+def test_f05_roman_violation() -> None:
+    """Римская нумерация в основном тексте — нарушение."""
+    section = PageSection(
+        id="main",
+        name="m",
+        type="main",
+        page_numbering=PageNumberingConfig(visible=True, format="roman"),
+    )
+    doc = _doc(section)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.05"]
+    assert len(found) == 1
+    assert found[0].details["actual"] == "roman"
+
+
+def test_f05_skipped_when_numbering_invisible() -> None:
+    """Титульный лист — нумерация отключена, проверку не запускаем."""
+    section = PageSection(
+        id="title",
+        name="Титул",
+        type="title",
+        page_numbering=PageNumberingConfig(visible=False, format="roman"),
+    )
+    doc = _doc(section)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "F.05"]
+    assert found == []
+
+
+def test_f05_profile_param_overrides_default() -> None:
+    """Профиль может потребовать roman — тогда arabic будет нарушением."""
+    section = PageSection(
+        id="main",
+        name="m",
+        type="main",
+        page_numbering=PageNumberingConfig(visible=True, format="arabic"),
+    )
+    doc = _doc(section)
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["F.05"].params["format"] = "roman"
+    found = [v for v in validate(doc, profile) if v.check_code == "F.05"]
+    assert len(found) == 1

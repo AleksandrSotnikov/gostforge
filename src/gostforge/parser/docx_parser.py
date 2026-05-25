@@ -160,6 +160,11 @@ def _extract_page_section(docx_doc: DocxDocument) -> PageSection:
         page_section.page_numbering.start_mode = "start_at"
         page_section.page_numbering.start_value = start_value
 
+    # Формат нумерации: <w:pgNumType w:fmt="decimal|upperRoman|..."/>.
+    fmt = _extract_page_number_format(sect)
+    if fmt is not None:
+        page_section.page_numbering.format = fmt
+
     footer_config = _extract_footer(sect)
     if footer_config is not None:
         page_section.footer = footer_config
@@ -186,6 +191,41 @@ def _extract_page_number_start(sect: DocxSection) -> int | None:
         return int(start_attr)
     except (TypeError, ValueError):
         return None
+
+
+# Соответствие OOXML w:fmt значениям модели PageNumberingConfig.format.
+# OOXML поддерживает много форматов (decimalZero, hindiNumbers, и т.д.),
+# но в модели мы фиксируем только три обиходных. Остальные значения
+# отображаем в ближайший аналог (decimal → arabic, прочие — None).
+_PAGE_FMT_MAP: dict[str, Literal["arabic", "roman", "uppercase_letter"]] = {
+    "decimal": "arabic",
+    "decimalZero": "arabic",
+    "lowerRoman": "roman",
+    "upperRoman": "roman",
+    "lowerLetter": "uppercase_letter",
+    "upperLetter": "uppercase_letter",
+}
+
+
+def _extract_page_number_format(
+    sect: DocxSection,
+) -> Literal["arabic", "roman", "uppercase_letter"] | None:
+    """Прочитать <w:pgNumType w:fmt="..."/> и вернуть значение для модели.
+
+    Возвращает None, если элемент или атрибут отсутствуют, либо если
+    OOXML-значение не покрывается моделью.
+    """
+    sect_pr = getattr(sect, "_sectPr", None)
+    if sect_pr is None:
+        return None
+    pg_num_type = sect_pr.find(f"{{{W_NS}}}pgNumType")
+    if pg_num_type is None:
+        return None
+    fmt_attr = pg_num_type.get(f"{{{W_NS}}}fmt")
+    if fmt_attr is None:
+        return None
+    return _PAGE_FMT_MAP.get(fmt_attr)
+
 
 
 def _length_to_mm(length: object | None) -> float:

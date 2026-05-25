@@ -275,10 +275,26 @@ def _write_footer(doc: DocxDocument, footer_template: ContentTemplate) -> None:
         _write_template_into_footer_paragraph(para, content)
 
 
-def _apply_pgnumtype_start(doc: DocxDocument, page_section: PageSection) -> None:
-    """Если в модели задано start_at, прописать <w:pgNumType w:start="N"/> в sectPr."""
+# Обратное отображение модели в OOXML w:fmt (см. парсер _PAGE_FMT_MAP).
+_PAGE_FMT_OOXML = {
+    "arabic": "decimal",
+    "roman": "upperRoman",
+    "uppercase_letter": "upperLetter",
+}
+
+
+def _apply_pgnumtype(doc: DocxDocument, page_section: PageSection) -> None:
+    """Прописать <w:pgNumType w:start="N" w:fmt="..."/> в sectPr.
+
+    Атрибут `w:start` пишется только при `start_mode = "start_at"` и
+    наличии `start_value`. Атрибут `w:fmt` пишется, если формат отличается
+    от арабских цифр (Word-дефолт), либо если хоть один из атрибутов
+    нужен — в этом случае пишем оба.
+    """
     numbering = page_section.page_numbering
-    if numbering.start_mode != "start_at" or numbering.start_value is None:
+    needs_start = numbering.start_mode == "start_at" and numbering.start_value is not None
+    needs_fmt = numbering.format != "arabic"
+    if not needs_start and not needs_fmt:
         return
     sect = doc.sections[0]
     sect_pr = getattr(sect, "_sectPr", None)
@@ -288,7 +304,10 @@ def _apply_pgnumtype_start(doc: DocxDocument, page_section: PageSection) -> None
     for existing in sect_pr.findall(f"{{{W_NS}}}pgNumType"):
         sect_pr.remove(existing)
     pg = etree.SubElement(sect_pr, f"{{{W_NS}}}pgNumType")
-    pg.set(f"{{{W_NS}}}start", str(numbering.start_value))
+    if needs_start:
+        pg.set(f"{{{W_NS}}}start", str(numbering.start_value))
+    if needs_fmt:
+        pg.set(f"{{{W_NS}}}fmt", _PAGE_FMT_OOXML.get(numbering.format, "decimal"))
 
 
 def _write_items(doc: DocxDocument, items: Sequence[LogicalSection | Block]) -> None:
@@ -325,7 +344,7 @@ def export_docx(document: Document, profile: Profile, output_path: str | Path) -
     # все PageSection кладутся в одну физическую секцию docx).
     if document.page_sections:
         first = document.page_sections[0]
-        _apply_pgnumtype_start(doc, first)
+        _apply_pgnumtype(doc, first)
         if first.footer is not None:
             _write_footer(doc, first.footer.default)
 

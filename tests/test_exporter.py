@@ -297,3 +297,24 @@ def test_export_roundtrip_preserves_f04_and_f06(tmp_path: Path) -> None:
     codes = {v.check_code for v in errors}
     assert "F.04" not in codes
     assert "F.06" not in codes
+
+
+def test_export_writes_pgnumtype_format(tmp_path: Path) -> None:
+    """Экспортёр пишет w:fmt в pgNumType, если формат отличается от arabic."""
+    from gostforge.model import PageNumberingConfig
+    from gostforge.parser import parse_docx
+    from gostforge.profile import load_profile
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="m",
+            type="main",
+            page_numbering=PageNumberingConfig(visible=True, format="roman"),
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+    reparsed = parse_docx(out)
+    assert reparsed.page_sections[0].page_numbering.format == "roman"

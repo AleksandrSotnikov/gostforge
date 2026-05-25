@@ -108,7 +108,7 @@ checks:
   F.01: {enabled: true}
   F.02: {enabled: true}
   F.04: {enabled: true, params: {position: bottom_center}}
-  F.05: {enabled: true}
+  F.05: {enabled: true, params: {format: arabic}}
   F.06: {enabled: true, params: {start_value: 3}}
   T.01: {enabled: true, params: {font: "Times New Roman"}}
   T.02: {enabled: true, params: {body_size: 14, caption_size: 12, footnote_size: 10}}
