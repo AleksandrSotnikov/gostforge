@@ -44,7 +44,13 @@
       распознаётся для F.04 в режиме `top_*`.
 - [x] **Конструктор работ** (`gostforge.builder`): WorkBuilder / SectionBuilder
       с fluent API, шаблоны coursework / bachelor_thesis / research_report,
-      команда `gostforge new`. Собранный документ проходит ≥29 из 30 проверок.
+      команда `gostforge new`. Методы `.image()` (с реальной вставкой PNG/JPG),
+      `.list(ordered=True|False)`. Парсер распознаёт списки.
+- [x] **Аннотация .docx комментариями** (`gostforge annotate`): inline-маркеры
+      `[CODE: message]` в проблемных параграфах исходного документа.
+- [x] **+7 проверок**: H.02, T.12, T.13, I.05, I.06, B.08, B.09. **Итого 37
+      проверок** в реестре.
+- [x] Новый профиль `gost-r-2.105-2019.yaml` (ЕСКД, узкое правое поле).
 - [x] Drag-and-drop UI на Streamlit: `gostforge ui` запускает локальный
       веб-интерфейс с загрузкой нескольких .docx, таблицей нарушений
       и скачиванием Markdown/Excel-отчётов.
