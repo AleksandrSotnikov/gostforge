@@ -161,6 +161,15 @@ Builder автоматически расставляет `page_break_before` у
 `research_report_template`. CLI-команда: `gostforge new my-coursework.docx
 --template coursework --title "..."`.
 
+### PDF-Exporter (`src/gostforge/pdf_exporter.py`)
+
+Тонкая обёртка над LibreOffice headless: `convert_to_pdf(input, output)`
+вызывает `soffice --headless --convert-to pdf` во временной директории
+и переносит результат в указанный путь. Если LibreOffice не установлен —
+поднимается `LibreOfficeNotFoundError` с подсказкой по установке.
+Изолирован от парсера и экспортёра — это отдельный артефакт «финальной»
+сборки документа после автофиксов.
+
 ### CLI (`src/gostforge/cli.py`)
 
 ```bash
@@ -168,13 +177,15 @@ gostforge check work.docx --profile gost-7.32-2017 [--report file.xlsx|.md] [--q
 gostforge fix work.docx -o fixed.docx [--only T.08] [--dry-run]
 gostforge stats work.docx
 gostforge new out.docx --template coursework --title "..." --year 2026
+gostforge pdf work.docx -o work.pdf [--timeout 60]
 gostforge profiles list|show <id>
 gostforge checks
 gostforge ui
 ```
 
 Exit codes: `0` — нарушений нет; `1` — найдены error; `2` — ошибка
-загрузки профиля.
+загрузки профиля; для `pdf` дополнительно: `3` — LibreOffice не найден,
+`4` — таймаут, `5` — LibreOffice вернул ошибку.
 
 ### Web (`src/gostforge/web/`)
 

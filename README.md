@@ -166,6 +166,17 @@ from gostforge.builder import work
 
 Документ, собранный конструктором, проходит ≥29 из 30 проверок из коробки.
 
+### PDF-экспорт
+
+```bash
+# Требует установленный LibreOffice (sudo apt install libreoffice)
+gostforge pdf work.docx -o work.pdf
+```
+
+Использует LibreOffice headless для конвертации. Полезно для генерации
+финальной версии работы после автофиксов. Exit codes: `3` — LibreOffice
+не найден; `4` — таймаут; `5` — LibreOffice вернул ошибку.
+
 Планируется в следующих фазах:
 
 ```bash

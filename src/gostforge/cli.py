@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -540,8 +541,6 @@ def ui(host: str, port: int) -> None:
         )
         sys.exit(2)
 
-    import subprocess
-
     # Импортируем модуль приложения, чтобы получить путь до его файла.
     # Импорт обёрнут в try/except: в нём, помимо streamlit, могут быть
     # ошибки конфигурации, которые имеет смысл показать.
@@ -621,6 +620,49 @@ def annotate(path: Path, output: Path, profile: str) -> None:
     n = annotate_docx(path, output, prof)
     click.echo(f"Создано пометок: {n}")
     click.echo(f"Аннотированный документ сохранён: {output}")
+
+
+@main.command()
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить .pdf.",
+)
+@click.option(
+    "--timeout",
+    type=float,
+    default=60.0,
+    help="Таймаут конвертации в секундах.",
+)
+def pdf(path: Path, output: Path, timeout: float) -> None:
+    """Конвертировать .docx → .pdf через LibreOffice headless.
+
+    Требует установленного LibreOffice. Полезно для генерации
+    PDF-версии работы после применения автофиксов.
+    """
+    from gostforge.pdf_exporter import LibreOfficeNotFoundError, convert_to_pdf
+
+    try:
+        result = convert_to_pdf(path, output, timeout=timeout)
+    except LibreOfficeNotFoundError as e:
+        click.echo(f"Ошибка: {e}", err=True)
+        sys.exit(3)
+    except subprocess.TimeoutExpired:
+        click.echo(
+            f"Конвертация прервана по таймауту ({timeout}s)", err=True
+        )
+        sys.exit(4)
+    except subprocess.CalledProcessError as e:
+        click.echo(
+            f"LibreOffice вернул ошибку (код {e.returncode}):", err=True
+        )
+        stderr = e.stderr or b""
+        click.echo(stderr.decode("utf-8", errors="replace"), err=True)
+        sys.exit(5)
+    click.echo(f"PDF сохранён: {result}")
 
 
 @main.command()

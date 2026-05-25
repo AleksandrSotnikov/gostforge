@@ -1,3 +1,5 @@
+# ruff: noqa: RUF001, RUF002, RUF003
+
 """Конвертация .docx → .pdf через LibreOffice headless.
 
 Требует установленного LibreOffice (``libreoffice`` / ``soffice``).

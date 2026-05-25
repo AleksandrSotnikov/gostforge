@@ -1,3 +1,5 @@
+# ruff: noqa: RUF002
+
 """Тесты для ``gostforge.pdf_exporter``.
 
 Все тесты НЕ вызывают реальный LibreOffice — внешние процессы замоканы.
@@ -21,9 +23,11 @@ from gostforge.pdf_exporter import (
 
 def test_find_soffice_raises_when_not_in_path() -> None:
     """Если ни soffice, ни libreoffice не найдены — поднимается LibreOfficeNotFoundError."""
-    with patch("gostforge.pdf_exporter.shutil.which", return_value=None):
-        with pytest.raises(LibreOfficeNotFoundError) as exc_info:
-            _find_soffice()
+    with (
+        patch("gostforge.pdf_exporter.shutil.which", return_value=None),
+        pytest.raises(LibreOfficeNotFoundError) as exc_info,
+    ):
+        _find_soffice()
     # Сообщение должно содержать подсказку по установке.
     assert "LibreOffice" in str(exc_info.value)
     assert "apt install" in str(exc_info.value) or "brew" in str(exc_info.value)
@@ -138,9 +142,9 @@ def test_convert_raises_when_libreoffice_does_not_produce_pdf(tmp_path: Path) ->
     with (
         patch("gostforge.pdf_exporter._find_soffice", return_value="/usr/bin/soffice"),
         patch("gostforge.pdf_exporter.subprocess.run", side_effect=fake_run),
+        pytest.raises(RuntimeError) as exc_info,
     ):
-        with pytest.raises(RuntimeError) as exc_info:
-            convert_to_pdf(input_path, output_path)
+        convert_to_pdf(input_path, output_path)
     assert "PDF" in str(exc_info.value)
 
 
@@ -156,9 +160,9 @@ def test_convert_propagates_called_process_error(tmp_path: Path) -> None:
     with (
         patch("gostforge.pdf_exporter._find_soffice", return_value="/usr/bin/soffice"),
         patch("gostforge.pdf_exporter.subprocess.run", side_effect=fake_run),
+        pytest.raises(subprocess.CalledProcessError),
     ):
-        with pytest.raises(subprocess.CalledProcessError):
-            convert_to_pdf(input_path, output_path)
+        convert_to_pdf(input_path, output_path)
 
 
 def test_convert_propagates_timeout(tmp_path: Path) -> None:
@@ -173,6 +177,6 @@ def test_convert_propagates_timeout(tmp_path: Path) -> None:
     with (
         patch("gostforge.pdf_exporter._find_soffice", return_value="/usr/bin/soffice"),
         patch("gostforge.pdf_exporter.subprocess.run", side_effect=fake_run),
+        pytest.raises(subprocess.TimeoutExpired),
     ):
-        with pytest.raises(subprocess.TimeoutExpired):
-            convert_to_pdf(input_path, output_path, timeout=0.5)
+        convert_to_pdf(input_path, output_path, timeout=0.5)
