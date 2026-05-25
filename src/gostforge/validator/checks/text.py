@@ -436,6 +436,66 @@ def check_no_trailing_spaces(
     return violations
 
 
+@register("T.10")
+def check_typographic_quotes(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """В русском тексте должны использоваться «ёлочки», не ASCII-кавычки.
+
+    Параметры `checks.T.10.params`:
+    - `allow_inch_marker` (bool, по умолчанию False) — игнорировать кавычки
+      рядом с цифрами (например, `5"` — дюймы). На Фазе 1 не реализовано
+      (просто оставлено как заглушка).
+
+    Считает количество прямых ASCII-кавычек (`"`) в склеенном тексте всех
+    TextRun абзаца. `>=2` — нарушение «прямые кавычки вместо ёлочек». `1` —
+    нарушение «непарная кавычка». Игнорирует колонтитулы.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("T.10")
+    allow_inch_marker = False
+    if config and config.params.get("allow_inch_marker") is not None:
+        allow_inch_marker = bool(config.params["allow_inch_marker"])
+
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) == "header_footer":
+            continue
+        text = _paragraph_text(paragraph)
+        if not text:
+            continue
+        quote_count = text.count('"')
+        if allow_inch_marker:
+            quote_count -= _count_inch_markers(text)
+        if quote_count <= 0:
+            continue
+        preview = _preview(paragraph.content)
+        if quote_count >= 2:
+            message = (
+                f"В абзаце «{preview}» использованы прямые ASCII-кавычки вместо «ёлочек»"
+            )
+        else:
+            message = f"В абзаце «{preview}» обнаружена непарная ASCII-кавычка"
+        violations.append(
+            Violation(
+                check_code="T.10",
+                severity="warning",
+                message=message,
+                location=f"page_sections.*.paragraph[{paragraph.id}]",
+                suggestion=(
+                    "Заменить прямые кавычки на типографские: «…» (верхний уровень), "
+                    "„…“ (вложенный)"
+                ),
+                details={"quote_count": str(quote_count)},
+            )
+        )
+    return violations
+
+
+def _count_inch_markers(text: str) -> int:
+    """Сколько ASCII-кавычек стоит сразу после цифры (паттерн `\\d"`)."""
+    return len(re.findall(r'\d"', text))
+
+
 def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violation:
     location = (
         f"page_sections.*.paragraph[{location_id}]"
@@ -463,4 +523,5 @@ __all__ = [
     "check_no_consecutive_empty_paragraphs",
     "check_no_double_spaces",
     "check_no_trailing_spaces",
+    "check_typographic_quotes",
 ]

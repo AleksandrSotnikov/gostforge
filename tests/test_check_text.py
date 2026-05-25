@@ -586,3 +586,82 @@ def test_t09_trailing_space_in_last_nonempty_run() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.09"]
     assert len(found) == 1
+
+
+# --- T.10 (типографские кавычки) -------------------------------------------
+
+
+def test_t10_registered() -> None:
+    assert "T.10" in registered_checks()
+
+
+def test_t10_typographic_quotes_no_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="Это «правильные» ёлочки.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.10"]
+    assert found == []
+
+
+def test_t10_pair_of_ascii_quotes_violation() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text='Это "прямые" кавычки.')],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.10"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "ёлочек" in found[0].message
+    assert found[0].details["quote_count"] == "2"
+
+
+def test_t10_single_ascii_quote_violation() -> None:
+    """Непарная ASCII-кавычка — отдельное сообщение."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text='Незакрытая кавычка тут.')],
+        style_name="Normal",
+    )
+    paragraph.content = [TextRun(text='Незакрытая " тут.')]
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.10"]
+    assert len(found) == 1
+    assert "непарная" in found[0].message
+
+
+def test_t10_quotes_split_across_runs_still_caught() -> None:
+    """Кавычки могут быть в разных run-ах — проверка склеивает текст."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[
+            TextRun(text='Начало "', bold=False),
+            TextRun(text='слово', bold=True),
+            TextRun(text='" конец.', bold=False),
+        ],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "T.10"]
+    assert len(found) == 1
+
+
+def test_t10_allow_inch_marker_ignores_digit_quotes() -> None:
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text='Монитор 27" диагональ.')],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["T.10"].params["allow_inch_marker"] = True
+    found = [v for v in validate(doc, profile) if v.check_code == "T.10"]
+    assert found == []
