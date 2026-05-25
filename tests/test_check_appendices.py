@@ -118,3 +118,89 @@ def test_p01_no_appendices_no_violation() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "P.01"]
     assert found == []
+
+
+# --- P.02 -----------------------------------------------------------------
+
+
+def _doc_main_and_appendix(
+    main_paragraphs: list[Paragraph],
+    appendices: list[LogicalSection],
+) -> Document:
+    """Документ с двумя PageSection: main с параграфами и appendix с разделами."""
+    doc = Document()
+    main = PageSection(
+        id="main",
+        name="main",
+        type="main",
+        content=list(main_paragraphs),  # type: ignore[arg-type]
+    )
+    app = PageSection(
+        id="app",
+        name="app",
+        type="appendix",
+        content=list(appendices),  # type: ignore[arg-type]
+    )
+    doc.page_sections.append(main)
+    doc.page_sections.append(app)
+    return doc
+
+
+def test_p02_registered() -> None:
+    assert "P.02" in registered_checks()
+
+
+def test_p02_reference_present_no_violation() -> None:
+    """Приложение А имеет ссылку «см. приложение А» — нет нарушения."""
+    main_para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Подробности см. приложение А.")],
+    )
+    app = _appendix("app-a", "Приложение А")
+    doc = _doc_main_and_appendix([main_para], [app])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.02"]
+    assert found == []
+
+
+def test_p02_no_reference_violation() -> None:
+    """Приложение Б — ни одной ссылки в тексте — нарушение."""
+    main_para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Обычный текст работы без ссылок.")],
+    )
+    app_a = _appendix("app-a", "Приложение А")
+    app_b = _appendix("app-b", "Приложение Б")
+    doc = _doc_main_and_appendix([main_para], [app_a, app_b])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.02"]
+    letters = {v.details["letter"] for v in found}
+    assert "А" in letters and "Б" in letters
+
+
+def test_p02_alternative_reference_forms() -> None:
+    """Различные формы ссылок (прил., в приложении, (приложение X)) — ок."""
+    main_para_1 = Paragraph(
+        id="p-1",
+        content=[TextRun(text="В приложении А приведена схема.")],
+    )
+    main_para_2 = Paragraph(
+        id="p-2",
+        content=[TextRun(text="См. прил. Б для подробностей.")],
+    )
+    main_para_3 = Paragraph(
+        id="p-3",
+        content=[TextRun(text="Данные приведены (приложение В).")],
+    )
+    app_a = _appendix("app-a", "Приложение А")
+    app_b = _appendix("app-b", "Приложение Б")
+    app_c = _appendix("app-c", "Приложение В")
+    doc = _doc_main_and_appendix(
+        [main_para_1, main_para_2, main_para_3],
+        [app_a, app_b, app_c],
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "P.02"]
+    assert found == []
+
+

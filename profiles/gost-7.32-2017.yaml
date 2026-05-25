@@ -192,6 +192,7 @@ checks:
     params:
       threshold: 5
   A.03: {enabled: true}
+  P.02: {enabled: true}
   P.03: {enabled: true}
   K.01: {enabled: true}
   K.02: {enabled: true}
