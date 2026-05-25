@@ -309,3 +309,104 @@ def test_i05_no_figures_no_violation() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.05"]
     assert found == []
+
+
+# --- I.06 (на каждый рисунок есть ссылка в тексте) ----------------------
+
+
+def test_i06_registered() -> None:
+    assert "I.06" in registered_checks()
+
+
+def test_i06_reference_in_text_no_violation() -> None:
+    """В тексте есть «на рисунке 1» — нарушения нет."""
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Алгоритм представлен на рисунке 1.")],
+    )
+    doc = _doc_with_content([para, figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.06"]
+    assert found == []
+
+
+def test_i06_no_reference_violation() -> None:
+    """Рисунок есть, ссылки в тексте нет — нарушение."""
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="Просто абзац без ссылок.")],
+    )
+    doc = _doc_with_content([para, figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.06"]
+    assert len(found) == 1
+    assert found[0].details["figure_id"] == "f-1"
+    assert found[0].details["number"] == "1"
+
+
+def test_i06_reference_abbreviated_form() -> None:
+    """«рис. 1» — тоже ссылка."""
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="См. рис. 1 для деталей.")],
+    )
+    doc = _doc_with_content([para, figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.06"]
+    assert found == []
+
+
+def test_i06_case_insensitive() -> None:
+    """Ссылка «На Рисунке 1» (с большой буквы) — тоже считается."""
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="На Рисунке 1 показана структура.")],
+    )
+    doc = _doc_with_content([para, figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.06"]
+    assert found == []
+
+
+def test_i06_multiple_figures_some_referenced() -> None:
+    """Несколько рисунков — нарушения только у тех, на которые нет ссылок."""
+    f1 = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — A")])
+    f2 = Figure(id="f-2", caption=[TextRun(text="Рисунок 2 — B")])
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="См. рисунок 1, но не рисунок два.")],
+    )
+    doc = _doc_with_content([para, f1, f2])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.06"]
+    assert len(found) == 1
+    assert found[0].details["figure_id"] == "f-2"
+
+
+def test_i06_empty_caption_skipped() -> None:
+    """Пустые подписи — это случай I.01."""
+    figure = Figure(id="f-1", caption=[])
+    para = Paragraph(id="p-1", content=[TextRun(text="Нет ссылок.")])
+    doc = _doc_with_content([para, figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.06"]
+    assert found == []
+
+
+def test_i06_reference_in_nested_section() -> None:
+    """Ссылка во вложенной секции тоже находится."""
+    f1 = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — A")])
+    inner = LogicalSection(
+        id="sec-2",
+        level=2,
+        heading=[TextRun(text="Sub")],
+        children=[Paragraph(id="p-1", content=[TextRun(text="См. рисунок 1.")])],
+    )
+    doc = _doc_with_content([f1, inner])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.06"]
+    assert found == []

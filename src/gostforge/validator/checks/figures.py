@@ -14,6 +14,7 @@ from gostforge.model import (
     InlineElement,
     LogicalSection,
     PageSection,
+    Paragraph,
     TextRun,
 )
 from gostforge.profile import Profile
@@ -139,6 +140,30 @@ def check_figure_caption_format(
 _FIGURE_NUMBER_RE = re.compile(r"^Рис(?:унок)?\.?\s+(\d+)")
 
 
+def _iter_paragraphs(items: Sequence[LogicalSection | Block]) -> list[Paragraph]:
+    """Рекурсивно собрать все Paragraph (через LogicalSection.children)."""
+    result: list[Paragraph] = []
+    for item in items:
+        if isinstance(item, Paragraph):
+            result.append(item)
+        elif isinstance(item, LogicalSection):
+            result.extend(_iter_paragraphs(item.children))
+    return result
+
+
+def _all_paragraphs(document: Document) -> list[Paragraph]:
+    """Все Paragraph документа (плоско, со всех PageSection)."""
+    paragraphs: list[Paragraph] = []
+    for ps in document.page_sections:
+        paragraphs.extend(_iter_paragraphs(ps.content))
+    return paragraphs
+
+
+def _paragraph_text(paragraph: Paragraph) -> str:
+    """Склеить весь текст параграфа из TextRun-ов."""
+    return "".join(el.text for el in paragraph.content if isinstance(el, TextRun))
+
+
 @register("I.05")
 def check_figure_numbering_continuous(
     document: Document, profile: Profile  # noqa: ARG001
@@ -184,8 +209,8 @@ def check_figure_numbering_continuous(
                     ),
                     location=f"figure[{figure.id}]",
                     suggestion=(
-                        f"Перенумеровать рисунки так, чтобы каждый имел "
-                        f"уникальный сквозной номер"
+                        "Перенумеровать рисунки так, чтобы каждый имел "
+                        "уникальный сквозной номер"
                     ),
                     details={
                         "figure_id": figure.id,
@@ -224,8 +249,69 @@ def check_figure_numbering_continuous(
     return violations
 
 
+# Регэкспы для поиска ссылок на рисунок N в тексте. Все case-insensitive.
+def _figure_reference_patterns(num: int) -> list[re.Pattern[str]]:
+    """Сформировать regex'ы вида «рисунок N», «рис. N», «рисунке N» для номера N."""
+    return [
+        re.compile(rf"рисунок\s+{num}\b", re.IGNORECASE),
+        re.compile(rf"рисунке\s+{num}\b", re.IGNORECASE),
+        re.compile(rf"рис\.\s*{num}\b", re.IGNORECASE),
+    ]
+
+
+@register("I.06")
+def check_figure_referenced_in_text(
+    document: Document, profile: Profile  # noqa: ARG001
+) -> list[Violation]:
+    """На каждый рисунок должна быть ссылка в тексте.
+
+    Извлекает номер N из caption рисунка и ищет в склеенном тексте всех
+    Paragraph документа упоминание вида `рисунок N`, `рис. N` или
+    `рисунке N` (case-insensitive). Если ни одной ссылки не найдено —
+    Violation. Пустые подписи пропускаются (I.01).
+    """
+    violations: list[Violation] = []
+
+    # Один раз склеиваем весь текст документа из параграфов.
+    all_text = "\n".join(_paragraph_text(p) for p in _all_paragraphs(document))
+
+    for page_section, figure in _all_figures(document):
+        text = _caption_text(figure.caption)
+        if not text:
+            continue
+        match = _FIGURE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            num = int(match.group(1))
+        except ValueError:
+            continue
+
+        if any(p.search(all_text) for p in _figure_reference_patterns(num)):
+            continue
+
+        violations.append(
+            Violation(
+                check_code="I.06",
+                severity="error",
+                message=(
+                    f"В тексте отсутствует ссылка на рисунок {num} «{figure.id}»"
+                ),
+                location=f"page_sections.{page_section.id}.figure[{figure.id}]",
+                suggestion=(
+                    f"Добавить в текст ссылку вида «см. рисунок {num}» или "
+                    f"«на рисунке {num}»"
+                ),
+                details={"figure_id": figure.id, "number": str(num)},
+            )
+        )
+
+    return violations
+
+
 __all__ = [
     "check_figure_caption_format",
     "check_figure_has_caption",
     "check_figure_numbering_continuous",
+    "check_figure_referenced_in_text",
 ]
