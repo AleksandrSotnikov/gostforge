@@ -496,6 +496,26 @@ def check_heading_not_hanging(
     return violations
 
 
+@register("H.07")
+def check_heading_spacing(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Отступы до и после заголовка (заглушка).
+
+    Параметры из `profile.styles.extra.heading_1` и `heading_2`:
+    - `spacing_before_pt: float` (например 18)
+    - `spacing_after_pt: float` (например 12)
+
+    TODO (Фаза 2): в текущей модели у Paragraph нет полей
+    `spacing_before_pt` / `spacing_after_pt` — они хранятся в стилях Word.
+    Кроме того, в LogicalSection.heading — это `list[InlineElement]`, а не
+    Paragraph, у которого можно было бы прочитать отступы. Полноценная
+    реализация требует расширения модели и парсера.
+    """
+    return []
+
+
 def _violation(
     code: str,
     message: str,
@@ -523,5 +543,6 @@ __all__ = [
     "check_heading_not_hanging",
     "check_heading_number_no_trailing_dot",
     "check_heading_numbering_continuous",
+    "check_heading_spacing",
     "iter_logical_sections",
 ]
