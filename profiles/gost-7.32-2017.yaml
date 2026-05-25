@@ -187,6 +187,10 @@ checks:
     enabled: true
     params:
       known_abbreviations: []
+  A.02:
+    enabled: true
+    params:
+      threshold: 5
   P.03: {enabled: true}
   K.01: {enabled: true}
   K.02: {enabled: true}

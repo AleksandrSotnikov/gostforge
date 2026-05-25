@@ -1,6 +1,6 @@
-"""Тесты A.01 — расшифровка аббревиатур при первом употреблении."""
+"""Тесты A.01/A.02/A.03 — проверки аббревиатур."""
 
-# ruff: noqa: RUF003
+# ruff: noqa: RUF001, RUF003
 
 from gostforge.model import (
     Document,
@@ -137,3 +137,75 @@ def test_a01_abbr_in_nested_section() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "A.01"]
     assert len(found) == 1
     assert found[0].details["abbreviation"] == "БД"
+
+
+# --- A.02 -----------------------------------------------------------------
+
+
+def test_a02_registered() -> None:
+    assert "A.02" in registered_checks()
+
+
+def test_a02_below_threshold_no_violation() -> None:
+    """Меньше или равно порогу (5) аббревиатур — нет нарушения."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="ВКР, НИР, БД, ПО, КИС — пять аббревиатур.")],
+    )
+    doc = _doc_with_content([para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "A.02"]
+    assert found == []
+
+
+def test_a02_above_threshold_without_section_violation() -> None:
+    """>5 аббревиатур без раздела «Список сокращений» — нарушение."""
+    para = Paragraph(
+        id="p-1",
+        content=[
+            TextRun(
+                text=(
+                    "ВКР, НИР, БД, ПО, КИС, СУБД, ОЗУ — семь аббревиатур."
+                )
+            )
+        ],
+    )
+    doc = _doc_with_content([para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "A.02"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert int(found[0].details["abbreviation_count"]) >= 6
+
+
+def test_a02_above_threshold_with_section_no_violation() -> None:
+    """>5 аббревиатур, но «Список сокращений» есть — нет нарушения."""
+    para = Paragraph(
+        id="p-1",
+        content=[
+            TextRun(text="ВКР, НИР, БД, ПО, КИС, СУБД, ОЗУ — семь аббр.")
+        ],
+    )
+    abbr_section = LogicalSection(
+        id="sec-abbr",
+        level=1,
+        heading=[TextRun(text="Список сокращений")],
+        children=[],
+    )
+    doc = _doc_with_content([para, abbr_section])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "A.02"]
+    assert found == []
+
+
+def test_a02_custom_threshold_param() -> None:
+    """Параметр threshold=2 — после 2 аббревиатур уже нужен раздел."""
+    para = Paragraph(
+        id="p-1",
+        content=[TextRun(text="ВКР, НИР, БД — три аббревиатуры.")],
+    )
+    doc = _doc_with_content([para])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["A.02"].params["threshold"] = 2
+    found = [v for v in validate(doc, profile) if v.check_code == "A.02"]
+    assert len(found) == 1
