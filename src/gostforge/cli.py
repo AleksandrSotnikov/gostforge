@@ -9,6 +9,7 @@ import sys
 import time
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -1499,6 +1500,153 @@ def generate_cmd(
 
     output.write_bytes(data)
     click.echo(f"Сгенерирован файл: {output}")
+
+
+@main.command("export-md")
+@click.argument("state_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить .md.",
+)
+def export_md_cmd(state_path: Path, output: Path) -> None:
+    """Экспортировать state-конструктора в Markdown.
+
+    Удобно для:
+    * быстрого ревью работы в git/pull-request;
+    * конвертации в другие форматы через pandoc;
+    * интеграции с системами на базе Markdown (Obsidian, Notion).
+
+    Маппинг:
+    * sections с level=1 → ``# Заголовок``;
+    * sub (level=2) → ``## Заголовок``;
+    * subsub (level=3) → ``### Заголовок``;
+    * paragraph → обычный абзац;
+    * list/ordered → ``1. item`` / ``- item``;
+    * table → GFM-таблица с caption-строкой;
+    * figure → ``![caption](image_path)``;
+    * formula → ``$$ latex $$``;
+    * references → нумерованный список.
+
+    Не сохраняет: disabled_checks, profile-id (это metadata
+    конструктора, не имеет смысла в Markdown).
+    """
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        click.echo(f"Не удалось прочитать JSON: {exc}", err=True)
+        sys.exit(2)
+    if not isinstance(state, dict) or "sections" not in state:
+        click.echo("В state.json должен быть ключ 'sections'.", err=True)
+        sys.exit(2)
+    md = _state_to_markdown(state)
+    output.write_text(md, encoding="utf-8")
+    click.echo(f"Создан {output} ({len(md.splitlines())} строк)")
+
+
+def _state_to_markdown(state: dict[str, Any]) -> str:
+    """Сериализовать state в строку Markdown (GFM).
+
+    Используется CLI export-md, а также может быть переиспользована
+    в UI как preview перед скачиванием.
+    """
+    lines: list[str] = []
+    title = state.get("title", "").strip()
+    if title:
+        lines.append(f"# {title}")
+        lines.append("")
+        meta_parts = []
+        if state.get("author"):
+            meta_parts.append(f"**Автор:** {state['author']}")
+        if state.get("year"):
+            meta_parts.append(f"**Год:** {state['year']}")
+        if state.get("supervisor"):
+            meta_parts.append(f"**Руководитель:** {state['supervisor']}")
+        if meta_parts:
+            lines.append(" · ".join(meta_parts))
+            lines.append("")
+
+    for sec in state.get("sections", []):
+        _section_to_md(sec, depth=2, lines=lines)
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _section_to_md(
+    section: dict[str, Any], *, depth: int, lines: list[str]
+) -> None:
+    """Записать один раздел и его потомков в lines.
+
+    ``depth`` — уровень заголовка (1=#, 2=##, ...). Top-level разделы
+    идут с depth=2, потому что depth=1 зарезервирован под title работы.
+    """
+    heading = section.get("heading", "").strip() or "(без названия)"
+    hash_prefix = "#" * min(depth, 6)
+    lines.append(f"{hash_prefix} {heading}")
+    lines.append("")
+
+    if section.get("is_bibliography"):
+        for i, ref in enumerate(section.get("references", []) or [], start=1):
+            lines.append(f"{i}. {ref}")
+        lines.append("")
+        return
+
+    for block in section.get("blocks") or []:
+        _block_to_md(block, lines=lines)
+
+    for sub in section.get("subsections") or []:
+        _section_to_md(sub, depth=depth + 1, lines=lines)
+
+
+def _block_to_md(block: dict[str, Any], *, lines: list[str]) -> None:
+    """Сериализовать один Block в Markdown-строки."""
+    kind = block.get("kind", "")
+    if kind == "paragraph":
+        text = block.get("text", "")
+        if not text and block.get("runs"):
+            text = "".join(
+                r.get("text", "")
+                for r in block["runs"]
+                if r.get("kind") == "text"
+            )
+        if text.strip():
+            lines.append(text)
+            lines.append("")
+    elif kind == "list":
+        items = block.get("items") or []
+        ordered = block.get("ordered", False)
+        for i, item in enumerate(items, start=1):
+            marker = f"{i}." if ordered else "-"
+            lines.append(f"{marker} {item}")
+        lines.append("")
+    elif kind == "table":
+        headers = block.get("headers") or []
+        rows = block.get("rows") or []
+        caption = block.get("caption", "")
+        if caption:
+            lines.append(f"**{caption}**")
+            lines.append("")
+        if headers:
+            lines.append("| " + " | ".join(str(h) for h in headers) + " |")
+            lines.append("|" + "|".join("---" for _ in headers) + "|")
+        for row in rows:
+            lines.append("| " + " | ".join(str(c) for c in row) + " |")
+        lines.append("")
+    elif kind == "figure":
+        path = block.get("image_path", "")
+        caption = block.get("caption", "")
+        if path:
+            lines.append(f"![{caption}]({path})")
+        elif caption:
+            lines.append(f"*Рисунок: {caption}*")
+        lines.append("")
+    elif kind == "formula":
+        latex = block.get("latex", "")
+        if latex:
+            lines.append(f"$$ {latex} $$")
+            lines.append("")
 
 
 @main.command("import-docx")
