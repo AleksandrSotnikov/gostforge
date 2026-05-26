@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -774,8 +775,163 @@ def history(limit: int, filename: str | None, submission_id: int | None) -> None
         )
 
 
+@main.group()
+def comment() -> None:
+    """Комментарии к submission-ам (совместная работа)."""
+
+
+def _default_author() -> str:
+    """Имя автора по умолчанию — из env или getpass.getuser()."""
+    env = os.environ.get("GOSTFORGE_DEFAULT_AUTHOR", "").strip()
+    if env:
+        return env
+    try:
+        import getpass
+
+        return getpass.getuser()
+    except Exception:  # pragma: no cover - graceful
+        return ""
+
+
+@comment.command("add")
+@click.argument("submission_id", type=int)
+@click.argument("body")
+@click.option(
+    "--author",
+    default=None,
+    help="Имя автора. Если не задано — берётся из env GOSTFORGE_DEFAULT_AUTHOR "
+    "или getpass.getuser().",
+)
+@click.option(
+    "--role",
+    type=click.Choice(["student", "supervisor", "anonymous"]),
+    default="anonymous",
+    help="Роль автора (student/supervisor/anonymous).",
+)
+def comment_add(
+    submission_id: int, body: str, author: str | None, role: str
+) -> None:
+    """Добавить комментарий к submission.
+
+    Пример:
+
+        gostforge comment add 42 "Переделай введение" --role supervisor
+
+    Если submission_id не существует или body пустой — выходим с
+    кодом 2 + сообщением.
+    """
+    from gostforge.db import add_comment, get_connection
+
+    final_author = author if author is not None else _default_author()
+    try:
+        with get_connection() as conn:
+            c = add_comment(
+                conn,
+                submission_id=submission_id,
+                body=body,
+                author=final_author,
+                role=role,
+            )
+    except ValueError as exc:
+        click.echo(click.style(f"Ошибка: {exc}", fg="red"), err=True)
+        sys.exit(2)
+
+    click.echo(
+        click.style("Комментарий добавлен:", fg="green", bold=True)
+        + f" #{c.id} к submission #{c.submission_id}"
+    )
+    click.echo(f"  Автор: {c.author or '—'}  [{c.role}]")
+    click.echo(f"  Время: {c.created_at}")
+
+
+@comment.command("list")
+@click.argument("submission_id", type=int)
+@click.option(
+    "--unresolved",
+    is_flag=True,
+    help="Показать только незакрытые комментарии.",
+)
+def comment_list(submission_id: int, unresolved: bool) -> None:
+    """Показать все комментарии к submission.
+
+    Закрытые помечены ``✓``, открытые — ``●``.
+    """
+    from gostforge.db import get_connection, list_comments
+
+    with get_connection() as conn:
+        items = list_comments(
+            conn,
+            submission_id=submission_id,
+            include_resolved=not unresolved,
+        )
+    if not items:
+        click.echo("Комментариев нет.")
+        return
+    for c in items:
+        role_color = {
+            "supervisor": "magenta",
+            "student": "blue",
+            "anonymous": "bright_black",
+        }.get(c.role, "white")
+        role_label = click.style(f"[{c.role}]", fg=role_color)
+        status = (
+            click.style("✓", fg="green") if c.resolved else click.style("●", fg="yellow")
+        )
+        author = c.author or "—"
+        click.echo(
+            f"#{c.id} {status} {role_label} {author} "
+            + click.style(c.created_at, fg="bright_black")
+        )
+        for line in c.body.splitlines():
+            click.echo(f"    {line}")
+
+
+@comment.command("resolve")
+@click.argument("comment_id", type=int)
+@click.option(
+    "--reopen",
+    is_flag=True,
+    help="Снять отметку resolved (вернуть в открытые).",
+)
+def comment_resolve(comment_id: int, reopen: bool) -> None:
+    """Пометить комментарий как resolved (или снять отметку через --reopen)."""
+    from gostforge.db import get_connection, resolve_comment
+
+    with get_connection() as conn:
+        ok = resolve_comment(conn, comment_id, resolved=not reopen)
+    if not ok:
+        click.echo(
+            click.style(f"Комментарий #{comment_id} не найден.", fg="yellow"),
+            err=True,
+        )
+        sys.exit(1)
+    action = "переоткрыт" if reopen else "закрыт"
+    click.echo(
+        click.style(f"Комментарий #{comment_id} {action}.", fg="green", bold=True)
+    )
+
+
+@comment.command("delete")
+@click.argument("comment_id", type=int)
+def comment_delete(comment_id: int) -> None:
+    """Удалить комментарий."""
+    from gostforge.db import delete_comment, get_connection
+
+    with get_connection() as conn:
+        ok = delete_comment(conn, comment_id)
+    if not ok:
+        click.echo(
+            click.style(f"Комментарий #{comment_id} не найден.", fg="yellow"),
+            err=True,
+        )
+        sys.exit(1)
+    click.echo(
+        click.style(f"Комментарий #{comment_id} удалён.", fg="green", bold=True)
+    )
+
+
 def _print_submission_details(sub: object) -> None:
-    """Распечатать одну запись со списком violations."""
+    """Распечатать одну запись со списком violations и комментариев."""
     click.echo(click.style(f"Submission #{sub.id}", bold=True))  # type: ignore[attr-defined]
     click.echo(f"  Файл:      {sub.filename}")  # type: ignore[attr-defined]
     click.echo(f"  Профиль:   {sub.profile_id}")  # type: ignore[attr-defined]
@@ -788,20 +944,57 @@ def _print_submission_details(sub: object) -> None:
     )
     if not sub.violations:  # type: ignore[attr-defined]
         click.echo("\n  Нарушений нет.")
+    else:
+        click.echo("\n  Нарушения:")
+        for v in sub.violations:  # type: ignore[attr-defined]
+            color = {"error": "red", "warning": "yellow", "info": "cyan"}.get(
+                v.severity, "white"
+            )
+            click.echo(
+                f"    {click.style(v.severity.upper(), fg=color)}  "
+                f"{v.code:>6}  {v.message}"
+            )
+            if v.location:
+                click.echo(
+                    click.style(f"            {v.location}", fg="bright_black")
+                )
+            if v.suggestion:
+                click.echo(click.style(f"          → {v.suggestion}", fg="green"))
+
+    _print_submission_comments(sub.id)  # type: ignore[attr-defined]
+
+
+def _print_submission_comments(submission_id: int) -> None:
+    """Распечатать ленту комментариев к submission (если есть)."""
+    try:
+        from gostforge.db import get_connection, list_comments
+    except ImportError:
         return
-    click.echo("\n  Нарушения:")
-    for v in sub.violations:  # type: ignore[attr-defined]
-        color = {"error": "red", "warning": "yellow", "info": "cyan"}.get(
-            v.severity, "white"
+    try:
+        with get_connection() as conn:
+            comments = list_comments(conn, submission_id=submission_id)
+    except Exception:
+        return
+    if not comments:
+        return
+    click.echo("\n  " + click.style("Комментарии:", bold=True))
+    for c in comments:
+        role_color = {
+            "supervisor": "magenta",
+            "student": "blue",
+            "anonymous": "bright_black",
+        }.get(c.role, "white")
+        role_label = click.style(f"[{c.role}]", fg=role_color)
+        status = (
+            click.style(" ✓", fg="green") if c.resolved else click.style(" ●", fg="yellow")
         )
+        author = c.author or "—"
         click.echo(
-            f"    {click.style(v.severity.upper(), fg=color)}  "
-            f"{v.code:>6}  {v.message}"
+            f"    #{c.id}{status}  {role_label}  {author}  "
+            + click.style(c.created_at, fg="bright_black")
         )
-        if v.location:
-            click.echo(click.style(f"            {v.location}", fg="bright_black"))
-        if v.suggestion:
-            click.echo(click.style(f"          → {v.suggestion}", fg="green"))
+        for line in c.body.splitlines():
+            click.echo(f"        {line}")
 
 
 def _normalize_message(text: str) -> str:
