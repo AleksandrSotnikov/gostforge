@@ -263,6 +263,9 @@ checks:
   X.03: {enabled: true}
   X.04: {enabled: true}
   X.05: {enabled: true}
+  X.06: {enabled: false}   # канцеляризмы (info, можно включить кафедре)
+  X.07: {enabled: false}   # длинные предложения (info)
+  X.08: {enabled: false}   # повтор слов (info)
 
   # U.* — единицы измерения (ГОСТ Р 8.000-2015).
   U.01: {enabled: true}   # неразрывный пробел между числом и единицей
