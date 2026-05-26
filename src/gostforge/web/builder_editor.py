@@ -1571,16 +1571,92 @@ def _render_sidebar_metadata() -> None:
 # --- UI: section tree --------------------------------------------------------
 
 
+def _section_matches_query(section: dict[str, Any], query: str) -> bool:
+    """True, если в разделе (или его подразделах/блоках) есть совпадение
+    с поисковым запросом (case-insensitive substring).
+
+    Ищет в:
+    * заголовке раздела, подразделов, sub-subsections;
+    * текстах параграфов (включая rich-формат с runs);
+    * подписях таблиц / рисунков;
+    * элементах списков;
+    * текстах ссылок (references).
+    """
+    if not query:
+        return True
+
+    def text_in_block(b: dict[str, Any]) -> str:
+        kind = b.get("kind", "")
+        text = b.get("text", "")
+        if not text and b.get("runs"):
+            text = "".join(
+                r.get("text", "") for r in b["runs"] if r.get("kind") == "text"
+            )
+        if kind == "table":
+            text += " " + str(b.get("caption", ""))
+            for row in b.get("rows", []):
+                text += " " + " ".join(str(c) for c in row)
+            text += " " + " ".join(str(h) for h in b.get("headers", []))
+        elif kind == "figure":
+            text += " " + str(b.get("caption", ""))
+        elif kind == "list":
+            text += " " + " ".join(str(it) for it in b.get("items", []))
+        return text
+
+    def search_in_section(sec: dict[str, Any]) -> bool:
+        if query in str(sec.get("heading", "")).lower():
+            return True
+        for b in sec.get("blocks", []) or []:
+            if query in text_in_block(b).lower():
+                return True
+        for ref in sec.get("references") or []:
+            if query in str(ref).lower():
+                return True
+        for sub in sec.get("subsections") or []:
+            if search_in_section(sub):
+                return True
+        return False
+
+    return search_in_section(section)
+
+
 def _render_section_tree() -> None:
-    """Список разделов с кнопками ↑/↓/✕ и выбором активного раздела."""
+    """Список разделов с кнопками ↑/↓/⎘/✕ и фильтром-поиском."""
     state = _get_state()
     sections = state["sections"]
 
     st.subheader("Разделы работы")
+
+    # Поиск по разделам: фильтрует и подсвечивает в дереве.
+    # Хранится в state, чтобы переживать rerun.
+    query = st.text_input(
+        "Поиск по разделам",
+        value=str(state.get("section_search", "")),
+        placeholder="часть заголовка или текста параграфа",
+        key="section_search_input",
+        help=(
+            "Фильтрует список ниже. Совпадения ищутся в заголовках разделов, "
+            "подразделов и текстах параграфов (регистронезависимо)."
+        ),
+    )
+    state["section_search"] = query
+    filter_q = query.strip().lower()
+
+    matched: set[int] = set()
+    if filter_q:
+        for idx, sec in enumerate(sections):
+            if _section_matches_query(sec, filter_q):
+                matched.add(idx)
+        if not matched:
+            st.warning(f"Ничего не найдено по запросу «{query}»")
+
     if not sections:
         st.info("Нет ни одного раздела. Добавьте раздел кнопкой ниже.")
     else:
         for idx, section in enumerate(sections):
+            # Если активен фильтр и текущий раздел не совпал — скрываем.
+            if filter_q and idx not in matched:
+                continue
             heading = section.get("heading") or f"Раздел {idx + 1}"
             is_active = idx == state.get("active_section_index", 0)
             # 6 колонок: маркер активного, заголовок, ↑, ↓, дубль, удалить.
