@@ -262,10 +262,13 @@ def create_app() -> FastAPI:
     async def post_check(
         file: UploadFile = File(...),
         profile_id: str = Form("gost-7.32-2017"),
+        record: bool = Form(True),
     ) -> JSONResponse:
         """Прогнать нормоконтроль файла по выбранному профилю.
 
         Returns JSON-отчёт со списком violations и summary по severity.
+        Если record=True (по умолчанию) — submission сохраняется в
+        локальную БД истории, в ответе возвращается submission_id.
         """
         data = await _read_docx_upload(file)
         profile = _load_profile_or_404(profile_id)
@@ -277,6 +280,22 @@ def create_app() -> FastAPI:
             ) from exc
         violations = validate(document, profile)
         summary = Counter(v.severity for v in violations)
+
+        submission_id: int | None = None
+        if record:
+            try:
+                from gostforge.db import get_connection, record_submission
+
+                with get_connection() as conn:
+                    submission_id = record_submission(
+                        conn,
+                        filename=file.filename or "uploaded.docx",
+                        profile_id=profile_id,
+                        violations=violations,
+                    )
+            except Exception:  # pragma: no cover - не валим API на БД
+                submission_id = None
+
         return JSONResponse(
             {
                 "profile_id": profile_id,
@@ -286,6 +305,7 @@ def create_app() -> FastAPI:
                     "warning": summary.get("warning", 0),
                     "info": summary.get("info", 0),
                 },
+                "submission_id": submission_id,
             }
         )
 
@@ -404,6 +424,83 @@ def create_app() -> FastAPI:
         stats = compute_stats(document)
         # DocumentStats — dataclass: разворачиваем в dict через __dict__.
         return JSONResponse(stats.__dict__)
+
+    @app.get("/submissions")
+    def get_submissions(
+        limit: int = 20, filename: str | None = None
+    ) -> list[dict[str, Any]]:
+        """История проверок из локальной БД.
+
+        Лимит до 200 (защита от тяжёлых выгрузок). По filename — точное
+        совпадение (для трекинга прогресса над одной работой).
+        Возвращает только метаданные + summary; за деталями обращайтесь
+        к /submissions/{id}.
+        """
+        from gostforge.db import get_connection, list_submissions
+
+        capped = min(max(int(limit), 1), 200)
+        with get_connection() as conn:
+            items = list_submissions(conn, limit=capped, filename=filename)
+        return [
+            {
+                "id": s.id,
+                "filename": s.filename,
+                "profile_id": s.profile_id,
+                "created_at": s.created_at,
+                "error_count": s.error_count,
+                "warning_count": s.warning_count,
+                "info_count": s.info_count,
+            }
+            for s in items
+        ]
+
+    @app.get("/submissions/{submission_id}")
+    def get_submission_endpoint(submission_id: int) -> dict[str, Any]:
+        """Детали одного submission со списком всех violations."""
+        from gostforge.db import get_connection, get_submission
+
+        with get_connection() as conn:
+            sub = get_submission(conn, submission_id)
+        if sub is None:
+            raise HTTPException(
+                status_code=404, detail=f"Submission #{submission_id} не найден"
+            )
+        return {
+            "id": sub.id,
+            "filename": sub.filename,
+            "profile_id": sub.profile_id,
+            "created_at": sub.created_at,
+            "summary": {
+                "error": sub.error_count,
+                "warning": sub.warning_count,
+                "info": sub.info_count,
+            },
+            "violations": [
+                {
+                    "id": v.id,
+                    "code": v.code,
+                    "severity": v.severity,
+                    "message": v.message,
+                    "location": v.location,
+                    "suggestion": v.suggestion,
+                }
+                for v in sub.violations
+            ],
+        }
+
+    @app.delete("/submissions/{submission_id}")
+    def delete_submission_endpoint(submission_id: int) -> dict[str, bool]:
+        """Удалить submission (и все его violations через CASCADE)."""
+        from gostforge.db import get_connection
+        from gostforge.db.submissions import delete_submission
+
+        with get_connection() as conn:
+            deleted = delete_submission(conn, submission_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=404, detail=f"Submission #{submission_id} не найден"
+            )
+        return {"deleted": True}
 
     return app
 
