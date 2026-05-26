@@ -289,7 +289,7 @@ def test_paragraph_with_citation_in_runs() -> None:
             "kind": "paragraph",
             "runs": [
                 {"kind": "text", "text": "См. "},
-                {"kind": "citation", "source_id": "1", "page": "42"},
+                {"kind": "citation", "source_id": "1", "pages": "42"},
             ],
         }
     )

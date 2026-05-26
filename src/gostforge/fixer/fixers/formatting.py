@@ -6,6 +6,7 @@ from gostforge.model import (
     ContentTemplate,
     Document,
     HeaderConfig,
+    InlineElement,
     TextRun,
 )
 from gostforge.profile import Profile
@@ -126,7 +127,9 @@ def _has_page_placeholder(content) -> bool:  # type: ignore[no-untyped-def]
     return any(isinstance(el, TextRun) and el.text == "{page}" for el in content)
 
 
-def _strip_page_placeholder(content):  # type: ignore[no-untyped-def]
+def _strip_page_placeholder(
+    content: list[InlineElement] | None,
+) -> list[InlineElement]:
     """Убрать все {page}-плейсхолдеры из content."""
     return [el for el in (content or []) if not (isinstance(el, TextRun) and el.text == "{page}")]
 

@@ -47,6 +47,8 @@ dev = [
     "pytest-cov>=4.1",
     "ruff>=0.1",
     "mypy>=1.7",
+    "types-PyYAML",
+    "types-openpyxl",
     "streamlit>=1.30",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",

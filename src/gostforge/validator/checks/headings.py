@@ -165,7 +165,7 @@ def check_heading_1_format(document: Document, profile: Profile) -> list[Violati
                         section.id,
                         suggestion=(
                             "Использовать чёрный (auto) цвет шрифта в заголовках"
-                            if expected_color in (None, "auto", "")
+                            if not expected_color or expected_color == "auto"
                             else f"Использовать цвет #{expected_color.lstrip('#')}"
                         ),
                     )
@@ -182,7 +182,7 @@ def _color_violates_expected(actual: str | None, expected: str | None) -> bool:
     ожидается hex (например, "FF0000") — проверяем точное совпадение
     без учёта регистра и лидирующего «#».
     """
-    if expected in (None, "auto", ""):
+    if not expected or expected == "auto":
         if actual is None:
             return False
         norm = actual.lstrip("#").upper()
@@ -195,7 +195,7 @@ def _color_violates_expected(actual: str | None, expected: str | None) -> bool:
 
 def _describe_expected_color(expected: str | None) -> str:
     """Описание ожидаемого цвета для текста нарушения."""
-    if expected in (None, "auto", ""):
+    if not expected or expected == "auto":
         return "ожидается чёрный (auto)"
     return f"ожидается #{expected.lstrip('#')}"
 
@@ -281,7 +281,7 @@ def check_heading_2_format(document: Document, profile: Profile) -> list[Violati
                         section.id,
                         suggestion=(
                             "Использовать чёрный (auto) цвет шрифта в заголовках"
-                            if expected_color in (None, "auto", "")
+                            if not expected_color or expected_color == "auto"
                             else f"Использовать цвет #{expected_color.lstrip('#')}"
                         ),
                     )

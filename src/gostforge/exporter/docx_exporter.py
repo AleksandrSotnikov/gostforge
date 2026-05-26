@@ -26,17 +26,18 @@ from datetime import UTC
 from pathlib import Path
 from typing import Any, Literal
 
-import docx  # type: ignore[import-not-found]
-from docx.document import Document as DocxDocument  # type: ignore[import-not-found]
-from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-not-found]
-from docx.oxml import OxmlElement  # type: ignore[import-not-found]
-from docx.oxml.ns import qn  # type: ignore[import-not-found]
-from docx.shared import Cm, Mm, Pt, RGBColor  # type: ignore[import-not-found]
-from docx.text.paragraph import Paragraph as DocxParagraph  # type: ignore[import-not-found]
+import docx
+from docx.document import Document as DocxDocument
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Mm, Pt, RGBColor
+from docx.text.paragraph import Paragraph as DocxParagraph
 from lxml import etree  # type: ignore[import-untyped]
 
 from gostforge.model import (
     Block,
+    CellMerge,
     Citation,
     ContentTemplate,
     CrossRef,
@@ -659,7 +660,7 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
         _apply_cell_merges(docx_table, table.merges)
 
 
-def _apply_cell_merges(docx_table: Any, merges: list) -> None:  # type: ignore[no-untyped-def]
+def _apply_cell_merges(docx_table: Any, merges: list[CellMerge]) -> None:
     """Применить CellMerge к docx-таблице через <w:gridSpan>/<w:vMerge>.
 
     Для colspan > 1: на первой ячейке ставим <w:gridSpan w:val="N">,

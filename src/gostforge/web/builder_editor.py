@@ -868,7 +868,7 @@ def document_to_state(document: Any) -> dict[str, Any]:
                     {
                         "kind": "citation",
                         "source_id": el.source_id,
-                        "page": el.page or "",
+                        "pages": el.pages or "",
                     }
                 )
         return runs
@@ -1793,7 +1793,7 @@ def _section_matches_query(section: dict[str, Any], query: str) -> bool:
 
     def text_in_block(b: dict[str, Any]) -> str:
         kind = b.get("kind", "")
-        text = b.get("text", "")
+        text: str = b.get("text", "")
         if not text and b.get("runs"):
             text = "".join(r.get("text", "") for r in b["runs"] if r.get("kind") == "text")
         if kind == "table":
@@ -2679,7 +2679,7 @@ def _render_toc_preview_panel() -> None:
     # Собираем все заголовки с глубиной.
     headings: list[tuple[int, str]] = []
 
-    def walk(secs: list[dict], depth: int = 1) -> None:
+    def walk(secs: list[dict[str, Any]], depth: int = 1) -> None:
         for sec in secs:
             heading = (sec.get("heading") or "").strip()
             if heading:
@@ -2773,7 +2773,7 @@ def _compute_progress_metrics(state: dict[str, Any]) -> dict[str, Any]:
     }
 
     def block_text(b: dict[str, Any]) -> str:
-        text = b.get("text", "")
+        text: str = b.get("text", "")
         if not text and b.get("runs"):
             text = "".join(r.get("text", "") for r in b["runs"] if r.get("kind") == "text")
         return text

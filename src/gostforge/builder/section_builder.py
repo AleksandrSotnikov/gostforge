@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -177,8 +178,8 @@ class SectionBuilder:
 
     def table(
         self,
-        headers: list[str],
-        rows: list[list[str]],
+        headers: builtins.list[str],
+        rows: builtins.list[builtins.list[str]],
         caption: str,
     ) -> SectionBuilder:
         """Добавить таблицу с автонумерованной подписью."""

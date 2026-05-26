@@ -5,6 +5,7 @@ from __future__ import annotations
 from gostforge.model import (
     Block,
     Document,
+    InlineElement,
     ListBlock,
     LogicalSection,
     TextRun,
@@ -36,7 +37,7 @@ def _all_lists(document: Document) -> list[ListBlock]:
     return lists
 
 
-def _last_text_run(item: list) -> TextRun | None:  # type: ignore[no-untyped-def]
+def _last_text_run(item: list[InlineElement]) -> TextRun | None:
     """Найти последний TextRun в элементе списка (с непустым text)."""
     for el in reversed(item):
         if isinstance(el, TextRun) and el.text:

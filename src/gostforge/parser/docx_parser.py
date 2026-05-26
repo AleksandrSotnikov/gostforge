@@ -18,10 +18,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-import docx  # type: ignore[import-not-found]
-from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-not-found]
-from docx.table import Table as DocxTableCls  # type: ignore[import-not-found]
-from docx.text.paragraph import Paragraph as DocxParagraphCls  # type: ignore[import-not-found]
+import docx
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.table import Table as DocxTableCls
+from docx.text.paragraph import Paragraph as DocxParagraphCls
 from lxml import etree  # type: ignore[import-untyped]
 
 from gostforge.model import (
@@ -283,7 +283,7 @@ def _attach_footnote_text(page_sections: list[PageSection], footnotes: dict[str,
     через сигнатуры _build_paragraph и далее.
     """
 
-    def walk(items: list) -> None:
+    def walk(items: list[Any]) -> None:
         for item in items:
             if hasattr(item, "content"):  # Paragraph
                 for el in item.content:
@@ -362,7 +362,7 @@ def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> No
     только info['dpi']).
     """
     try:
-        from PIL import Image  # type: ignore[import-not-found]
+        from PIL import Image
     except ImportError:
         return
 
@@ -628,7 +628,7 @@ def _extract_header_or_footer(container: Any) -> HeaderConfig | None:
         if not _paragraph_has_page_field(fp):
             continue
         alignment = _alignment_to_literal(fp.paragraph_format.alignment)
-        slot_runs = [TextRun(text="{page}")]
+        slot_runs: list[InlineElement] = [TextRun(text="{page}")]
         # Распределение по слоту определяется выравниванием параграфа в
         # колонтитуле. None и justify трактуем как center — это типичный
         # случай отображения номера страницы.
@@ -790,7 +790,7 @@ def _paragraph_num_id(dp: DocxParagraph) -> str | None:
     num_id_el = num_pr.find(f"{{{W_NS}}}numId")
     if num_id_el is None:
         return None
-    return num_id_el.get(f"{{{W_NS}}}val")
+    return cast("str | None", num_id_el.get(f"{{{W_NS}}}val"))
 
 
 # Regex-маркеры элементов текстовых списков, написанных через builder/
@@ -925,13 +925,6 @@ def _try_consume_marker_run(items: list[Any], start: int) -> tuple[Any, int] | N
         items=[[TextRun(text=t)] for t in items_texts],
     )
     return list_block, consumed
-
-
-def _paragraph_plain_text(p: Any) -> str:
-    """Склейка text всех TextRun параграфа (helper для list-grouping)."""
-    from gostforge.model import TextRun
-
-    return "".join(el.text for el in p.content if isinstance(el, TextRun)).strip()
 
 
 def _bibliography_section_ids(page_sections: list[PageSection]) -> set[str]:

@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 class PageGeometryProfile(BaseModel):
     size: str = "A4"
     margins_mm: dict[str, float] = Field(
-        default_factory=lambda: {"top": 20, "right": 15, "bottom": 20, "left": 30}
+        default_factory=lambda: {"top": 20.0, "right": 15.0, "bottom": 20.0, "left": 30.0}
     )
 
 

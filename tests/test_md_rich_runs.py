@@ -59,7 +59,7 @@ def test_paragraph_with_citation() -> None:
         "kind": "paragraph",
         "runs": [
             {"kind": "text", "text": "См. "},
-            {"kind": "citation", "source_id": "1", "page": "42"},
+            {"kind": "citation", "source_id": "1", "pages": "42"},
         ],
     }
     md = _paragraph_to_md(block)

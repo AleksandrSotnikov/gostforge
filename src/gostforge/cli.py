@@ -24,7 +24,7 @@ from gostforge.validator.engine import registered_checks
 
 # Цветовая палитра по серьёзности нарушения. Click автоматически отключает
 # цвет, если stdout не терминал, так что отдельно проверять не нужно.
-_SEVERITY_STYLE = {
+_SEVERITY_STYLE: dict[str, tuple[str, dict[str, Any], str]] = {
     "error": ("ошибок", {"fg": "red", "bold": True}, "ERROR"),
     "warning": ("предупр.", {"fg": "yellow", "bold": True}, "WARN "),
     "info": ("инфо", {"fg": "cyan"}, "INFO "),
@@ -124,11 +124,12 @@ def _write_xlsx_report(results: dict[str, list[Violation]], output: Path, profil
     """Сохранить отчёт в Excel: один лист «Сводка» + по листу на каждый файл."""
     # openpyxl уже в зависимостях; импорт локально, чтобы CLI грузился без него
     # при использовании только Markdown-отчётов.
-    from openpyxl import Workbook  # type: ignore[import-not-found]
-    from openpyxl.styles import Alignment, Font, PatternFill  # type: ignore[import-not-found]
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
 
     wb = Workbook()
     summary = wb.active
+    assert summary is not None  # у нового Workbook всегда есть активный лист
     summary.title = "Сводка"
 
     bold = Font(bold=True)
@@ -1413,7 +1414,7 @@ def new_state_cmd(
 
     if template == "empty":
         # Минимальный каркас: один раздел «Введение» + список источников.
-        state = {
+        state: dict[str, Any] = {
             "title": title,
             "author": author,
             "year": year,
@@ -1706,7 +1707,7 @@ def _paragraph_to_html_inline(block: dict[str, Any]) -> str:
     """Сериализовать параграф (text или runs) в HTML с inline-разметкой."""
     import html as html_mod
 
-    text = block.get("text", "")
+    text: str = block.get("text", "")
     runs = block.get("runs") or []
     if not runs:
         return html_mod.escape(text)
@@ -1727,7 +1728,7 @@ def _paragraph_to_html_inline(block: dict[str, Any]) -> str:
             parts.append(f"\\({latex}\\)")
         elif r.get("kind") == "citation":
             sid = r.get("source_id", "")
-            page = r.get("page", "")
+            page = r.get("pages", "")
             label = f"[{sid}, с. {page}]" if page else f"[{sid}]"
             parts.append(html_mod.escape(label))
     return "".join(parts)
@@ -1841,7 +1842,7 @@ def _paragraph_to_md(block: dict[str, Any]) -> str:
 
     Для простого text= возвращаем как есть.
     """
-    text = block.get("text", "")
+    text: str = block.get("text", "")
     runs = block.get("runs") or []
     if not runs:
         return text
@@ -1854,7 +1855,7 @@ def _paragraph_to_md(block: dict[str, Any]) -> str:
                 out_parts.append(f"${r.get('latex', '')}$")
             elif r.get("kind") == "citation":
                 sid = r.get("source_id", "")
-                page = r.get("page", "")
+                page = r.get("pages", "")
                 out_parts.append(f"[{sid}, с. {page}]" if page else f"[{sid}]")
             elif r.get("kind") == "xref":
                 # xref в Markdown ёще нет нативного аналога — кладём
@@ -2478,7 +2479,8 @@ def _markdown_to_state(
     def current_blocks() -> list[dict[str, Any]] | None:
         if not section_stack:
             return None
-        return section_stack[-1][1].setdefault("blocks", [])
+        blocks: list[dict[str, Any]] = section_stack[-1][1].setdefault("blocks", [])
+        return blocks
 
     i = 0
     while i < len(lines):
