@@ -1,0 +1,36 @@
+# gostforge REST API — пример docker-compose для production.
+#
+# Использование:
+#   1. Скопируйте .env.example в .env и заполните ключи / origins.
+#   2. docker compose up -d
+#   3. curl -H "X-API-Key: ${GOSTFORGE_API_KEYS}" http://localhost:8000/health
+#
+# Для публичного интернета поставьте перед сервисом nginx/Caddy с
+# TLS-терминированием и rate-limiting'ом.
+
+services:
+  api:
+    build: .
+    image: gostforge:latest
+    container_name: gostforge-api
+    restart: unless-stopped
+    ports:
+      - "${GOSTFORGE_BIND:-127.0.0.1}:8000:8000"
+    environment:
+      # Ключи через .env (см. .env.example).
+      GOSTFORGE_API_KEYS: "${GOSTFORGE_API_KEYS:-}"
+      GOSTFORGE_CORS_ORIGINS: "${GOSTFORGE_CORS_ORIGINS:-}"
+      GOSTFORGE_MAX_UPLOAD_MB: "${GOSTFORGE_MAX_UPLOAD_MB:-25}"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Лимит ресурсов — на случай вредных запросов.
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M

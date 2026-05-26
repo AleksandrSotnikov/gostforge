@@ -225,14 +225,19 @@ inline-формула, библиографическая цитата.
 
 ## Фаза 3 — Продакшен и масштаб — по мере спроса
 
-- [x] **REST API (FastAPI)** для интеграций с LMS — первая итерация.
-      7 endpoints (`/health`, `/profiles[/{id}]`, `/checks`, `/check`,
-      `/fix`, `/annotate`, `/stats`), CLI-обёртка `gostforge serve`,
-      опциональная зависимость `[api]`, 20 тестов через
-      `fastapi.testclient`. Полная спецификация —
-      [docs/phase-3-api-spec.md](phase-3-api-spec.md).
-- [ ] Аутентификация и rate-limiting (предполагается reverse-proxy
-      или API-gateway — пока без встроенной поддержки).
+- [x] **REST API (FastAPI)** для интеграций с LMS. 7 endpoints
+      (`/health`, `/profiles[/{id}]`, `/checks`, `/check`, `/fix`,
+      `/annotate`, `/stats`), CLI-обёртка `gostforge serve`,
+      опциональная зависимость `[api]`. Спецификация:
+      [phase-3-api-spec.md](phase-3-api-spec.md).
+- [x] **Аутентификация API-key** через middleware (env
+      `GOSTFORGE_API_KEYS`, поддержка нескольких ключей, bypass для
+      `/health` и `/docs`). Rate-limiting — на стороне reverse-proxy
+      (готовый nginx-конфиг в [api.md](api.md)).
+- [x] **Docker и docker-compose** для production-деплоя.
+      Multi-stage Dockerfile на python:3.11-slim, non-root user,
+      HEALTHCHECK через `/health`, лимит ресурсов. Руководство по
+      деплою с nginx — [api.md](api.md).
 - [ ] Веб-версия — деплой Streamlit-UI как сервис.
 - [ ] Командная работа: руководитель ↔ студент (комментарии,
       обсуждения, итерации).

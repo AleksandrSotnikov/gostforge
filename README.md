@@ -12,9 +12,9 @@
 ## Статус
 
 **Фазы 0–2 завершены, Фаза 2.5 (пословное редактирование в
-конструкторе) и первая итерация Фазы 3 (REST API на FastAPI) —
-реализованы.** Покрытие каталога — **104 проверки в 15 категориях
-(100%)**, общая база тестов **866+**.
+конструкторе) и Фаза 3 (REST API на FastAPI с API-key auth, Docker)
+— реализованы.** Покрытие каталога — **104 проверки в 15 категориях
+(100%)**, общая база тестов **877+**.
 
 Что уже работает:
 
@@ -59,11 +59,15 @@
   рисунка/таблицы/формулы по списку), Citation (выбор записи
   библиографии с опц. страницами). Undo/Redo на 50 шагов + автосохранение
   в `~/.gostforge/autosave/`. См. [docs/builder.md](docs/builder.md#41-пословное-редактирование-фаза-25).
-- **REST API** (Фаза 3, первая итерация, опц. extra `[api]`): 7 endpoints
-  на FastAPI — `/health`, `/profiles`, `/profiles/{id}`, `/checks`,
-  `/check`, `/fix`, `/annotate`, `/stats`. Запуск через
-  `gostforge serve`. См. [docs/phase-3-api-spec.md](docs/phase-3-api-spec.md).
-- **866+ тестов**, mypy --strict baseline, ruff без регресса.
+- **REST API** (Фаза 3, опц. extra `[api]`): 7 endpoints на FastAPI —
+  `/health`, `/profiles`, `/profiles/{id}`, `/checks`, `/check`,
+  `/fix`, `/annotate`, `/stats`. Аутентификация через `X-API-Key`
+  middleware (env `GOSTFORGE_API_KEYS`), CORS, лимит размера файла.
+  Запуск через `gostforge serve` или `docker compose up`. См.
+  [docs/api.md](docs/api.md) — руководство по деплою с nginx,
+  [docs/phase-3-api-spec.md](docs/phase-3-api-spec.md) — спецификация
+  endpoints.
+- **877+ тестов**, mypy --strict baseline, ruff без регресса.
 
 См. [docs/roadmap.md](docs/roadmap.md) — план фаз и текущий прогресс.
 
