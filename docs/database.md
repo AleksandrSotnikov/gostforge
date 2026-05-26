@@ -157,11 +157,15 @@ with get_connection() as conn:
 * **v2** — `custom_profiles` (id, profile_id, name, version,
   yaml_content, source, installed_at). Локальный реестр кафедральных
   профилей. Подробное руководство — [profiles.md](profiles.md).
-
-**Запланированы (ещё не в коде):**
-
-* **v3** — `users`, `comments`, `review_threads` для совместной
-  работы студент ↔ руководитель.
+* **v3** — `comments` (id, submission_id FK→submissions, author,
+  role, body, resolved, created_at). Совместная работа руководитель
+  ↔ студент. Роли ограничены CHECK (student/supervisor/anonymous).
+  CASCADE при удалении submission. CLI:
+  `gostforge comment add/list/resolve/delete`. REST:
+  `GET/POST /submissions/{id}/comments`, `PATCH /comments/{id}/resolve`,
+  `DELETE /comments/{id}`. Аутентификация — на уровне CLI/UI (env
+  `GOSTFORGE_DEFAULT_AUTHOR`), не на уровне БД; полноценная таблица
+  `users` появится при переходе к multi-user сервису.
 
 Каждая миграция добавляется только append-only в `migrations.py`;
 существующие записи никогда не редактируются.

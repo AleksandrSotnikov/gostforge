@@ -13,10 +13,10 @@
 
 **Фазы 0–2 завершены, Фаза 2.5 (пословное редактирование в
 конструкторе) и Фаза 3 (REST API + Docker + локальная БД с
-auto-migrations + маркетплейс кафедральных профилей + фундамент
-совместной работы + встроенный просмотр документации в UI) —
-реализованы.** Покрытие каталога — **104 проверки в 15 категориях
-(100%)**, общая база тестов **991+**.
+auto-migrations + маркетплейс кафедральных профилей + совместная
+работа руководитель↔студент + встроенный просмотр документации в
+UI) — реализованы.** Покрытие каталога — **104 проверки в 15
+категориях (100%)**, общая база тестов **1024+**.
 
 Что уже работает:
 
@@ -50,9 +50,10 @@ auto-migrations + маркетплейс кафедральных профиле
   Word (боковые выноски) либо inline-маркеры о нарушениях прямо в `.docx`.
 - **Плагины проверок** (`~/.gostforge/plugins/`): динамическая загрузка
   пользовательских проверок без модификации кода gostforge.
-- **CLI** (15 операций): `check`, `fix`, `annotate`, `new`, `pdf`, `diff`,
+- **CLI** (16 операций): `check`, `fix`, `annotate`, `new`, `pdf`, `diff`,
   `stats`, `ui`, `serve`, `history`, `checks`,
-  `profiles list/show/validate/diff`, `plugins list/dir`.
+  `profiles list/show/install/uninstall/validate/diff`,
+  `comment add/list/resolve/delete`, `plugins list/dir`.
 - **Streamlit-WebApp** с тремя режимами (Нормоконтроль / Конструктор /
   Документация). Открывается в любом современном браузере, включая
   мобильный — отдельные native-клиенты не разрабатываются. Режим
@@ -83,6 +84,14 @@ auto-migrations + маркетплейс кафедральных профиле
   `gostforge profiles install kafedra.yaml` или `POST /profiles`.
   После этого профиль доступен всем командам без правки исходников.
   См. [docs/profiles.md](docs/profiles.md#установка-кафедрального-профиля).
+- **Совместная работа руководитель ↔ студент** (миграция v3):
+  таблица комментариев с ролями `supervisor`/`student`/`anonymous`,
+  toggle resolved-флага, счётчик `unresolved_comments` в submission
+  detail. CLI: `gostforge comment add/list/resolve/delete` +
+  показ в `gostforge history --id N`. REST: `POST/GET
+  /submissions/{id}/comments`, `PATCH /comments/{id}/resolve`,
+  `DELETE /comments/{id}`. Authorship: env
+  `GOSTFORGE_DEFAULT_AUTHOR`.
 - **Production-деплой через Docker**: `Dockerfile` (API), `Dockerfile.ui`
   (Streamlit UI), `docker compose up -d` поднимает оба сервиса.
   Multi-stage образы на `python:3.11-slim` с non-root юзером и

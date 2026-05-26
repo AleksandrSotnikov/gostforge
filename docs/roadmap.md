@@ -268,11 +268,16 @@ inline-формула, библиографическая цитата.
       флаг `is_custom` в `GET /profiles`. Custom-профиль с тем же
       id что builtin переопределяет последний — кафедра может
       «уточнить» базовый ГОСТ.
-- [~] **Командная работа: руководитель ↔ студент** (миграция v3).
-      Фундамент готов — таблица `comments` с ролями student/
-      supervisor/anonymous, CRUD-операции, CASCADE при удалении
-      submission. Осталось: REST endpoints, CLI-команды, UI-панель
-      обсуждения в Streamlit.
+- [x] **Командная работа: руководитель ↔ студент** (миграция v3).
+      Таблица `comments` с ролями student/supervisor/anonymous,
+      CRUD-операции, CASCADE при удалении submission. REST:
+      `GET/POST /submissions/{id}/comments`,
+      `PATCH /comments/{id}/resolve`, `DELETE /comments/{id}`;
+      `unresolved_comments` в `GET /submissions/{id}`. CLI:
+      `gostforge comment add/list/resolve/delete` + интеграция в
+      `gostforge history --id N` (комментарии под violations).
+      Authorship: env `GOSTFORGE_DEFAULT_AUTHOR` или `getpass.getuser()`
+      по умолчанию; полноценный multi-user — отдельная миграция.
 - [ ] Интеграция с LMS (Moodle, eLearning, и др.) — теперь
       технически возможна через REST API.
 - [ ] Маркетплейс профилей кафедр — публичный реестр (а не только

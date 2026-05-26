@@ -142,7 +142,40 @@ curl -X DELETE -H "X-API-Key: $KEY" \
 
 Подробное руководство по реестру — [profiles.md](profiles.md).
 
-### 4.6. История проверок (submissions)
+### 4.6. Комментарии (совместная работа руководитель ↔ студент)
+
+```bash
+# Добавить комментарий к submission.
+curl -X POST http://localhost:8000/submissions/42/comments \
+  -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"body": "Переделай введение", "author": "prof", "role": "supervisor"}'
+
+# Список комментариев.
+curl -H "X-API-Key: $KEY" \
+  http://localhost:8000/submissions/42/comments
+
+# Только незакрытые (для UI «что осталось обсудить»).
+curl -H "X-API-Key: $KEY" \
+  "http://localhost:8000/submissions/42/comments?include_resolved=false"
+
+# Пометить как resolved.
+curl -X PATCH -H "X-API-Key: $KEY" \
+  http://localhost:8000/comments/7/resolve
+
+# Снять отметку (re-open).
+curl -X PATCH -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"resolved": false}' \
+  http://localhost:8000/comments/7/resolve
+
+# Удалить.
+curl -X DELETE -H "X-API-Key: $KEY" http://localhost:8000/comments/7
+```
+
+`role` — одно из `student`, `supervisor`, `anonymous`. Поле
+`unresolved_comments` в `GET /submissions/{id}` сразу показывает
+сколько открытых вопросов остаётся.
+
+### 4.7. История проверок (submissions)
 
 Каждый `POST /check` по умолчанию записывает submission в локальную
 БД (см. [database.md](database.md)).
