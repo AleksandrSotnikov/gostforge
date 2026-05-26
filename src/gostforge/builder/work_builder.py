@@ -157,11 +157,17 @@ class WorkBuilder:
             if first_para is not None:
                 first_para.page_break_before = True
 
-        # Создаём одну PageSection «main» с правильной геометрией, нумерацией
-        # страниц и футером «{page}». Параметры — по умолчанию для ГОСТ 7.32.
+        # Создаём одну PageSection «main». Параметры геометрии и нумерации
+        # читаем из профиля (если он указан и зарегистрирован) — иначе
+        # fallback на дефолты ГОСТ 7.32. Это закрывает F.01 (поля) и F.06
+        # (start_value) для всех профилей-наследников (ЕСКД с правым полем
+        # 10 мм, кафедра с start_value=4 и т. п.).
+        page_margins, start_value = _resolve_page_params_from_profile(
+            self._profile_id
+        )
         page = PageGeometry(
             paper="A4",
-            margins_mm={"top": 20, "right": 15, "bottom": 20, "left": 30},
+            margins_mm=page_margins,
             orientation="portrait",
         )
         footer = HeaderConfig(
@@ -171,7 +177,7 @@ class WorkBuilder:
             visible=True,
             format="arabic",
             start_mode="start_at",
-            start_value=3,
+            start_value=start_value,
         )
         content: list[LogicalSection | Block] = list(self._sections)
         page_section = PageSection(
@@ -264,6 +270,42 @@ def work(
 
 
 # --- Хелперы -----------------------------------------------------------------
+
+
+_DEFAULT_MARGINS_MM = {"top": 20.0, "right": 15.0, "bottom": 20.0, "left": 30.0}
+_DEFAULT_START_VALUE = 3
+
+
+def _resolve_page_params_from_profile(
+    profile_id: str,
+) -> tuple[dict[str, float], int]:
+    """Извлечь поля страницы и start_value нумерации из профиля.
+
+    Если профиль не зарегистрирован или не удалось загрузить — возвращаем
+    дефолты ГОСТ 7.32-2017. Профиль может прийти с любого окружения
+    (тесты, пользовательский YAML), поэтому делаем мягко через
+    try/except — builder не должен падать на этапе build() из-за
+    конфига профиля.
+    """
+    try:
+        from gostforge.profile import load_profile  # noqa: PLC0415
+
+        profile = load_profile(profile_id)
+    except Exception:  # noqa: BLE001
+        return dict(_DEFAULT_MARGINS_MM), _DEFAULT_START_VALUE
+
+    margins = dict(_DEFAULT_MARGINS_MM)
+    margins.update({k: float(v) for k, v in profile.styles.page.margins_mm.items()})
+
+    start_value = _DEFAULT_START_VALUE
+    f06 = profile.checks.get("F.06")
+    if f06 and f06.params.get("start_value") is not None:
+        try:
+            start_value = int(f06.params["start_value"])
+        except (TypeError, ValueError):
+            pass
+
+    return margins, start_value
 
 
 def _find_first_paragraph(section: LogicalSection) -> Paragraph | None:

@@ -859,6 +859,43 @@ _PAGE_FMT_OOXML = {
 }
 
 
+def _sync_page_section_with_profile(
+    page_section: PageSection, profile: Profile
+) -> None:
+    """Применить параметры профиля к модели page_section перед записью.
+
+    Согласует:
+    * margins_mm — поля страницы из profile.styles.page;
+    * page_numbering.start_value — из profile.checks['F.06'].params,
+      если задано и текущий start_mode='start_at'.
+
+    Эта функция мутирует input page_section (side effect). Это
+    единственное место, где модель «приземляется» под конкретный
+    профиль во время экспорта — builder.build() остаётся
+    профиль-агностичным.
+    """
+    # Поля страницы.
+    margins = profile.styles.page.margins_mm
+    if margins:
+        merged = dict(page_section.page.margins_mm)
+        merged.update({k: float(v) for k, v in margins.items()})
+        page_section.page.margins_mm = merged
+    # F.06 start_value.
+    f06 = profile.checks.get("F.06")
+    if (
+        f06
+        and f06.enabled
+        and f06.params.get("start_value") is not None
+        and page_section.page_numbering.start_mode == "start_at"
+    ):
+        try:
+            page_section.page_numbering.start_value = int(
+                f06.params["start_value"]
+            )
+        except (TypeError, ValueError):
+            pass
+
+
 def _apply_pgnumtype(doc: DocxDocument, page_section: PageSection) -> None:
     """Прописать <w:pgNumType w:start="N" w:fmt="..."/> в sectPr.
 
@@ -964,6 +1001,11 @@ def export_docx(
 
         if document.page_sections:
             first = document.page_sections[0]
+            # Согласовать page_section с профилем перед записью: F.06
+            # start_value, поля страницы. Builder ставит свои дефолты,
+            # а профиль (особенно наследник base) может их переопределить.
+            # Этот вызов — единое место синхронизации модели с профилем.
+            _sync_page_section_with_profile(first, profile)
             _apply_page_size(doc, first)
             _apply_pgnumtype(doc, first)
             if first.footer is not None:
