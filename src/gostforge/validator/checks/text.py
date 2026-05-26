@@ -53,7 +53,8 @@ def _all_paragraphs(document: Document) -> list[Paragraph]:
 
 
 def _classify_paragraph(paragraph: Paragraph) -> str:
-    """Классифицировать абзац: 'body', 'caption', 'footnote', 'header_footer', 'heading'.
+    """Классифицировать абзац: 'body', 'caption', 'footnote',
+    'header_footer', 'heading', 'figure_placeholder'.
 
     Используется проверками для выбора применимых параметров профиля.
     """
@@ -66,6 +67,14 @@ def _classify_paragraph(paragraph: Paragraph) -> str:
         return "header_footer"
     if style.startswith("heading"):
         return "heading"
+    # Placeholder для отсутствующего файла-рисунка: «[Рисунок: fig-1]»
+    # или «[Таблица: tbl-1]». Не должен проверяться body-правилами —
+    # это не абзац основного текста.
+    text = "".join(
+        el.text for el in paragraph.content if isinstance(el, TextRun)
+    ).strip()
+    if text.startswith("[Рисунок:") or text.startswith("[Таблица:"):
+        return "figure_placeholder"
     return "body"
 
 

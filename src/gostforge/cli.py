@@ -2571,18 +2571,31 @@ def import_docx_cmd(path: Path, output: Path) -> None:
     останутся параграфами. Это не теряет содержимое, но требует
     собрать список заново в UI, если он нужен как list-блок.
     """
-    from gostforge.web.builder_editor import document_to_state  # noqa: PLC0415
+    from gostforge.web.builder_editor import (  # noqa: PLC0415
+        document_to_state,
+        extract_embedded_images,
+        remap_embedded_image_paths_in_state,
+    )
 
     document = parse_docx(path)
     state = document_to_state(document)
+    # Извлекаем embedded-картинки рядом со state.json (каталог
+    # <output>.images/), чтобы при повторной генерации они не
+    # терялись.
+    images_dir = output.parent / f"{output.stem}.images"
+    rid_to_path = extract_embedded_images(path, images_dir)
+    if rid_to_path:
+        remap_embedded_image_paths_in_state(state, rid_to_path)
     output.write_text(
         json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     n_sec = len(state.get("sections", []))
-    click.echo(
-        f"Разложено {n_sec} разделов в {output}. "
-        f"Загрузите его через `gostforge ui` → «Загрузить сохранение (.json)»."
-    )
+    n_img = len(rid_to_path)
+    msg = f"Разложено {n_sec} разделов в {output}."
+    if n_img:
+        msg += f" Извлечено {n_img} изображений → {images_dir}."
+    msg += " Загрузите через `gostforge ui` → «Загрузить сохранение (.json)»."
+    click.echo(msg)
 
 
 if __name__ == "__main__":

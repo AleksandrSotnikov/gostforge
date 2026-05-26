@@ -914,6 +914,9 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
        снизу, таблицам — сверху; параграфы-подписи удаляются.
     """
     current_section: LogicalSection | None = None
+    # Стек открытых секций для построения иерархии (глава → подраздел
+    # → пункт). См. логику ниже при обработке заголовков.
+    section_stack: list[LogicalSection] = []
     counters = _Counters()
     body = docx_doc.element.body
 
@@ -974,7 +977,21 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
                     level=heading_level,
                     heading=heading_content,
                 )
-                page_section.content.append(section)
+                # Поддерживаем стек открытых секций для правильной
+                # иерархии. Новая секция уровня L закрывает (pop) все
+                # открытые секции с level>=L и становится child-ом
+                # текущей вершины стека (или попадает на top-level,
+                # если стек пуст).
+                # Без этого S.07/H.06 ложно срабатывали на главах:
+                # подразделы лежали на top-level рядом с главой, а у
+                # главы children=[].
+                while section_stack and section_stack[-1].level >= heading_level:
+                    section_stack.pop()
+                if section_stack:
+                    section_stack[-1].children.append(section)
+                else:
+                    page_section.content.append(section)
+                section_stack.append(section)
                 current_section = section
                 continue
 

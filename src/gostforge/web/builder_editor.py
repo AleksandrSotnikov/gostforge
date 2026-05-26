@@ -596,6 +596,94 @@ def _reconstruct_section_hierarchy(flat: list[Any]) -> list[Any]:
     return top
 
 
+def extract_embedded_images(
+    docx_path: Path, target_dir: Path
+) -> dict[str, Path]:
+    """Распаковать все embedded-картинки из .docx в target_dir.
+
+    Возвращает {rId: extracted_path}. Используется при импорте чужой
+    .docx в конструктор: без распаковки image_path остаётся как
+    'embedded:rIdN', и при повторной генерации (когда source_docx уже
+    не открыт) картинки заменяются на placeholder.
+
+    Алгоритм:
+    1. Открываем .docx как ZIP.
+    2. Парсим word/_rels/document.xml.rels — там пары
+       (rId → image-target).
+    3. Извлекаем каждый image-target (например word/media/image1.png)
+       в target_dir/<rId><.ext>.
+    4. Возвращаем mapping rId → path.
+    """
+    import zipfile  # noqa: PLC0415
+    from xml.etree import ElementTree as ET  # noqa: PLC0415
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    mapping: dict[str, Path] = {}
+    IMAGE_REL_TYPE = (
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    )
+
+    try:
+        with zipfile.ZipFile(docx_path) as zf:
+            try:
+                rels_xml = zf.read("word/_rels/document.xml.rels")
+            except KeyError:
+                return mapping
+            root = ET.fromstring(rels_xml)
+            rels_ns = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+            for rel in root.findall(f"{rels_ns}Relationship"):
+                if rel.get("Type") != IMAGE_REL_TYPE:
+                    continue
+                r_id = rel.get("Id") or ""
+                target = rel.get("Target") or ""
+                if not r_id or not target:
+                    continue
+                # target обычно вида 'media/image1.png' (относительно word/).
+                zip_path = (
+                    f"word/{target}"
+                    if not target.startswith("word/")
+                    else target
+                )
+                try:
+                    blob = zf.read(zip_path)
+                except KeyError:
+                    continue
+                # Сохраняем под именем <rId><.ext>.
+                ext = Path(target).suffix or ".bin"
+                out_path = target_dir / f"{r_id}{ext}"
+                out_path.write_bytes(blob)
+                mapping[r_id] = out_path
+    except (zipfile.BadZipFile, ET.ParseError):  # pragma: no cover
+        pass
+    return mapping
+
+
+def remap_embedded_image_paths_in_state(
+    state: dict[str, Any], rid_to_path: dict[str, Path]
+) -> None:
+    """Заменить 'embedded:rIdN' в state на абсолютные пути из mapping.
+
+    Мутирует state на месте. Если rId не найден в mapping — путь
+    остаётся как был (экспортёр запишет placeholder).
+    """
+    def walk_blocks(blocks: list[dict[str, Any]]) -> None:
+        for b in blocks:
+            if b.get("kind") == "figure":
+                path = b.get("image_path", "")
+                if path.startswith("embedded:"):
+                    rid = path[len("embedded:"):]
+                    if rid in rid_to_path:
+                        b["image_path"] = str(rid_to_path[rid])
+
+    def walk_section(sec: dict[str, Any]) -> None:
+        walk_blocks(sec.get("blocks") or [])
+        for sub in sec.get("subsections") or []:
+            walk_section(sub)
+
+    for sec in state.get("sections") or []:
+        walk_section(sec)
+
+
 def document_to_state(document: Any) -> dict[str, Any]:
     """Разложить распарсенный Document обратно в state-dict конструктора.
 
@@ -2274,6 +2362,18 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
             tmp_path = Path(tmp.name)
         document = parse_docx(tmp_path)
         new_state = document_to_state(document)
+        # Извлекаем embedded-картинки в постоянный каталог и
+        # подменяем 'embedded:rIdN' в state на абсолютные пути.
+        # Без этого при повторной генерации картинки терялись
+        # (source_docx уже не доступен).
+        import time  # noqa: PLC0415
+        images_dir = (
+            Path.home() / ".gostforge" / "imports" /
+            f"{filename}-{int(time.time())}"
+        )
+        rid_to_path = extract_embedded_images(tmp_path, images_dir)
+        if rid_to_path:
+            remap_embedded_image_paths_in_state(new_state, rid_to_path)
     except Exception as exc:  # pragma: no cover - UI feedback
         st.sidebar.error(f"Не удалось разложить «{filename}»: {exc}")
         return

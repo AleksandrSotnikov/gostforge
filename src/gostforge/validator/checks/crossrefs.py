@@ -148,8 +148,21 @@ def check_figure_references_resolve(
     existing = _figure_numbers(document)
 
     for paragraph in _all_paragraphs(document):
+        # Пропускаем параграфы с подписями (стиль 'Caption' или текст
+        # начинается с 'Рисунок N —' / 'Таблица N —'). Подпись сама
+        # содержит «Рисунок 1 — ...», но это НЕ ссылка на рисунок, это
+        # его собственный заголовок. Без этого фильтра проверка
+        # ложно срабатывала на каждой подписи.
+        style = (paragraph.style_name or "").lower()
+        if style.startswith("caption"):
+            continue
         text = _paragraph_text(paragraph)
         if not text:
+            continue
+        # Текст подписи: «Рисунок N — описание» или «Таблица N — описание».
+        # Если параграф ЦЕЛИКОМ начинается с этого паттерна — это подпись,
+        # даже если стиль не задан как Caption (старые docx без стиля).
+        if _CAPTION_PREFIX_RE.match(text):
             continue
         for match in _FIGURE_REF_RE.finditer(text):
             try:
@@ -176,6 +189,16 @@ def check_figure_references_resolve(
             )
 
     return violations
+
+
+# Heuristic-регекс «параграф является подписью рисунка/таблицы».
+# Сработает на «Рисунок 1 — ...», «Таблица 1 — ...», независимо от
+# стиля абзаца. Используется в C.01/C.02 как fallback к проверке
+# style_name='Caption'.
+_CAPTION_PREFIX_RE = re.compile(
+    r"^\s*(?:Рисунок|Таблица)\s+\d+\s*[—–-]",
+    re.IGNORECASE,
+)
 
 
 # --- C.02 — ссылки на таблицы разрешаются ----------------------------------
@@ -249,8 +272,14 @@ def check_table_references_resolve(
     existing = _table_numbers(document)
 
     for paragraph in _all_paragraphs(document):
+        # Пропускаем подписи (стиль Caption или префикс 'Рисунок/Таблица N —').
+        style = (paragraph.style_name or "").lower()
+        if style.startswith("caption"):
+            continue
         text = _paragraph_text(paragraph)
         if not text:
+            continue
+        if _CAPTION_PREFIX_RE.match(text):
             continue
         for match in _TABLE_REF_RE.finditer(text):
             try:
