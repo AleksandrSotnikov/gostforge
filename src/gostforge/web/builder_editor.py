@@ -1571,6 +1571,29 @@ def _render_sidebar_metadata() -> None:
 # --- UI: section tree --------------------------------------------------------
 
 
+def _highlight_query_in_text(text: str, query: str) -> str:
+    """Обернуть все вхождения query в <mark> для подсветки в Streamlit-caption.
+
+    Сохраняет регистр найденного фрагмента (case-insensitive match,
+    но в результате — оригинальный регистр). HTML-инъекции защищены
+    через html.escape ВСЕГО входного text, потом мы НЕ экранируем
+    <mark>...</mark> теги — они стандартные.
+    """
+    if not query:
+        return text
+    import html  # noqa: PLC0415
+    import re  # noqa: PLC0415
+
+    escaped_text = html.escape(text)
+    # Регекс по escape-нутому text, но ищем escape-нутый query —
+    # чтобы не сломаться на спец-символах.
+    escaped_query = re.escape(html.escape(query))
+    pattern = re.compile(escaped_query, re.IGNORECASE)
+    return pattern.sub(
+        lambda m: f"<mark>{m.group(0)}</mark>", escaped_text
+    )
+
+
 def _section_matches_query(section: dict[str, Any], query: str) -> bool:
     """True, если в разделе (или его подразделах/блоках) есть совпадение
     с поисковым запросом (case-insensitive substring).
@@ -1664,13 +1687,30 @@ def _render_section_tree() -> None:
             with cols[0]:
                 st.markdown("**▶**" if is_active else " ")
             with cols[1]:
-                if st.button(
-                    heading,
-                    key=f"select_section_{idx}",
-                    use_container_width=True,
-                ):
-                    state["active_section_index"] = idx
-                    st.rerun()
+                # Подсветка совпадения query в heading.
+                button_label = heading
+                if filter_q:
+                    # Streamlit button не рендерит markdown — поэтому
+                    # подсветку показываем рядом отдельным caption-ом.
+                    if st.button(
+                        button_label,
+                        key=f"select_section_{idx}",
+                        use_container_width=True,
+                    ):
+                        state["active_section_index"] = idx
+                        st.rerun()
+                    st.caption(
+                        _highlight_query_in_text(heading, filter_q),
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    if st.button(
+                        button_label,
+                        key=f"select_section_{idx}",
+                        use_container_width=True,
+                    ):
+                        state["active_section_index"] = idx
+                        st.rerun()
             with cols[2]:
                 if st.button("↑", key=f"up_{idx}", disabled=idx == 0):
                     sections[idx - 1], sections[idx] = sections[idx], sections[idx - 1]
@@ -1894,6 +1934,21 @@ def _render_bulk_operations_sidebar() -> None:
         st.sidebar.info(f"Снято отключений у {reset} разделов")
         st.rerun()
 
+    if st.sidebar.button(
+        "Авто-нумерация глав и подразделов",
+        key="bulk_autonumber",
+        help=(
+            "Проставляет «1.», «1.1», «1.1.1» перед каждым "
+            "заголовком в работе. Существующая нумерация будет "
+            "заменена. Структурные разделы (Введение, Заключение, "
+            "Содержание, Реферат, Список источников, Приложения) "
+            "пропускаются."
+        ),
+    ):
+        numbered = _bulk_auto_number_headings(state)
+        st.sidebar.success(f"Пронумеровано заголовков: {numbered}")
+        st.rerun()
+
 
 def _bulk_remove_empty_paragraphs(state: dict[str, Any]) -> int:
     """Удалить пустые параграфы во всех разделах. Возвращает счётчик."""
@@ -1973,6 +2028,95 @@ def _to_title_case(text: str) -> str:
         else:
             out.append(w)
     return " ".join(out)
+
+
+# Заголовки, которые НЕ нужно автонумеровать (это структурные разделы
+# по ГОСТу — у них нет номера). Сравнение case-insensitive по нормализованной
+# первой строке без существующей нумерации.
+_STRUCTURAL_HEADINGS = frozenset(
+    {
+        "введение",
+        "заключение",
+        "содержание",
+        "реферат",
+        "список использованных источников",
+        "список литературы",
+        "литература",
+        "список источников",
+        "библиографический список",
+        "оглавление",
+        "перечень сокращений",
+        "перечень обозначений и сокращений",
+    }
+)
+
+
+def _is_structural_heading(heading: str) -> bool:
+    """True, если заголовок — структурный (Введение, Заключение, ...)
+    или приложение (начинается с «Приложение»)."""
+    import re  # noqa: PLC0415
+
+    # Снимаем существующую нумерацию вида '1 Х', '1. Х', '1.1 Х' для
+    # сравнения с базовым названием.
+    cleaned = re.sub(r"^\d+(\.\d+)*\.?\s+", "", heading).strip().lower()
+    if cleaned in _STRUCTURAL_HEADINGS:
+        return True
+    # Приложения: «Приложение А», «Приложение Б», ...
+    if cleaned.startswith("приложение"):
+        return True
+    return False
+
+
+def _strip_existing_number(heading: str) -> str:
+    """Убрать существующую нумерацию из начала heading.
+
+    Примеры: «1 Глава» → «Глава», «1.1. Подраздел» → «Подраздел»,
+    «1.1.1 Пункт» → «Пункт». Если номера нет — возвращает как есть.
+    """
+    import re  # noqa: PLC0415
+
+    return re.sub(r"^\d+(\.\d+)*\.?\s+", "", heading).strip()
+
+
+def _bulk_auto_number_headings(state: dict[str, Any]) -> int:
+    """Проставить «1», «1.1», «1.1.1» перед заголовками не-структурных
+    разделов. Возвращает счётчик пронумерованных.
+
+    Алгоритм:
+    1. Идём по top-level sections. Если структурный — пропускаем,
+       счётчик top не растёт.
+    2. Иначе top-counter++, heading = «N <название>».
+    3. Рекурсивно для subsections и sub-subsections, поддерживая
+       префикс родителя.
+    """
+    counter = 0
+    top_idx = 0
+    for sec in state.get("sections") or []:
+        if _is_structural_heading(sec.get("heading", "")):
+            # Заодно нормализуем — убираем случайную нумерацию.
+            base = _strip_existing_number(sec.get("heading", ""))
+            if base != sec.get("heading", ""):
+                sec["heading"] = base
+            # Подразделы внутри структурного раздела всё равно нумеруем,
+            # но без top-уровневого префикса.
+            for sub in sec.get("subsections") or []:
+                sub["heading"] = _strip_existing_number(sub.get("heading", ""))
+            continue
+        top_idx += 1
+        base = _strip_existing_number(sec.get("heading", ""))
+        sec["heading"] = f"{top_idx} {base}"
+        counter += 1
+        for s_idx, sub in enumerate(sec.get("subsections") or [], start=1):
+            sub_base = _strip_existing_number(sub.get("heading", ""))
+            sub["heading"] = f"{top_idx}.{s_idx} {sub_base}"
+            counter += 1
+            for ss_idx, subsub in enumerate(
+                sub.get("subsections") or [], start=1
+            ):
+                ss_base = _strip_existing_number(subsub.get("heading", ""))
+                subsub["heading"] = f"{top_idx}.{s_idx}.{ss_idx} {ss_base}"
+                counter += 1
+    return counter
 
 
 def _bulk_reset_disabled_checks(state: dict[str, Any]) -> int:
