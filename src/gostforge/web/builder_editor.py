@@ -559,6 +559,43 @@ def _strip_caption_prefix(caption: str, *, kind: Literal["table", "figure"]) -> 
 # --- Document → state ---------------------------------------------------------
 
 
+def _reconstruct_section_hierarchy(flat: list[Any]) -> list[Any]:
+    """Восстановить иерархию LogicalSection из плоского списка.
+
+    Парсер docx кладёт все секции (level 1, 2, 3, ...) в один линейный
+    список ``page_section.content``. Для конструктора нужна вложенная
+    структура: секция level=1 со списком children level=2, и т. д.
+
+    Алгоритм: проходим список, поддерживая стек открытых секций.
+    Каждая новая секция уровня L «закрывает» все секции со стека с
+    уровнем >= L, после чего становится child-ом текущей вершины стека
+    (если стек не пуст) или новой top-секцией.
+
+    Мутирует входные LogicalSection: добавляет children. Это
+    приемлемо, потому что вход — свежесозданный объект из parse_docx,
+    другими частями системы не разделяемый.
+    """
+    from gostforge.model import LogicalSection  # noqa: PLC0415
+
+    top: list[LogicalSection] = []
+    stack: list[LogicalSection] = []
+    for sec in flat:
+        if not isinstance(sec, LogicalSection):
+            continue
+        # Не сбрасываем children: парсер уже положил туда параграфы
+        # этой секции (до следующего заголовка). Мы только дополним
+        # список вложенными секциями.
+        # Закрываем уровни >= sec.level.
+        while stack and stack[-1].level >= sec.level:
+            stack.pop()
+        if stack:
+            stack[-1].children.append(sec)
+        else:
+            top.append(sec)
+        stack.append(sec)
+    return top
+
+
 def document_to_state(document: Any) -> dict[str, Any]:
     """Разложить распарсенный Document обратно в state-dict конструктора.
 
@@ -623,15 +660,32 @@ def document_to_state(document: Any) -> dict[str, Any]:
         "sections": [],
     }
 
-    # Парсер может класть LogicalSection и blocks смешанно (если документ
-    # имеет «висячие» блоки до первого заголовка) — мы такие блоки
-    # игнорируем, потому что builder требует, чтобы каждый блок
-    # принадлежал какой-то секции.
+    # Парсер кладёт LogicalSection плоско в page_section.content
+    # (level 1, 2, 3 — все на верхнем уровне). Восстанавливаем иерархию
+    # по level-у: секция level=N захватывает все следующие секции с
+    # level>N как свои потомки (пока не встретится секция с level<=N).
+    # Параграфы/таблицы между секциями игнорируются — builder требует,
+    # чтобы каждый блок принадлежал какой-то секции.
     top_sections: list[LogicalSection] = []
     for ps in document.page_sections:
-        for item in ps.content:
-            if isinstance(item, LogicalSection):
-                top_sections.append(item)
+        flat = [it for it in ps.content if isinstance(it, LogicalSection)]
+        # Если все секции — top-level (level==1) или плоские,
+        # реконструируем иерархию по level. Если уже видим вложенные
+        # секции (LogicalSection как child другой LogicalSection),
+        # иерархия построена и реконструировать не надо.
+        nested_section_ids: set[str] = set()
+        for sec in flat:
+            for child in sec.children:
+                if isinstance(child, LogicalSection):
+                    nested_section_ids.add(child.id)
+        already_built = bool(nested_section_ids)
+        if already_built:
+            # Берём только секции, не являющиеся child-ом другой.
+            top_sections.extend(
+                [s for s in flat if s.id not in nested_section_ids]
+            )
+        else:
+            top_sections.extend(_reconstruct_section_hierarchy(flat))
 
     # Эвристика для «раздела с библиографией»: заголовок попадает в
     # известный список названий («Список использованных источников»,
@@ -830,6 +884,12 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
             for sub in sec.get("subsections") or []:
                 sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))
                 _apply_blocks(sub_builder, sub.get("blocks") or [])
+                # Рекурсия для подразделов 3-го уровня и глубже.
+                for subsub in sub.get("subsections") or []:
+                    subsub_builder = sub_builder.subsection(
+                        subsub.get("heading", "Подраздел")
+                    )
+                    _apply_blocks(subsub_builder, subsub.get("blocks") or [])
             if sec.get("is_bibliography"):
                 for ref in sec.get("references") or []:
                     if isinstance(ref, str) and ref.strip():
@@ -1871,6 +1931,33 @@ def _apply_autofixes_to_state() -> None:
     st.success(f"Применено автофиксов: {len(applied)}. Сводка обновлена.")
 
 
+def _move_section_to(from_idx: int, to_idx: int) -> None:
+    """Переместить раздел из позиции from_idx в позицию to_idx.
+
+    Корректно обновляет active_section_index: если активная секция —
+    та, что перемещается, её индекс «следует» за ней.
+    """
+    state = _get_state()
+    sections = state["sections"]
+    if from_idx < 0 or from_idx >= len(sections):
+        return
+    to_idx = max(0, min(to_idx, len(sections) - 1))
+    if from_idx == to_idx:
+        return
+    item = sections.pop(from_idx)
+    sections.insert(to_idx, item)
+
+    active = state.get("active_section_index", 0)
+    if active == from_idx:
+        state["active_section_index"] = to_idx
+    elif from_idx < to_idx and from_idx < active <= to_idx:
+        # Раздел сдвинулся вниз — все между ним и новой позицией поднялись на 1.
+        state["active_section_index"] = active - 1
+    elif to_idx <= active < from_idx:
+        # Раздел сдвинулся вверх — все между ним и новой позицией опустились на 1.
+        state["active_section_index"] = active + 1
+
+
 def _duplicate_section(idx: int) -> None:
     """Дублировать раздел по индексу: вставить копию сразу после оригинала.
 
@@ -2056,6 +2143,25 @@ def _render_active_section_editor() -> None:
         value=section.get("heading", ""),
         key=f"edit_heading_{idx}",
     )
+
+    # Быстрое переупорядочивание: select-box с целевой позицией.
+    # Альтернатива drag-and-drop, не требующая внешних библиотек.
+    if len(sections) > 1:
+        with st.expander("Переместить раздел", expanded=False):
+            target = st.selectbox(
+                "Новая позиция",
+                options=list(range(1, len(sections) + 1)),
+                index=idx,
+                format_func=lambda n: f"Позиция {n}",
+                key=f"move_section_target_{idx}",
+            )
+            if st.button(
+                "Переместить",
+                key=f"move_section_btn_{idx}",
+                disabled=(target - 1) == idx,
+            ):
+                _move_section_to(idx, target - 1)
+                st.rerun()
 
     _render_section_validation_panel(section, idx)
 
@@ -2503,7 +2609,12 @@ def _render_add_block_buttons(blocks: list[dict[str, Any]], *, key_prefix: str) 
 
 
 def _render_subsections_editor(section: dict[str, Any], sec_idx: int) -> None:
-    """Список подразделов раздела с собственными блоками."""
+    """Список подразделов раздела с собственными блоками.
+
+    Поддерживается 2 уровня вложенности: subsection (level=2) и
+    sub-subsection (level=3). Глубже builder тоже работает, но UI
+    становится визуально перегруженным, поэтому ограничен.
+    """
     subs = section.setdefault("subsections", [])
     st.markdown("**Подразделы**")
     if not subs:
@@ -2521,6 +2632,10 @@ def _render_subsections_editor(section: dict[str, Any], sec_idx: int) -> None:
             sub_blocks = sub.setdefault("blocks", [])
             _render_blocks_editor(sub_blocks, key_prefix=f"sec{sec_idx}_sub{s_idx}")
             _render_add_block_buttons(sub_blocks, key_prefix=f"sec{sec_idx}_sub{s_idx}")
+
+            # Подразделы 3-го уровня (sub-subsections).
+            _render_subsubsections_editor(sub, sec_idx, s_idx)
+
             if st.button(
                 "Удалить подраздел",
                 key=f"del_sub_{sec_idx}_{s_idx}",
@@ -2533,6 +2648,51 @@ def _render_subsections_editor(section: dict[str, Any], sec_idx: int) -> None:
             {
                 "id": f"sub-{sec_idx}-{len(subs) + 1}",
                 "heading": f"Подраздел {len(subs) + 1}",
+                "blocks": [],
+                "subsections": [],
+            }
+        )
+        st.rerun()
+
+
+def _render_subsubsections_editor(
+    sub: dict[str, Any], sec_idx: int, s_idx: int
+) -> None:
+    """Список пунктов 3-го уровня (например 1.1.1, 1.1.2)."""
+    subsubs = sub.setdefault("subsections", [])
+    st.markdown("**Пункты**")
+    if not subsubs:
+        st.caption("Пунктов нет.")
+    for ss_idx, subsub in enumerate(subsubs):
+        with st.expander(
+            f"{sec_idx + 1}.{s_idx + 1}.{ss_idx + 1} "
+            f"{subsub.get('heading') or '(без названия)'}",
+            expanded=False,
+        ):
+            subsub["heading"] = st.text_input(
+                "Название пункта",
+                value=subsub.get("heading", ""),
+                key=f"subsub_heading_{sec_idx}_{s_idx}_{ss_idx}",
+            )
+            subsub_blocks = subsub.setdefault("blocks", [])
+            prefix = f"sec{sec_idx}_sub{s_idx}_ss{ss_idx}"
+            _render_blocks_editor(subsub_blocks, key_prefix=prefix)
+            _render_add_block_buttons(subsub_blocks, key_prefix=prefix)
+            if st.button(
+                "Удалить пункт",
+                key=f"del_subsub_{sec_idx}_{s_idx}_{ss_idx}",
+            ):
+                subsubs.pop(ss_idx)
+                st.rerun()
+
+    if st.button(
+        "+ Пункт",
+        key=f"add_subsub_{sec_idx}_{s_idx}",
+    ):
+        subsubs.append(
+            {
+                "id": f"subsub-{sec_idx}-{s_idx}-{len(subsubs) + 1}",
+                "heading": f"Пункт {len(subsubs) + 1}",
                 "blocks": [],
             }
         )
