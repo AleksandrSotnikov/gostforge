@@ -2301,6 +2301,115 @@ def _compute_import_violations_summary(
     }
 
 
+def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
+    """Прогон нормоконтроля над текущим state — для live-сводки в UI.
+
+    Не сохраняет .docx на диск: builder.build() + validate напрямую.
+    Это быстрее, чем _validate_state_bytes (там нужно export →
+    parse → validate). Подходит для постоянного отображения в UI.
+
+    На ошибку (например, builder упал на пустом state) — пустая
+    сводка без падения.
+    """
+    from collections import Counter  # noqa: PLC0415
+
+    try:
+        # Внутрипрограммный путь без docx-touche: state → builder →
+        # Document → validate.
+        # Используем существующий WorkBuilder через _apply_blocks-логику.
+        from gostforge.builder import work  # noqa: PLC0415
+
+        builder = work(
+            title=state.get("title", "") or "X",
+            author=state.get("author", "") or "",
+            year=int(state.get("year", 2026) or 2026),
+            work_type=state.get("work_type", "coursework") or "coursework",
+            profile_id=state.get("profile_id", "gost-7.32-2017"),
+            supervisor=state.get("supervisor", "") or "",
+            organization=state.get("organization", "") or "",
+        )
+        for sec in state.get("sections") or []:
+            sec_builder = builder.section(sec.get("heading", "Раздел"))
+            _apply_blocks(sec_builder, sec.get("blocks") or [])
+            for sub in sec.get("subsections") or []:
+                sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))
+                _apply_blocks(sub_builder, sub.get("blocks") or [])
+                for subsub in sub.get("subsections") or []:
+                    subsub_builder = sub_builder.subsection(
+                        subsub.get("heading", "Подраздел")
+                    )
+                    _apply_blocks(subsub_builder, subsub.get("blocks") or [])
+            if sec.get("is_bibliography"):
+                for ref in sec.get("references") or []:
+                    if isinstance(ref, str) and ref.strip():
+                        sec_builder.reference(ref)
+            disabled = sec.get("disabled_checks") or []
+            if isinstance(disabled, list) and disabled:
+                if "*" in disabled:
+                    sec_builder.skip_all_checks()
+                else:
+                    sec_builder.skip_checks(*[str(c) for c in disabled])
+        document = builder.build()
+        profile = load_profile(state.get("profile_id", "gost-7.32-2017"))
+        violations = validate(document, profile)
+    except Exception:  # noqa: BLE001
+        return {"total": 0, "by_severity": {}, "top_codes": []}
+    by_severity: dict[str, int] = {"error": 0, "warning": 0, "info": 0}
+    for v in violations:
+        if v.severity in by_severity:
+            by_severity[v.severity] += 1
+    codes = Counter(v.check_code for v in violations).most_common(5)
+    return {
+        "total": len(violations),
+        "by_severity": by_severity,
+        "top_codes": [{"code": c, "count": n} for c, n in codes],
+    }
+
+
+def _render_live_validation_panel() -> None:
+    """Постоянная панель live-нормоконтроля в main-области.
+
+    Прогон над текущим state, без сохранения .docx. Перерасчёт
+    при каждом rerun Streamlit — это копеечно, потому что
+    validate работает на in-memory Document.
+
+    Сводка: total + 3 metrics (error/warning/info) + топ-5 кодов.
+    Раскрывается expander-ом (свёрнут по умолчанию, чтобы не
+    перегружать UI).
+    """
+    state = _get_state()
+    if not state.get("sections"):
+        return
+    summary = _compute_live_validation_summary(state)
+    total = summary.get("total", 0)
+    if total == 0:
+        label = "Live-нормоконтроль: нарушений нет ✓"
+    else:
+        by_sev = summary.get("by_severity", {})
+        label = (
+            f"Live-нормоконтроль: {total} нарушений "
+            f"({by_sev.get('error', 0)} ошибок, "
+            f"{by_sev.get('warning', 0)} предупр., "
+            f"{by_sev.get('info', 0)} инфо)"
+        )
+    with st.expander(label, expanded=False):
+        if total == 0:
+            st.success(
+                "Все проверки пройдены. Можно генерировать .docx."
+            )
+            return
+        cols = st.columns(3)
+        by_sev = summary["by_severity"]
+        cols[0].metric("Ошибки", by_sev.get("error", 0))
+        cols[1].metric("Предупреждения", by_sev.get("warning", 0))
+        cols[2].metric("Информация", by_sev.get("info", 0))
+        top = summary.get("top_codes", [])
+        if top:
+            st.markdown("**Топ-5 нарушений:**")
+            for entry in top:
+                st.write(f"- `{entry['code']}` × {entry['count']}")
+
+
 def _compute_progress_metrics(state: dict[str, Any]) -> dict[str, Any]:
     """Подсчитать метрики прогресса работы по state.
 
@@ -3489,6 +3598,7 @@ def render_interactive_builder() -> None:
     _render_import_violations_panel()
     _render_imported_comments_panel()
     _render_progress_panel()
+    _render_live_validation_panel()
     _render_section_tree()
     _render_active_section_editor()
     _render_generate_button()
