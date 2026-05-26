@@ -120,7 +120,20 @@ def test_new_section_resets_paragraphs_target() -> None:
 # --- Сборка: разрыв страницы и нумерация -------------------------------------
 
 
-def test_build_sets_page_break_before_for_non_first_section() -> None:
+def test_build_does_not_set_page_break_on_paragraphs() -> None:
+    """Builder больше НЕ ставит page_break_before на первые параграфы
+    разделов — разрыв страницы делается через стиль Heading 1 в
+    экспортёре (profile.styles.heading_1.page_break_before).
+
+    Раньше WorkBuilder.build() искал _find_first_paragraph для каждой
+    секции и ставил ей page_break_before=True, но это давало баг для
+    глав без вступительного текста: если глава начиналась сразу с
+    подраздела 1.1 [текст], page-break оседал на первом параграфе
+    ПОДРАЗДЕЛА, и текст уезжал на новую страницу после заголовка 1.1.
+
+    Теперь page_break_before — атрибут стиля Heading 1, применяемый
+    через _apply_heading_styles при экспорте.
+    """
     doc = (
         work("T")
         .section("A")
@@ -132,14 +145,13 @@ def test_build_sets_page_break_before_for_non_first_section() -> None:
         .build()
     )
     sections = _top_level_sections(doc)
-    a_paras = [c for c in sections[0].children if isinstance(c, Paragraph)]
-    b_paras = [c for c in sections[1].children if isinstance(c, Paragraph)]
-    c_paras = [c for c in sections[2].children if isinstance(c, Paragraph)]
-    # Первый раздел — на первой странице, без принудительного разрыва.
-    assert a_paras[0].page_break_before is None or a_paras[0].page_break_before is False
-    # Остальные — с разрывом.
-    assert b_paras[0].page_break_before is True
-    assert c_paras[0].page_break_before is True
+    for sec in sections:
+        for child in sec.children:
+            if isinstance(child, Paragraph):
+                # Параграф не должен иметь явно установленного
+                # page_break_before — он наследуется от стиля Heading 1
+                # через применение к секции, не к параграфу.
+                assert child.page_break_before is None or child.page_break_before is False
 
 
 def test_build_sets_footer_and_start_value() -> None:

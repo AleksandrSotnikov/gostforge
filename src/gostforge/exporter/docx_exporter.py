@@ -150,6 +150,10 @@ def _apply_normal_style(doc: DocxDocument, profile: Profile) -> None:
     pf = normal.paragraph_format
     pf.line_spacing = body.line_spacing
     pf.first_line_indent = Cm(body.first_line_indent_cm)
+    # Выравнивание основного текста — обычно justify по ГОСТу. Без
+    # явной установки Word наследует left из своего дефолтного шаблона,
+    # и абзацы основного текста выглядят рваными по правому краю.
+    pf.alignment = _ALIGNMENT_MAP[body.alignment]
     # Интервалы между абзацами. По ГОСТу — 0; Word из дефолтного
     # шаблона ставит 'after=200 twips' (10 pt), что вылезает
     # между абзацами обычного текста как лишнее белое поле. Явно
@@ -770,6 +774,9 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
         max_level=max_level,
     )
 
+    item_left_twips = int(Cm(left_indent_cm).twips)
+    item_hanging_twips = int(Cm(hanging_indent_cm).twips)
+
     for idx, item_content in enumerate(list_block.items):
         paragraph = doc.add_paragraph()
         # ilvl: из item_levels или 0 по умолчанию.
@@ -783,7 +790,23 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
         ilvl.set(f"{{{W_NS}}}val", str(item_level))
         num_id_el = etree.SubElement(num_pr, f"{{{W_NS}}}numId")
         num_id_el.set(f"{{{W_NS}}}val", str(num_id))
-        paragraph.paragraph_format.first_line_indent = Cm(0)
+        # Явный <w:ind> с left+hanging на уровне параграфа списка.
+        # БАГ-ФИКС: раньше тут стоял `paragraph.paragraph_format.
+        # first_line_indent = Cm(0)`, что писало <w:ind w:firstLine="0"/>
+        # — это перекрывало hanging из numbering.xml, и при переносе
+        # длинного элемента на следующую строку текст начинался с
+        # красной строки 1.25 см (наследуясь от стиля Normal).
+        # Теперь явно ставим left+hanging на каждый параграф списка:
+        # numbering управляет ilvl, а параграф — отступом продолжения
+        # строки (left).
+        for old in pPr.findall(f"{{{W_NS}}}ind"):
+            pPr.remove(old)
+        # Уровни > 0 получают увеличенный left на +720 twips (как в
+        # _ensure_list_num_in_numbering при создании lvl).
+        effective_left = item_left_twips + item_level * 720
+        ind = etree.SubElement(pPr, f"{{{W_NS}}}ind")
+        ind.set(f"{{{W_NS}}}left", str(effective_left))
+        ind.set(f"{{{W_NS}}}hanging", str(item_hanging_twips))
         _write_runs(paragraph, item_content)
 
 
