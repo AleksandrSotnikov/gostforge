@@ -1649,6 +1649,135 @@ def _block_to_md(block: dict[str, Any], *, lines: list[str]) -> None:
             lines.append("")
 
 
+@main.command("diff-state")
+@click.argument("state_a", type=click.Path(exists=True, path_type=Path))
+@click.argument("state_b", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--mode",
+    type=click.Choice(["summary", "unified"]),
+    default="summary",
+    help="Формат вывода: summary — счётчики изменений, unified — построчный diff.",
+)
+def diff_state_cmd(state_a: Path, state_b: Path, mode: str) -> None:
+    """Сравнить два state-файла конструктора.
+
+    Полезно для:
+    * сравнения версии до и после редактирования рецензентом;
+    * аудита автофикса (что именно поменялось);
+    * code-review JSON-state в pull request.
+
+    Режимы:
+    * ``summary`` (default) — счётчик добавленных/удалённых/изменённых
+      разделов, параграфов, других элементов. Компактный вывод.
+    * ``unified`` — построчный diff JSON-представлений с тем же
+      форматом, что у ``diff -u``.
+    """
+    try:
+        a = json.loads(state_a.read_text(encoding="utf-8"))
+        b = json.loads(state_b.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        click.echo(f"Не удалось прочитать JSON: {exc}", err=True)
+        sys.exit(2)
+
+    if mode == "unified":
+        import difflib  # noqa: PLC0415
+
+        a_text = json.dumps(a, ensure_ascii=False, indent=2, sort_keys=True)
+        b_text = json.dumps(b, ensure_ascii=False, indent=2, sort_keys=True)
+        diff = difflib.unified_diff(
+            a_text.splitlines(keepends=True),
+            b_text.splitlines(keepends=True),
+            fromfile=str(state_a),
+            tofile=str(state_b),
+        )
+        for line in diff:
+            click.echo(line, nl=False)
+        return
+
+    # summary
+    report = _state_diff_summary(a, b)
+    if not any(report.values()):
+        click.echo("Без изменений.")
+        return
+    click.echo(f"Сравнение: {state_a} ↔ {state_b}\n")
+    if report["title_changed"]:
+        click.echo(f"  Заголовок изменён: «{a.get('title')}» → «{b.get('title')}»")
+    if report["sections_added"]:
+        click.echo(f"  Добавлено разделов: {len(report['sections_added'])}")
+        for h in report["sections_added"]:
+            click.echo(f"    + {h}")
+    if report["sections_removed"]:
+        click.echo(f"  Удалено разделов: {len(report['sections_removed'])}")
+        for h in report["sections_removed"]:
+            click.echo(f"    - {h}")
+    if report["sections_modified"]:
+        click.echo(f"  Изменено разделов: {len(report['sections_modified'])}")
+        for entry in report["sections_modified"]:
+            click.echo(f"    ~ {entry['heading']}: {entry['summary']}")
+
+
+def _state_diff_summary(
+    a: dict[str, Any], b: dict[str, Any]
+) -> dict[str, Any]:
+    """Сравнить два state-словаря, вернуть структуру изменений.
+
+    Маппит разделы по индексу и по заголовку: если в обоих state
+    есть раздел с heading=H, считается, что это один и тот же
+    раздел (даже если он переместился).
+    """
+    out: dict[str, Any] = {
+        "title_changed": a.get("title") != b.get("title"),
+        "sections_added": [],
+        "sections_removed": [],
+        "sections_modified": [],
+    }
+
+    a_sections = a.get("sections") or []
+    b_sections = b.get("sections") or []
+    a_by_heading = {
+        (s.get("heading") or f"#{i}"): s for i, s in enumerate(a_sections)
+    }
+    b_by_heading = {
+        (s.get("heading") or f"#{i}"): s for i, s in enumerate(b_sections)
+    }
+
+    a_keys = set(a_by_heading)
+    b_keys = set(b_by_heading)
+    out["sections_added"] = sorted(b_keys - a_keys)
+    out["sections_removed"] = sorted(a_keys - b_keys)
+    for key in sorted(a_keys & b_keys):
+        summary = _compare_sections(a_by_heading[key], b_by_heading[key])
+        if summary:
+            out["sections_modified"].append({"heading": key, "summary": summary})
+    return out
+
+
+def _compare_sections(a: dict[str, Any], b: dict[str, Any]) -> str:
+    """Вернуть короткое описание изменений двух разделов или '' если идентичны."""
+    parts = []
+    a_blocks = a.get("blocks") or []
+    b_blocks = b.get("blocks") or []
+    if len(a_blocks) != len(b_blocks):
+        parts.append(f"блоков {len(a_blocks)}→{len(b_blocks)}")
+    elif a_blocks != b_blocks:
+        parts.append("блоки изменены")
+    a_subs = a.get("subsections") or []
+    b_subs = b.get("subsections") or []
+    if len(a_subs) != len(b_subs):
+        parts.append(f"подразделов {len(a_subs)}→{len(b_subs)}")
+    a_disabled = sorted(a.get("disabled_checks") or [])
+    b_disabled = sorted(b.get("disabled_checks") or [])
+    if a_disabled != b_disabled:
+        parts.append(f"disabled_checks {a_disabled}→{b_disabled}")
+    a_refs = a.get("references") or []
+    b_refs = b.get("references") or []
+    if len(a_refs) != len(b_refs):
+        parts.append(f"источников {len(a_refs)}→{len(b_refs)}")
+    elif a_refs != b_refs:
+        parts.append("источники изменены")
+    return ", ".join(parts)
+
+
 @main.command("import-md")
 @click.argument("md_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
