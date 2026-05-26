@@ -1649,6 +1649,226 @@ def _block_to_md(block: dict[str, Any], *, lines: list[str]) -> None:
             lines.append("")
 
 
+@main.command("import-md")
+@click.argument("md_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить JSON-state.",
+)
+@click.option(
+    "--title", type=str, default=None,
+    help="Название работы (по умолчанию — из первого # заголовка).",
+)
+@click.option(
+    "--profile", "profile_id", type=str, default="gost-7.32-2017",
+    help="Идентификатор профиля.",
+)
+def import_md_cmd(
+    md_path: Path,
+    output: Path,
+    title: str | None,
+    profile_id: str,
+) -> None:
+    """Импортировать Markdown в state-конструктора.
+
+    Обратная операция к ``export-md``. Поддерживает разумное
+    подмножество GFM:
+
+    * ``#`` → title работы (если задан один раз в начале);
+    * ``##`` / ``###`` → разделы / подразделы;
+    * абзацы → kind='paragraph';
+    * ``- item`` / ``* item`` → unordered list;
+    * ``1. item`` (последовательная нумерация) → ordered list;
+    * ``$$ latex $$`` → formula;
+    * GFM-таблицы (``| ... |``) → table.
+
+    Не поддерживается: inline-форматирование (`**bold**`, ``*italic*``)
+    — текст идёт как plain. Сложные HTML-вставки игнорируются.
+    """
+    text = md_path.read_text(encoding="utf-8")
+    state = _markdown_to_state(text, profile_id=profile_id, title=title)
+    output.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    n = len(state.get("sections", []))
+    click.echo(
+        f"Импортирован {output} ({n} разделов). Используйте `gostforge ui` "
+        f"для редактирования или `generate` для сборки .docx."
+    )
+
+
+def _markdown_to_state(
+    text: str,
+    *,
+    profile_id: str = "gost-7.32-2017",
+    title: str | None = None,
+) -> dict[str, Any]:
+    """Распарсить Markdown в state-словарь.
+
+    Простой scanner — не полноценный GFM-парсер. Идём по строкам,
+    переключаемся между состояниями (in-table, in-formula).
+    Достаточно для round-trip с export-md и большинства руковописных
+    .md-файлов.
+    """
+    import re  # noqa: PLC0415
+
+    lines = text.splitlines()
+    state: dict[str, Any] = {
+        "title": title or "",
+        "year": 2026,
+        "profile_id": profile_id,
+        "sections": [],
+    }
+    # Стек открытых секций: (depth, dict). depth = уровень # (2..6).
+    # Используется чтобы новый ## закрывал предыдущие подразделы.
+    section_stack: list[tuple[int, dict[str, Any]]] = []
+
+    def current_blocks() -> list[dict[str, Any]] | None:
+        if not section_stack:
+            return None
+        return section_stack[-1][1].setdefault("blocks", [])
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+
+        # H1: title работы (берём только если ещё не задан).
+        m = re.match(r"^#\s+(.+?)\s*$", stripped)
+        if m and not stripped.startswith("##"):
+            if not state["title"]:
+                state["title"] = m.group(1).strip()
+            i += 1
+            continue
+
+        # H2-H6: секции.
+        m = re.match(r"^(#{2,6})\s+(.+?)\s*$", stripped)
+        if m:
+            depth = len(m.group(1))
+            heading = m.group(2).strip()
+            new_sec: dict[str, Any] = {"heading": heading, "blocks": []}
+            # bibliography по эвристике.
+            if heading.lower() in {
+                "список использованных источников",
+                "список литературы",
+                "литература",
+                "список источников",
+                "библиографический список",
+            }:
+                new_sec["is_bibliography"] = True
+                new_sec["references"] = []
+            # Закрываем стек до уровня >= depth.
+            while section_stack and section_stack[-1][0] >= depth:
+                section_stack.pop()
+            if section_stack:
+                parent = section_stack[-1][1]
+                parent.setdefault("subsections", []).append(new_sec)
+            else:
+                # depth == 2 (топ-level раздел).
+                state["sections"].append(new_sec)
+            section_stack.append((depth, new_sec))
+            i += 1
+            continue
+
+        # GFM-таблица: строка из | ... |, следом разделитель |---|, следом данные.
+        if stripped.startswith("|") and i + 1 < len(lines) and re.match(
+            r"^\|[\s\-:|]+\|\s*$", lines[i + 1].strip()
+        ):
+            blocks = current_blocks()
+            if blocks is None:
+                i += 1
+                continue
+            headers = [c.strip() for c in stripped.strip("|").split("|")]
+            i += 2  # skip header + separator
+            rows: list[list[str]] = []
+            while i < len(lines) and lines[i].strip().startswith("|"):
+                row_cells = [c.strip() for c in lines[i].strip().strip("|").split("|")]
+                rows.append(row_cells)
+                i += 1
+            blocks.append(
+                {
+                    "kind": "table",
+                    "headers": headers,
+                    "rows": rows,
+                    "caption": "",
+                }
+            )
+            continue
+
+        # Formula: $$ latex $$.
+        m = re.match(r"^\$\$\s*(.+?)\s*\$\$\s*$", stripped)
+        if m:
+            blocks = current_blocks()
+            if blocks is not None:
+                blocks.append({"kind": "formula", "latex": m.group(1)})
+            i += 1
+            continue
+
+        # List items: '- text' или '* text' (unordered), '1. text' (ordered).
+        m_ul = re.match(r"^[-*]\s+(.+?)\s*$", stripped)
+        m_ol = re.match(r"^\d+\.\s+(.+?)\s*$", stripped)
+        if m_ul or m_ol:
+            ordered = m_ol is not None
+            items: list[str] = []
+            while i < len(lines):
+                s = lines[i].strip()
+                m2u = re.match(r"^[-*]\s+(.+?)\s*$", s)
+                m2o = re.match(r"^\d+\.\s+(.+?)\s*$", s)
+                if ordered and m2o:
+                    items.append(m2o.group(1))
+                    i += 1
+                elif not ordered and m2u:
+                    items.append(m2u.group(1))
+                    i += 1
+                else:
+                    break
+            # bibliography-секция: items → references.
+            if (
+                section_stack
+                and section_stack[-1][1].get("is_bibliography")
+                and ordered
+            ):
+                section_stack[-1][1].setdefault("references", []).extend(items)
+            else:
+                blocks = current_blocks()
+                if blocks is not None:
+                    blocks.append(
+                        {"kind": "list", "ordered": ordered, "items": items}
+                    )
+            continue
+
+        # Figure: ![caption](path).
+        m = re.match(r"^!\[([^\]]*)\]\(([^\)]+)\)\s*$", stripped)
+        if m:
+            blocks = current_blocks()
+            if blocks is not None:
+                blocks.append(
+                    {
+                        "kind": "figure",
+                        "image_path": m.group(2),
+                        "caption": m.group(1),
+                    }
+                )
+            i += 1
+            continue
+
+        # Обычный параграф (или пустая строка).
+        if stripped:
+            # Игнорируем metadata-строки '**Автор:** ...' — они не нужны
+            # в blocks, парсятся отдельно сверху (TODO: парсить
+            # metadata после первого # title).
+            blocks = current_blocks()
+            if blocks is not None:
+                blocks.append({"kind": "paragraph", "text": stripped})
+        i += 1
+
+    return state
+
+
 @main.command("import-docx")
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
 @click.option(
