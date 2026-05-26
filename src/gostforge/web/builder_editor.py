@@ -2201,7 +2201,20 @@ def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
         key="builder_docx_import",
     )
     if docx_uploaded is not None:
-        _handle_docx_import(docx_uploaded.getvalue(), docx_uploaded.name)
+        # ВАЖНО: file_uploader Streamlit-а сохраняет UploadedFile в
+        # session_state и при КАЖДОМ rerun возвращает не-None. Без
+        # защиты мы бы импортировали файл повторно при каждом
+        # взаимодействии (нажатие кнопки, изменение input) и перезатёрли
+        # бы все правки пользователя. Отслеживаем file_id (стабилен
+        # для одного загруженного файла) и пропускаем повтор.
+        file_id = getattr(docx_uploaded, "file_id", None) or docx_uploaded.name
+        if st.session_state.get("docx_import_processed") != file_id:
+            st.session_state["docx_import_processed"] = file_id
+            _handle_docx_import(docx_uploaded.getvalue(), docx_uploaded.name)
+    else:
+        # Пользователь убрал файл — сбрасываем флаг, чтобы повторная
+        # загрузка того же файла снова сработала.
+        st.session_state.pop("docx_import_processed", None)
 
 
 def _handle_docx_import(data: bytes, filename: str) -> None:
