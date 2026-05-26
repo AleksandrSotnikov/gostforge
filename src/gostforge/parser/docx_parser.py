@@ -35,8 +35,10 @@ from gostforge.model import (
     Document,
     DocumentMetadata,
     Figure,
+    FootnoteRef,
     Formula,
     HeaderConfig,
+    Hyperlink,
     InlineElement,
     InlineFormula,
     ListBlock,
@@ -48,6 +50,9 @@ from gostforge.model import (
     Table,
     TextRun,
 )
+
+# Relationship-namespace для <w:hyperlink r:id="...">.
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 if TYPE_CHECKING:
     DocxDocument = Any
@@ -207,6 +212,11 @@ def parse_docx(path: str | Path) -> Document:
     # элементы списка (в bib-разделе каждая запись = отдельный параграф).
     _group_text_marker_lists(page_section, exclude_section_ids=_bibliography_section_ids([page_section]))
     comments = _extract_comments(docx_doc)
+    # Сноски: извлекаем содержимое word/footnotes.xml и подставляем
+    # текст в FootnoteRef-элементы внутри параграфов.
+    footnotes = _extract_footnotes(docx_doc)
+    if footnotes:
+        _attach_footnote_text([page_section], footnotes)
 
     return Document(
         metadata=metadata,
@@ -215,6 +225,83 @@ def parse_docx(path: str | Path) -> Document:
         auto_hyphenation=auto_hyphenation,
         comments=comments,
     )
+
+
+def _extract_footnotes(docx_doc: DocxDocument) -> dict[str, str]:
+    """Извлечь содержимое сносок из word/footnotes.xml.
+
+    Возвращает {footnote_id: text}. Идентификатор — целое число
+    как строка. Содержимое — склейка всех ``<w:t>`` внутри
+    ``<w:footnote w:id="N">``.
+
+    Если footnotes-part отсутствует (документ без сносок) —
+    пустой dict.
+    """
+    out: dict[str, str] = {}
+    rels = getattr(docx_doc.part, "rels", None)
+    if rels is None:
+        return out
+    footnotes_part = None
+    target_reltype = (
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
+    )
+    try:
+        for rel in rels.values():
+            if getattr(rel, "reltype", None) == target_reltype:
+                footnotes_part = rel.target_part
+                break
+    except (etree.XMLSyntaxError, KeyError, AttributeError):
+        return out
+    if footnotes_part is None:
+        return out
+
+    blob = getattr(footnotes_part, "blob", None)
+    if not blob:
+        return out
+    try:
+        root = etree.fromstring(blob)
+    except etree.XMLSyntaxError:
+        return out
+
+    for fn in root.findall(f"{{{W_NS}}}footnote"):
+        fn_id = fn.get(f"{{{W_NS}}}id", "")
+        if not fn_id:
+            continue
+        # Стандартные системные сноски (id=-1, 0): «separator» и
+        # «continuationSeparator» — пропускаем, они не текстовые.
+        fn_type = fn.get(f"{{{W_NS}}}type")
+        if fn_type in {"separator", "continuationSeparator"}:
+            continue
+        texts: list[str] = []
+        for t in fn.iter(f"{{{W_NS}}}t"):
+            if t.text:
+                texts.append(t.text)
+        out[fn_id] = "".join(texts).strip()
+
+    return out
+
+
+def _attach_footnote_text(
+    page_sections: list[PageSection], footnotes: dict[str, str]
+) -> None:
+    """Заполнить FootnoteRef.text из карты footnotes.
+
+    Парсер inline-элементов создаёт FootnoteRef только с id; полный
+    текст подставляется здесь, чтобы избежать передачи footnotes-map
+    через сигнатуры _build_paragraph и далее.
+    """
+
+    def walk(items: list) -> None:
+        for item in items:
+            if hasattr(item, "content"):  # Paragraph
+                for el in item.content:
+                    if isinstance(el, FootnoteRef):
+                        el.text = footnotes.get(el.footnote_id, "")
+            if hasattr(item, "children"):  # LogicalSection
+                walk(item.children)
+
+    for ps in page_sections:
+        walk(ps.content)
 
 
 def _extract_comments(docx_doc: DocxDocument) -> list[Any]:
@@ -1190,22 +1277,102 @@ def _build_table(dtable: DocxTable, *, idx: int) -> Table:
     Headers — первый ряд cells; rows — остальные ряды. Каждая ячейка
     хранится как list[InlineElement] из текста первого параграфа
     ячейки (без атрибутов форматирования — Фаза 1).
+
+    Заполняет ``merges: list[CellMerge]`` информацией об объединённых
+    ячейках: ``<w:vMerge>`` (вертикальное), ``<w:gridSpan>``
+    (горизонтальное). Координаты row/col 0-based от верха таблицы.
     """
+    from gostforge.model import CellMerge  # noqa: PLC0415
+
     rows_raw = list(dtable.rows)
     headers: list[list[InlineElement]] = []
     body_rows: list[list[list[InlineElement]]] = []
+    merges: list[CellMerge] = []
 
     if rows_raw:
         headers = [_cell_inline(cell) for cell in rows_raw[0].cells]
         for row in rows_raw[1:]:
             body_rows.append([_cell_inline(cell) for cell in row.cells])
+        merges = _extract_cell_merges(rows_raw)
 
     return Table(
         id=f"t-{idx}",
         caption=[],
         headers=headers,
         rows=body_rows,
+        merges=merges,
     )
+
+
+def _extract_cell_merges(rows_raw: list[Any]) -> list[Any]:
+    """Извлечь информацию об объединённых ячейках из таблицы.
+
+    Алгоритм:
+    1. Для каждой ячейки читаем <w:tcPr>/<w:gridSpan w:val="N"/> (colspan).
+    2. <w:tcPr>/<w:vMerge w:val="restart"/> начинает вертикальное
+       объединение; <w:vMerge/> без val (или val="continue") — продолжение.
+    3. Считаем rowspan: для каждой restart-ячейки идём вниз по той же
+       колонке, считая continue-ячейки.
+
+    Возвращает CellMerge только для ячеек с rowspan>1 или colspan>1.
+    """
+    from gostforge.model import CellMerge  # noqa: PLC0415
+
+    merges: list[CellMerge] = []
+    # Построим матрицу tc-элементов для удобного поиска.
+    tc_grid: list[list[Any]] = []
+    for row in rows_raw:
+        tc_grid.append([cell._tc for cell in row.cells])
+
+    n_rows = len(tc_grid)
+    for r, row_tcs in enumerate(tc_grid):
+        for c, tc in enumerate(row_tcs):
+            tcPr = tc.find(f"{{{W_NS}}}tcPr")
+            colspan = 1
+            v_merge_kind: str | None = None
+            if tcPr is not None:
+                grid_span = tcPr.find(f"{{{W_NS}}}gridSpan")
+                if grid_span is not None:
+                    try:
+                        colspan = int(
+                            grid_span.get(f"{{{W_NS}}}val", "1")
+                        )
+                    except ValueError:
+                        colspan = 1
+                v_merge = tcPr.find(f"{{{W_NS}}}vMerge")
+                if v_merge is not None:
+                    v_merge_kind = (
+                        v_merge.get(f"{{{W_NS}}}val") or "continue"
+                    )
+            # Continue-ячейки пропускаем — они уже учтены в restart выше.
+            if v_merge_kind == "continue":
+                continue
+            # Считаем rowspan: смотрим в ту же колонку (с учётом colspan
+            # — python-docx обычно возвращает физические ячейки, и
+            # continue-tc лежит в той же позиции в row_tcs).
+            rowspan = 1
+            if v_merge_kind == "restart":
+                for r2 in range(r + 1, n_rows):
+                    if c >= len(tc_grid[r2]):
+                        break
+                    next_tc = tc_grid[r2][c]
+                    next_tcPr = next_tc.find(f"{{{W_NS}}}tcPr")
+                    if next_tcPr is None:
+                        break
+                    next_vm = next_tcPr.find(f"{{{W_NS}}}vMerge")
+                    if next_vm is None:
+                        break
+                    val = next_vm.get(f"{{{W_NS}}}val")
+                    if val == "restart":
+                        # Новое объединение — текущее закончилось.
+                        break
+                    # val=None или 'continue' — продолжение.
+                    rowspan += 1
+            if rowspan > 1 or colspan > 1:
+                merges.append(
+                    CellMerge(row=r, col=c, rowspan=rowspan, colspan=colspan)
+                )
+    return merges
 
 
 def _cell_inline(cell: DocxCell) -> list[InlineElement]:
@@ -1350,6 +1517,13 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
                 latex = _extract_inline_formula_latex(nested_omath)
                 content.append(InlineFormula(latex=latex))
                 continue
+            # <w:footnoteReference w:id="N"/> — ссылка на сноску.
+            fn_ref = child.find(f"{{{W_NS}}}footnoteReference")
+            if fn_ref is not None:
+                fn_id = fn_ref.get(f"{{{W_NS}}}id", "")
+                if fn_id:
+                    content.append(FootnoteRef(footnote_id=fn_id))
+                continue
             text_run = _text_run_from_w_r(
                 child,
                 style_font_name=style_font_name,
@@ -1376,6 +1550,12 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
                 inner_text = _fld_simple_inner_text(child)
                 if inner_text:
                     content.append(TextRun(text=inner_text))
+        elif ns == W_NS and tag == "hyperlink":
+            # <w:hyperlink r:id="rIdN" w:anchor="bookmark">.
+            # Resolve URL через rels source-документа; anchor — внутренний.
+            hyperlink = _hyperlink_from_w_hyperlink(child, p)
+            if hyperlink is not None:
+                content.append(hyperlink)
         # Прочие элементы (`<w:pPr>`, `<w:bookmarkStart>`, и т. п.) — игнорируем.
 
     _attach_cross_ref_prefixes(content)
@@ -1538,6 +1718,43 @@ def _rpr_size_pt(rpr_elem: Any) -> float | None:
 # Парсер ищет инструкцию вида « REF <bookmark> [\h] ». Толерантно к лишним
 # пробелам и регистру (Word нормализует REF, но другие конвертеры — не всегда).
 _FLD_REF_INSTR_RE = re.compile(r"^\s*REF\s+([^\s\\]+)", re.IGNORECASE)
+
+
+def _hyperlink_from_w_hyperlink(
+    hl_elem: Any, paragraph: Any
+) -> Hyperlink | None:
+    """Построить Hyperlink из ``<w:hyperlink r:id="..." w:anchor="...">``.
+
+    Алгоритм:
+    1. Собрать текст из всех вложенных ``<w:r>/<w:t>``.
+    2. Если есть ``r:id`` — разрешить URL через
+       paragraph.part.rels[r:id].target_ref.
+    3. Если есть ``w:anchor`` — внутренняя ссылка на bookmark.
+
+    Возвращает None если нет ни URL, ни anchor, или нет видимого текста.
+    """
+    # Текст: склейка всех <w:t> внутри.
+    texts: list[str] = []
+    for t in hl_elem.iter(f"{{{W_NS}}}t"):
+        if t.text:
+            texts.append(t.text)
+    text = "".join(texts)
+    if not text:
+        return None
+
+    r_id = hl_elem.get(f"{{{_R_NS}}}id")
+    anchor = hl_elem.get(f"{{{W_NS}}}anchor")
+    url = ""
+    if r_id:
+        try:
+            rels = paragraph.part.rels
+            if r_id in rels:
+                url = rels[r_id].target_ref
+        except AttributeError:
+            pass
+    if not url and not anchor:
+        return None
+    return Hyperlink(url=url or "", text=text, anchor=anchor)
 
 
 def _cross_ref_from_fld_simple(fld_elem: Any) -> CrossRef | None:

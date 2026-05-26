@@ -83,7 +83,34 @@ class Citation:
     template: str = "[{n}]"  # либо "[{n}, с. {pages}]"
 
 
-InlineElement = TextRun | CrossRef | InlineFormula | Citation
+@dataclass
+class Hyperlink:
+    """Гиперссылка на URL/email/якорь внутри документа.
+
+    Отображается как кликабельный текст в Word/LibreOffice; на экспорте
+    превращается в ``<w:hyperlink r:id="rIdN">`` + Relationship на URL
+    (или ``<w:hyperlink w:anchor="bookmark">`` для внутренних).
+    """
+
+    url: str  # http://..., https://..., mailto:..., или пусто для anchor
+    text: str  # отображаемый текст (то, что видит читатель)
+    anchor: str | None = None  # для внутренних ссылок на bookmark
+
+
+@dataclass
+class FootnoteRef:
+    """Ссылка на сноску из ``word/footnotes.xml``.
+
+    Содержит id (стабильный в рамках одного документа) и опционально
+    кэшированный текст самой сноски — для удобства проверок
+    нормоконтроля без дополнительного lookup.
+    """
+
+    footnote_id: str
+    text: str = ""  # содержимое сноски, заполняется парсером
+
+
+InlineElement = TextRun | CrossRef | InlineFormula | Citation | Hyperlink | FootnoteRef
 
 
 # --- Блоки --------------------------------------------------------------------
@@ -148,6 +175,24 @@ class Figure(Block):
 
 
 @dataclass
+class CellMerge:
+    """Описание объединённой ячейки в таблице.
+
+    Координаты row/col отсчитываются от 0; row=0 — шапка (headers),
+    row=1+ — обычные данные (rows[0] = row=1 и т. д.).
+
+    rowspan/colspan ≥ 1. При rowspan=2, colspan=1 это «вертикальное
+    объединение двух ячеек одной колонки» (`<w:vMerge>`); colspan=2
+    — горизонтальное (`<w:gridSpan w:val="2"/>`).
+    """
+
+    row: int
+    col: int
+    rowspan: int = 1
+    colspan: int = 1
+
+
+@dataclass
 class Table(Block):
     type: BlockType = BlockType.TABLE
     caption: list[InlineElement] = field(default_factory=list)
@@ -155,6 +200,10 @@ class Table(Block):
     rows: list[list[list[InlineElement]]] = field(default_factory=list)
     column_widths_pct: list[float] | None = None
     number: int | None = None
+    # Объединённые ячейки. Пустой список = плоская таблица.
+    # Заполняется парсером из <w:vMerge>/<w:gridSpan>; экспортёр пишет
+    # обратно. Координаты row/col — индексы в (headers + rows), 0-based.
+    merges: list[CellMerge] = field(default_factory=list)
 
 
 @dataclass
