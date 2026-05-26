@@ -998,6 +998,15 @@ def export_docx(
             core.title = document.metadata.title
         if document.metadata.author:
             core.author = document.metadata.author
+        # Год работы: пишем как core.created (1 января указанного года),
+        # чтобы парсер мог его прочитать обратно при impоrt-docx.
+        # python-docx иначе ставит datetime.now(), и год потеряется.
+        if document.metadata.year:
+            from datetime import datetime, timezone  # noqa: PLC0415
+
+            core.created = datetime(
+                document.metadata.year, 1, 1, tzinfo=timezone.utc
+            )
 
         if document.page_sections:
             first = document.page_sections[0]

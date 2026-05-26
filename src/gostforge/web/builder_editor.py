@@ -1523,7 +1523,8 @@ def _render_section_tree() -> None:
         for idx, section in enumerate(sections):
             heading = section.get("heading") or f"Раздел {idx + 1}"
             is_active = idx == state.get("active_section_index", 0)
-            cols = st.columns([0.5, 4, 0.6, 0.6, 0.6])
+            # 6 колонок: маркер активного, заголовок, ↑, ↓, дубль, удалить.
+            cols = st.columns([0.5, 4, 0.6, 0.6, 0.6, 0.6])
             with cols[0]:
                 st.markdown("**▶**" if is_active else " ")
             with cols[1]:
@@ -1555,6 +1556,14 @@ def _render_section_tree() -> None:
                         state["active_section_index"] = idx
                     st.rerun()
             with cols[4]:
+                if st.button(
+                    "⎘",
+                    key=f"dup_{idx}",
+                    help="Дублировать раздел",
+                ):
+                    _duplicate_section(idx)
+                    st.rerun()
+            with cols[5]:
                 if st.button("✕", key=f"del_section_{idx}"):
                     _delete_section(idx)
                     st.rerun()
@@ -1669,6 +1678,10 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
     Использует parse_docx → document_to_state. Если парсинг или
     преобразование падает — показывает st.error и не трогает текущий
     state (защищаемся от потери работы).
+
+    После успешной загрузки сразу прогоняет нормоконтроль через
+    profile из state и показывает summary нарушений — пользователь
+    получает мгновенный feedback о том, что нужно исправить.
     """
     from gostforge.parser import parse_docx  # noqa: PLC0415
 
@@ -1693,11 +1706,123 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
 
     _normalize_state_paragraphs(new_state)
     st.session_state["builder_state"] = new_state
+
+    # Сохраним сводку для пользователя: сколько и каких нарушений
+    # нашёл нормоконтроль (показывается через _render_import_violations_panel
+    # после rerun, потому что прямой st.* здесь не дойдёт в main-области).
+    summary = _compute_import_violations_summary(document, new_state["profile_id"])
+    st.session_state["last_import_summary"] = {
+        "filename": filename,
+        "sections_count": len(new_state["sections"]),
+        **summary,
+    }
+
     st.sidebar.success(
         f"«{filename}» загружен в конструктор: "
-        f"{len(new_state['sections'])} разделов."
+        f"{len(new_state['sections'])} разделов, "
+        f"{summary['total']} нарушений нормоконтроля."
     )
     st.rerun()
+
+
+def _compute_import_violations_summary(
+    document: Any, profile_id: str
+) -> dict[str, Any]:
+    """Прогон нормоконтроля для импортируемого документа.
+
+    Возвращает {'total', 'by_severity', 'top_codes'} — компактный
+    summary для UI. На случай ошибок (профиль не найден, exception
+    внутри validate) возвращает пустую сводку.
+    """
+    from collections import Counter  # noqa: PLC0415
+
+    try:
+        profile = load_profile(profile_id)
+        violations = validate(document, profile)
+    except Exception:  # noqa: BLE001
+        return {"total": 0, "by_severity": {}, "top_codes": []}
+    by_severity: dict[str, int] = {"error": 0, "warning": 0, "info": 0}
+    for v in violations:
+        if v.severity in by_severity:
+            by_severity[v.severity] += 1
+    codes = Counter(v.check_code for v in violations).most_common(10)
+    return {
+        "total": len(violations),
+        "by_severity": by_severity,
+        "top_codes": [{"code": c, "count": n} for c, n in codes],
+    }
+
+
+def _render_import_violations_panel() -> None:
+    """Показать summary нарушений после import-docx (если был).
+
+    Рендерится в main-области (не в sidebar), потому что место
+    в sidebar очень ограничено. Появляется один раз — при следующем
+    rerun сводка остаётся (пользователь может прочитать), но новых
+    нарушений не показывает.
+    """
+    summary = st.session_state.get("last_import_summary")
+    if not summary:
+        return
+    total = summary.get("total", 0)
+    if total == 0:
+        st.success(
+            f"Импорт «{summary['filename']}» прошёл без нарушений нормоконтроля."
+        )
+        if st.button("Скрыть сводку импорта", key="dismiss_import_summary"):
+            del st.session_state["last_import_summary"]
+            st.rerun()
+        return
+
+    with st.expander(
+        f"Нормоконтроль импортированной работы «{summary['filename']}» — "
+        f"{total} нарушений",
+        expanded=True,
+    ):
+        by_sev = summary.get("by_severity", {})
+        cols = st.columns(3)
+        cols[0].metric("Ошибки", by_sev.get("error", 0))
+        cols[1].metric("Предупреждения", by_sev.get("warning", 0))
+        cols[2].metric("Информация", by_sev.get("info", 0))
+
+        top = summary.get("top_codes", [])
+        if top:
+            st.markdown("**Топ-10 нарушений:**")
+            for entry in top:
+                st.write(f"- `{entry['code']}` × {entry['count']}")
+
+        if st.button("Скрыть сводку импорта", key="dismiss_import_summary"):
+            del st.session_state["last_import_summary"]
+            st.rerun()
+
+
+def _duplicate_section(idx: int) -> None:
+    """Дублировать раздел по индексу: вставить копию сразу после оригинала.
+
+    Полезно при создании однотипных глав («Глава 1», «Глава 2», ...).
+    К заголовку дубликата добавляется " (копия)" чтобы пользователь
+    сразу увидел, какой раздел свежесозданный.
+
+    Глубокая копия через json round-trip: state — это nested dict/list
+    из примитивов, поэтому json.loads(json.dumps(...)) корректно
+    воспроизводит структуру и заодно отвязывает изменения копии от
+    оригинала.
+    """
+    state = _get_state()
+    sections = state["sections"]
+    if idx < 0 or idx >= len(sections):
+        return
+    original = sections[idx]
+    copy = json.loads(json.dumps(original))
+    original_heading = str(copy.get("heading", "Раздел")).strip()
+    copy["heading"] = f"{original_heading} (копия)"
+    # Bib-секцию НЕ дублируем как is_bibliography — две bib-секции
+    # запутают валидатор и UI. Превратим копию в обычный раздел.
+    if copy.get("is_bibliography"):
+        copy["is_bibliography"] = False
+        copy.pop("references", None)
+    sections.insert(idx + 1, copy)
+    state["active_section_index"] = idx + 1
 
 
 def _delete_section(idx: int) -> None:
@@ -2422,6 +2547,7 @@ def render_interactive_builder() -> None:
         "параграфы, таблицы, рисунки, списки, формулы и список источников."
     )
 
+    _render_import_violations_panel()
     _render_section_tree()
     _render_active_section_editor()
     _render_generate_button()

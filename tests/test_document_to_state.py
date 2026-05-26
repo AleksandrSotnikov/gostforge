@@ -154,20 +154,17 @@ def test_roundtrip_table() -> None:
     assert "Сложность" in tbl["caption"]
 
 
-def test_roundtrip_list_items_preserved_as_text() -> None:
-    """Списки текущей реализации экспортируются как обычные параграфы
-    с префиксом-маркером — парсер их обратно как list НЕ собирает.
-    Этот тест фиксирует known limit: items сохраняются как текст
-    параграфов, маркер виден в тексте. Если builder+parser получат
-    полноценную поддержку numPr — этот тест станет проверять
-    нормальный round-trip."""
+def test_roundtrip_list_preserves_as_list_block() -> None:
+    """После добавления _group_text_marker_lists парсер собирает
+    подряд идущие маркированные параграфы обратно в ListBlock —
+    round-trip list↔list работает без потерь."""
     state_in = {
         "title": "Тест",
         "year": 2026,
         "profile_id": "gost-7.32-2017",
         "sections": [
             {
-                "heading": "Список",
+                "heading": "Перечисление",
                 "blocks": [
                     {
                         "kind": "list",
@@ -186,16 +183,13 @@ def test_roundtrip_list_items_preserved_as_text() -> None:
         path = Path(f.name)
     doc = parse_docx(path)
     state_out = document_to_state(doc)
-    sec = next(s for s in state_out["sections"] if "список" in s["heading"].lower())
-    # Items виды как параграфы с маркером в тексте.
-    paragraph_texts = " ".join(
-        b.get("text", "")
-        for b in sec["blocks"]
-        if b.get("kind") == "paragraph"
+    sec = next(
+        s for s in state_out["sections"] if "перечисл" in s["heading"].lower()
     )
-    assert "один" in paragraph_texts
-    assert "два" in paragraph_texts
-    assert "три" in paragraph_texts
+    lists = [b for b in sec["blocks"] if b.get("kind") == "list"]
+    assert lists, f"Список не собрался обратно. Блоки: {sec['blocks']}"
+    assert lists[0]["items"] == ["один", "два", "три"]
+    assert lists[0]["ordered"] is False
 
 
 # --- Bibliography ---
@@ -367,10 +361,10 @@ def test_builder_save_then_load_back_into_state(tmp_path: Path) -> None:
     parsed.profile_id = "gost-7.32-2017"
     state = document_to_state(parsed)
 
-    # Метаданные. year парсер не реконструирует из docx (нет
-    # стандартного поля) — берётся дефолт. Проверяем только title/author.
+    # Метаданные.
     assert state["title"] == "Курсовая работа"
     assert state["author"] == "Иванов И. И."
+    assert state["year"] == 2026  # экспортёр пишет в core.created
 
     # Разделы: Введение, 1 Анализ, Заключение, Список — в любом порядке/регистре.
     headings = [s["heading"].lower() for s in state["sections"]]

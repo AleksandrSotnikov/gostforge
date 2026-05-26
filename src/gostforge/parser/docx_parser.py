@@ -202,6 +202,10 @@ def parse_docx(path: str | Path) -> Document:
     # bibliography, потому что эвристика «[N]» требует знать допустимый
     # диапазон N (валидный 1-based индекс в Document.bibliography).
     _annotate_citations([page_section], bibliography)
+    # Группировка маркированных параграфов в ListBlock. Делаем ПОСЛЕ
+    # извлечения библиографии, чтобы не сгруппировать references как
+    # элементы списка (в bib-разделе каждая запись = отдельный параграф).
+    _group_text_marker_lists(page_section, exclude_section_ids=_bibliography_section_ids([page_section]))
 
     return Document(
         metadata=metadata,
@@ -588,6 +592,187 @@ def _paragraph_list_kind(dp: DocxParagraph) -> str | None:
         # Привязка к списку без указания типа в стиле — считаем ordered.
         return "ordered"
     return None
+
+
+# Regex-маркеры элементов текстовых списков, написанных через builder/
+# экспортёр без <w:numPr> (например, кастомный bullet_char из профиля).
+# Группа 1 — собственно символ маркера, группа 2 — текст после маркера.
+# Поддерживаются:
+#   * «– <текст>» / «— <текст>»  — bullet (тире из ГОСТ),
+#   * «• <текст>» / «* <текст>» / «◦ <текст>»  — bullet (другие маркеры),
+#   * «1) <текст>» / «1. <текст>»  — ordered.
+_BULLET_MARKERS = re.compile(r"^([–—•*◦])\s+(.+)$")
+_ORDERED_MARKERS = re.compile(r"^(\d{1,3})[\.\)]\s+(.+)$")
+
+
+def _group_text_marker_lists(
+    page_section: PageSection, *, exclude_section_ids: set[str]
+) -> None:
+    """Сгруппировать подряд идущие маркированные параграфы в ListBlock.
+
+    Builder/экспортёр сейчас пишет списки как обычные параграфы с
+    текстовым префиксом-маркером (из ``profile.styles.lists.bullet_char``,
+    например «– »). Парсер уже корректно собирает их как Paragraph,
+    но визуально это список — без этой постобработки round-trip
+    «builder → export → parse → builder» теряет list-блоки.
+
+    Алгоритм:
+    1. Обходим рекурсивно содержимое page_section (внутри LogicalSection).
+    2. Скользящим окном ищем последовательность Paragraph-ов, каждый
+       из которых начинается с одинакового lead-маркера. Минимум 2
+       параграфа подряд — иначе одиночный «– слово» в обычном тексте
+       не превратится в список из одного элемента.
+    3. Параграфы заменяются на один ``ListBlock`` с теми же items
+       (без маркера в начале).
+
+    Секции из ``exclude_section_ids`` пропускаются — обычно это
+    библиографический раздел, где каждый параграф — отдельная
+    запись, а не элемент списка.
+    """
+    from gostforge.model import LogicalSection, ListBlock, Paragraph  # noqa: PLC0415
+
+    def process(items: list[Any], in_excluded_section: bool) -> list[Any]:
+        result: list[Any] = []
+        i = 0
+        while i < len(items):
+            item = items[i]
+            if isinstance(item, LogicalSection):
+                excluded = in_excluded_section or item.id in exclude_section_ids
+                item.children = process(item.children, excluded)
+                result.append(item)
+                i += 1
+                continue
+            if in_excluded_section or not isinstance(item, Paragraph):
+                result.append(item)
+                i += 1
+                continue
+            # Пытаемся захватить run-серию параграфов с одинаковым
+            # типом маркера (bulleted или ordered) и одним и тем же
+            # символом маркера для bullet-варианта.
+            group = _try_consume_marker_run(items, i)
+            if group is None:
+                result.append(item)
+                i += 1
+                continue
+            list_block, consumed = group
+            result.append(list_block)
+            i += consumed
+        return result
+
+    for ps_attr in ("content",):
+        items = getattr(page_section, ps_attr)
+        setattr(
+            page_section,
+            ps_attr,
+            process(items, in_excluded_section=False),
+        )
+
+
+def _try_consume_marker_run(
+    items: list[Any], start: int
+) -> tuple[Any, int] | None:
+    """Попытаться захватить серию маркированных параграфов с позиции ``start``.
+
+    Возвращает (ListBlock, consumed) при успехе или None.
+    """
+    from gostforge.model import Block, ListBlock, Paragraph, TextRun  # noqa: PLC0415
+
+    first = items[start]
+    if not isinstance(first, Paragraph):
+        return None
+    first_text = _paragraph_plain_text(first)
+    bullet_match = _BULLET_MARKERS.match(first_text)
+    ordered_match = _ORDERED_MARKERS.match(first_text)
+    if bullet_match:
+        marker_char = bullet_match.group(1)
+        ordered = False
+    elif ordered_match:
+        marker_char = None  # для ordered не привязываемся к конкретному номеру
+        ordered = True
+    else:
+        return None
+
+    items_texts: list[str] = []
+    consumed = 0
+    expected_num = 1 if ordered else None
+    for idx in range(start, len(items)):
+        item = items[idx]
+        if not isinstance(item, Paragraph):
+            break
+        text = _paragraph_plain_text(item)
+        if ordered:
+            m = _ORDERED_MARKERS.match(text)
+            if m is None:
+                break
+            try:
+                num = int(m.group(1))
+            except ValueError:
+                break
+            # Допускаем сбой нумерации — лишь бы шла серия. Строгая
+            # проверка n+1 ломалась бы на «1) ..., 2) ..., 5) ...» —
+            # это всё равно список.
+            items_texts.append(m.group(2))
+            consumed += 1
+        else:
+            m = _BULLET_MARKERS.match(text)
+            if m is None or m.group(1) != marker_char:
+                break
+            items_texts.append(m.group(2))
+            consumed += 1
+
+    if consumed < 2:
+        # Одиночный «– слово» не считаем списком (ложные срабатывания
+        # на тире-сепаратор в обычном тексте).
+        return None
+
+    list_block = ListBlock(
+        id=f"list-{first.id}",
+        ordered=ordered,
+        items=[[TextRun(text=t)] for t in items_texts],
+    )
+    return list_block, consumed
+
+
+def _paragraph_plain_text(p: Any) -> str:
+    """Склейка text всех TextRun параграфа (helper для list-grouping)."""
+    from gostforge.model import TextRun  # noqa: PLC0415
+
+    return "".join(el.text for el in p.content if isinstance(el, TextRun)).strip()
+
+
+def _bibliography_section_ids(page_sections: list[PageSection]) -> set[str]:
+    """Найти id всех LogicalSection-ов с заголовком «Список ...».
+
+    Используется чтобы пропустить bib-секцию при группировке маркированных
+    параграфов в ListBlock (в bib каждая запись = отдельный параграф,
+    а не элемент списка).
+    """
+    from gostforge.model import LogicalSection, TextRun  # noqa: PLC0415
+
+    aliases = {
+        "список использованных источников",
+        "список литературы",
+        "литература",
+        "список источников",
+        "библиографический список",
+        "references",
+    }
+
+    result: set[str] = set()
+
+    def walk(items: list[Any]) -> None:
+        for it in items:
+            if isinstance(it, LogicalSection):
+                heading = "".join(
+                    el.text for el in it.heading if isinstance(el, TextRun)
+                ).strip().lower()
+                if heading in aliases:
+                    result.add(it.id)
+                walk(it.children)
+
+    for ps in page_sections:
+        walk(ps.content)
+    return result
 
 
 def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None:
