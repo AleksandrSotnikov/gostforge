@@ -119,7 +119,30 @@ curl -X POST http://localhost:8000/stats \
   -F file=@thesis.docx
 ```
 
-### 4.5. История проверок (submissions)
+### 4.5. Маркетплейс профилей — установка через API
+
+```bash
+# Установить YAML-профиль кафедры.
+curl -X POST http://localhost:8000/profiles \
+  -H "X-API-Key: $KEY" \
+  -F file=@kafedra.yaml
+
+# С перезаписью существующего.
+curl -X POST http://localhost:8000/profiles \
+  -H "X-API-Key: $KEY" \
+  -F file=@kafedra.yaml -F overwrite=true
+
+# Список (флаг is_custom помечает установленные локально).
+curl -H "X-API-Key: $KEY" http://localhost:8000/profiles
+
+# Удалить (только custom, builtin удалять нельзя).
+curl -X DELETE -H "X-API-Key: $KEY" \
+  http://localhost:8000/profiles/kafedra-prog-2026
+```
+
+Подробное руководство по реестру — [profiles.md](profiles.md).
+
+### 4.6. История проверок (submissions)
 
 Каждый `POST /check` по умолчанию записывает submission в локальную
 БД (см. [database.md](database.md)).

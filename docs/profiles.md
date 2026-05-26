@@ -12,9 +12,63 @@
 
 ## Расположение
 
-- Встроенные: `profiles/` в репозитории.
-- Пользовательские: `~/.gostforge/profiles/` (Linux/Mac) или `%APPDATA%/gostforge/profiles/` (Windows).
-- При совпадении ID пользовательский переопределяет встроенный.
+- **Встроенные:** `profiles/` в репозитории (`gost-7.32-2017`,
+  `gost-r-2.105-2019`, `example-department`).
+- **Пользовательские (рекомендуется):** локальный реестр в SQLite-БД
+  `~/.gostforge/gostforge.db`. Установка через
+  `gostforge profiles install file.yaml` или REST `POST /profiles`.
+  См. раздел «Установка кафедрального профиля» ниже и
+  [database.md](database.md).
+- При совпадении ID пользовательский профиль из БД переопределяет
+  встроенный — кафедра может «уточнить» базовый ГОСТ под себя.
+
+## Установка кафедрального профиля
+
+Любой кафедральный YAML можно установить в локальный реестр одной
+командой — после этого профиль доступен всем потребителям (CLI, REST
+API, конструктор):
+
+```bash
+# Установить из локального файла.
+gostforge profiles install /path/to/kafedra.yaml
+
+# С перезаписью существующего:
+gostforge profiles install kafedra.yaml --overwrite
+
+# Посмотреть установленные с маркерами builtin/custom.
+gostforge profiles list
+
+# Удалить.
+gostforge profiles uninstall kafedra-prog-2026
+```
+
+То же через REST:
+
+```bash
+# Установка.
+curl -X POST http://localhost:8000/profiles \
+  -H "X-API-Key: $KEY" \
+  -F file=@kafedra.yaml
+
+# С overwrite.
+curl -X POST http://localhost:8000/profiles \
+  -H "X-API-Key: $KEY" \
+  -F file=@kafedra.yaml -F overwrite=true
+
+# Удаление.
+curl -X DELETE -H "X-API-Key: $KEY" \
+  http://localhost:8000/profiles/kafedra-prog-2026
+```
+
+Перед записью YAML валидируется через Pydantic-схему. Битый формат
+или отсутствие обязательных полей (`id`, `name`) → понятная ошибка
+до сохранения в БД.
+
+Распространение между студентами: одной кафедральной командой
+выложить YAML на GitHub / сайт, студенты делают
+`gostforge profiles install URL.yaml` (после `curl -O URL`) и
+пишут проверки с этим профилем. Это убирает необходимость править
+исходники gostforge или копировать YAML по виртуалкам.
 
 ## Минимальный пример
 

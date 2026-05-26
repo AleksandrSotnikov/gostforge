@@ -258,6 +258,16 @@ inline-формула, библиографическая цитата.
       `GET /submissions[/{id}]`. DELETE для очистки. Persistence
       между перезапусками Docker — через named volume
       `gostforge-data`.
+- [x] **Маркетплейс кафедральных профилей** (миграция v2). Любой
+      кафедральный YAML устанавливается в локальный реестр одной
+      командой — `gostforge profiles install kafedra.yaml` или
+      `POST /profiles`. После установки профиль доступен всем
+      командам по своему id без правки исходников gostforge.
+      Расширения: `profiles uninstall`, `profiles list` с маркерами
+      `[builtin]/[custom]`, `DELETE /profiles/{id}`,
+      флаг `is_custom` в `GET /profiles`. Custom-профиль с тем же
+      id что builtin переопределяет последний — кафедра может
+      «уточнить» базовый ГОСТ.
 - [ ] Командная работа: руководитель ↔ студент (комментарии,
       обсуждения, итерации).
 - [ ] Интеграция с LMS (Moodle, eLearning, и др.) — теперь

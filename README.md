@@ -12,9 +12,10 @@
 ## Статус
 
 **Фазы 0–2 завершены, Фаза 2.5 (пословное редактирование в
-конструкторе) и Фаза 3 (REST API + Docker + локальная БД истории
-с auto-migrations) — реализованы.** Покрытие каталога —
-**104 проверки в 15 категориях (100%)**, общая база тестов **918+**.
+конструкторе) и Фаза 3 (REST API + Docker + локальная БД с
+auto-migrations + маркетплейс кафедральных профилей) —
+реализованы.** Покрытие каталога — **104 проверки в 15 категориях
+(100%)**, общая база тестов **958+**.
 
 Что уже работает:
 
@@ -73,6 +74,11 @@
   `schema_version`-таблицу, zero-config). Каждый `gostforge check`
   записывает submission + violations; `gostforge history` показывает
   трекинг прогресса. См. [docs/database.md](docs/database.md).
+- **Маркетплейс кафедральных профилей**: одной командой устанавить
+  YAML-профиль в локальный реестр —
+  `gostforge profiles install kafedra.yaml` или `POST /profiles`.
+  После этого профиль доступен всем командам без правки исходников.
+  См. [docs/profiles.md](docs/profiles.md#установка-кафедрального-профиля).
 - **Production-деплой через Docker**: `Dockerfile` (API), `Dockerfile.ui`
   (Streamlit UI), `docker compose up -d` поднимает оба сервиса.
   Multi-stage образы на `python:3.11-slim` с non-root юзером и

@@ -219,11 +219,13 @@ def create_app() -> FastAPI:
 
     @app.get("/profiles")
     def get_profiles() -> list[dict[str, Any]]:
-        """Список доступных профилей.
+        """Список доступных профилей (builtin + установленные локально).
 
-        Возвращает имя/id/версию/описание без полной выгрузки правил —
-        для UI «выберите профиль» этого достаточно.
+        Возвращает имя/id/версию/описание/is_custom. Полная выгрузка
+        правил — через GET /profiles/{id}.
         """
+        from gostforge.profile import is_custom_profile
+
         result: list[dict[str, Any]] = []
         for profile_id in list_profiles():
             try:
@@ -237,6 +239,7 @@ def create_app() -> FastAPI:
                     "version": p.version,
                     "extends": p.extends,
                     "description": p.description,
+                    "is_custom": is_custom_profile(p.id),
                 }
             )
         return result
@@ -246,6 +249,81 @@ def create_app() -> FastAPI:
         """Полный JSON одного профиля (включая правила проверок)."""
         profile = _load_profile_or_404(profile_id)
         return profile.model_dump()
+
+    @app.post("/profiles")
+    async def install_profile_endpoint(
+        file: UploadFile = File(...),
+        overwrite: bool = Form(False),
+    ) -> dict[str, Any]:
+        """Установить кафедральный YAML-профиль в локальный реестр.
+
+        Принимает multipart/form-data с file=*.yaml (YAML профиля).
+        Парсит и валидирует через Pydantic; при ошибке схемы возвращает
+        400. При попытке установить duplicate без overwrite=true — 409.
+        """
+        if not file or not file.filename:
+            raise HTTPException(status_code=400, detail="Файл не передан")
+        if not file.filename.lower().endswith((".yaml", ".yml")):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ожидался .yaml/.yml, получено: {file.filename!r}",
+            )
+        data = await file.read()
+        if len(data) > 1024 * 1024:  # 1 МБ — профили обычно <50 КБ
+            raise HTTPException(status_code=413, detail="YAML слишком большой (>1 МБ)")
+        try:
+            yaml_content = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(
+                status_code=400, detail=f"YAML должен быть UTF-8: {exc}"
+            ) from exc
+
+        from gostforge.db import get_connection
+        from gostforge.db.custom_profiles import install_profile
+
+        try:
+            with get_connection() as conn:
+                rec = install_profile(
+                    conn,
+                    yaml_content=yaml_content,
+                    source=f"upload:{file.filename}",
+                    overwrite=overwrite,
+                )
+        except ValueError as exc:
+            msg = str(exc)
+            status = 409 if "уже установлен" in msg else 400
+            raise HTTPException(status_code=status, detail=msg) from exc
+
+        return {
+            "id": rec.id,
+            "profile_id": rec.profile_id,
+            "name": rec.name,
+            "version": rec.version,
+            "source": rec.source,
+            "installed_at": rec.installed_at,
+        }
+
+    @app.delete("/profiles/{profile_id}")
+    def uninstall_profile_endpoint(profile_id: str) -> dict[str, bool]:
+        """Удалить custom-профиль из реестра.
+
+        Builtin-профили (gost-7.32-2017 и т.п.) удалить нельзя — они
+        в каталоге пакета, не в БД. Если профиль не в БД, 404.
+        """
+        from gostforge.db import get_connection
+        from gostforge.db.custom_profiles import uninstall_profile
+
+        with get_connection() as conn:
+            removed = uninstall_profile(conn, profile_id)
+        if not removed:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Профиль {profile_id!r} не установлен в локальный реестр "
+                    "(builtin-профили удалять нельзя)."
+                ),
+            )
+        return {"deleted": True}
 
     @app.get("/checks")
     def get_checks() -> list[dict[str, str]]:

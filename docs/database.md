@@ -149,15 +149,19 @@ with get_connection() as conn:
             print(f"  {v.severity}: {v.code} — {v.message}")
 ```
 
-## 9. Что планируется добавить
+## 9. Текущая и планируемые миграции
 
-Следующие миграции расширят БД под новые фичи:
+**Применённые:**
 
-* **v2 — пользовательские профили**: таблица `custom_profiles` (id,
-  name, version, yaml_content, source_url, installed_at). Маркетплейс
-  профилей кафедр будет хранить здесь установленные YAML-ы.
-* **v3 — комментарии руководителя**: таблицы `users`, `comments`,
-  `review_threads` для совместной работы студент ↔ руководитель.
+* **v1** — `submissions`, `violations` (история проверок).
+* **v2** — `custom_profiles` (id, profile_id, name, version,
+  yaml_content, source, installed_at). Локальный реестр кафедральных
+  профилей. Подробное руководство — [profiles.md](profiles.md).
+
+**Запланированы (ещё не в коде):**
+
+* **v3** — `users`, `comments`, `review_threads` для совместной
+  работы студент ↔ руководитель.
 
 Каждая миграция добавляется только append-only в `migrations.py`;
 существующие записи никогда не редактируются.
