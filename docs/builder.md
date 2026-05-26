@@ -101,6 +101,10 @@ gostforge new-state \
 # Разложить готовую .docx в JSON-state для редактирования
 gostforge import-docx work.docx -o state.json
 
+# Извлечь структуру PDF в JSON-state (форматирование не переносится,
+# нужен extra [import-formats]: pip install "gostforge[import-formats]")
+gostforge import-pdf work.pdf -o state.json
+
 # Собрать .docx из JSON-state (зеркало import-docx)
 gostforge generate state.json -o new.docx
 gostforge generate state.json -o new.docx --profile gost-r-2.105-2019

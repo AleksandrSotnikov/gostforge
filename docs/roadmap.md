@@ -262,6 +262,8 @@ inline-формула, библиографическая цитата.
 
 - [x] `gostforge new-state` — JSON-state из шаблона для конструктора.
 - [x] `gostforge import-docx` — разложение готовой .docx в state.
+- [x] `gostforge import-pdf` — извлечение структуры PDF в state
+      (опциональный extra `[import-formats]`, pdfplumber).
 - [x] `gostforge generate` — JSON-state → .docx (зеркало import-docx).
 - [x] `gostforge export-md` — JSON-state → Markdown (GFM, bold/italic,
       таблицы, формулы, изображения, библиография).

@@ -30,7 +30,7 @@
 - **Подразделы до 3-го уровня** через рекурсивный `.subsection(...)`.
 - **Разложение готовой .docx в конструктор** (`document_to_state`) — импортированную работу можно редактировать дальше как через UI, так и через CLI.
 
-### CLI (29 команд)
+### CLI (30 команд)
 | Команда | Что делает |
 |---|---|
 | `gostforge check` | Прогон нормоконтроля с цветным отчётом / Excel / Markdown |
@@ -39,6 +39,7 @@
 | `gostforge new` | Болванка работы по шаблону → .docx |
 | `gostforge new-state` | То же, но в JSON-state для конструктора |
 | `gostforge import-docx` | Разложить готовую работу в JSON-state |
+| `gostforge import-pdf` | Извлечь структуру PDF в JSON-state (extra `[import-formats]`) |
 | `gostforge generate` | JSON-state → .docx |
 | `gostforge export-md` | JSON-state → Markdown (GFM, bold/italic, таблицы, формулы) |
 | `gostforge import-md` | Markdown → JSON-state (round-trip с export-md) |
@@ -133,8 +134,9 @@ source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
 
 # Опционально:
-pip install -e ".[dev,ui]"        # Streamlit UI
-pip install -e ".[dev,ui,api]"    # + REST API
+pip install -e ".[dev,ui]"             # Streamlit UI
+pip install -e ".[dev,ui,api]"         # + REST API
+pip install -e ".[dev,import-formats]" # + импорт PDF (pdfplumber)
 ```
 
 ## Использование
@@ -194,6 +196,8 @@ gostforge new-state --template coursework \
 gostforge new-state --template coursework --title "..." -o state.json
 # ИЛИ
 gostforge import-docx work.docx -o state.json
+# ИЛИ из PDF (нужен extra [import-formats]):
+gostforge import-pdf work.pdf -o state.json
 
 # 2. Редактировать (вручную, в UI, или скриптом)
 gostforge ui                          # визуально
