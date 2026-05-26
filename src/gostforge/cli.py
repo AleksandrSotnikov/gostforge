@@ -2057,6 +2057,93 @@ def check_state_cmd(
         sys.exit(1)
 
 
+@main.command("state-versions")
+@click.argument(
+    "subcommand",
+    type=click.Choice(["list", "restore"]),
+)
+@click.argument("version", required=False, type=str)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Куда восстановить version (для подкоманды 'restore'). "
+    "По умолчанию — рядом с оригиналом.",
+)
+def state_versions_cmd(
+    subcommand: str, version: str | None, output: Path | None
+) -> None:
+    """Управление версиями state-файлов конструктора.
+
+    Версии создаются автоматически каждые 5 минут активной работы
+    в Streamlit-UI (см. ``_save_state_version``) и хранятся в
+    ``~/.gostforge/state-versions/`` (последние 30).
+
+    Подкоманды:
+
+    \b
+        gostforge state-versions list
+        gostforge state-versions restore <filename> [-o output.json]
+
+    Пример::
+
+        gostforge state-versions list
+        gostforge state-versions restore Курсовая-20260526-143000.json \
+                                         -o restored.json
+    """
+    from gostforge.web.builder_editor import (  # noqa: PLC0415
+        _state_versions_dir,
+        list_state_versions,
+    )
+
+    if subcommand == "list":
+        versions = list_state_versions()
+        if not versions:
+            click.echo("Версий state не найдено.")
+            click.echo(f"Каталог: {_state_versions_dir()}")
+            return
+        click.echo(f"Версии state ({len(versions)}):")
+        for p in versions:
+            mtime = p.stat().st_mtime
+            from datetime import datetime as _dt  # noqa: PLC0415
+
+            ts = _dt.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+            size_kb = p.stat().st_size // 1024
+            click.echo(f"  {p.name} ({ts}, {size_kb} КБ)")
+        return
+
+    # subcommand == "restore"
+    if not version:
+        click.echo(
+            "Для 'restore' нужен аргумент <filename> "
+            "(см. 'gostforge state-versions list').",
+            err=True,
+        )
+        sys.exit(2)
+
+    versions_dir = _state_versions_dir()
+    candidate = versions_dir / version
+    if not candidate.exists():
+        # Может быть указано только имя без полного match (например, без .json).
+        matches = list(versions_dir.glob(f"*{version}*.json"))
+        if len(matches) == 1:
+            candidate = matches[0]
+        elif len(matches) > 1:
+            click.echo(f"Неоднозначное имя «{version}». Подходят:", err=True)
+            for m in matches:
+                click.echo(f"  {m.name}", err=True)
+            sys.exit(2)
+        else:
+            click.echo(f"Версия «{version}» не найдена в {versions_dir}", err=True)
+            sys.exit(2)
+
+    if output is None:
+        output = Path.cwd() / candidate.name
+    output.write_bytes(candidate.read_bytes())
+    click.echo(f"Восстановлено: {output}")
+
+
 @main.command("apply-fixes")
 @click.argument("state_path", type=click.Path(exists=True, path_type=Path))
 @click.option(

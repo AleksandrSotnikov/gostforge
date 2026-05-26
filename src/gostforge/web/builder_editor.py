@@ -267,6 +267,11 @@ def _autosave_now() -> None:
 
     Ошибки IO логируются и глотаются — UI продолжает работать даже
     если диск переполнен или каталог недоступен.
+
+    Дополнительно: периодически (раз в 5 минут) кладёт snapshot в
+    каталог версий ``~/.gostforge/state-versions/<title>-<timestamp>.json``.
+    Это даёт возможность откатиться к более ранней версии работы
+    через ``gostforge state-versions list/restore``.
     """
     import time
 
@@ -283,6 +288,73 @@ def _autosave_now() -> None:
         import logging
 
         logging.getLogger(__name__).warning("autosave failed: %s", exc)
+        return
+
+    # Версионирование: каждые VERSION_INTERVAL_SEC кладём snapshot.
+    last_version = float(
+        st.session_state.get("builder_version_ts", 0.0)
+    )
+    if now - last_version >= _VERSION_INTERVAL_SEC:
+        try:
+            state = _get_state()
+            _save_state_version(state)
+            st.session_state["builder_version_ts"] = now
+        except Exception as exc:  # pragma: no cover
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "state version save failed: %s", exc
+            )
+
+
+_VERSION_INTERVAL_SEC = 5 * 60.0  # одна версия каждые 5 минут активной работы
+_VERSION_KEEP_COUNT = 30  # держим последние 30 версий
+
+
+def _state_versions_dir() -> Path:
+    """Каталог для версий state-файлов (~/.gostforge/state-versions/)."""
+    path = Path.home() / ".gostforge" / "state-versions"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _save_state_version(state: dict[str, Any]) -> Path:
+    """Сохранить snapshot state в каталог версий.
+
+    Имя файла: ``<sanitized-title>-<YYYYMMDD-HHMMSS>.json``. Заодно
+    подрезает старые версии до _VERSION_KEEP_COUNT.
+    """
+    import datetime
+    import re as _re
+
+    title = state.get("title") or "untitled"
+    safe_title = _re.sub(r"[^\w\s.-]", "", title).strip().replace(" ", "_")[:50] or "untitled"
+    ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    target_dir = _state_versions_dir()
+    out_path = target_dir / f"{safe_title}-{ts}.json"
+    payload = json.dumps(state, ensure_ascii=False, indent=2).encode("utf-8")
+    out_path.write_bytes(payload)
+    # Подрежем старые версии (по mtime).
+    versions = sorted(
+        target_dir.glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    for old in versions[_VERSION_KEEP_COUNT:]:
+        try:
+            old.unlink()
+        except OSError:
+            pass
+    return out_path
+
+
+def list_state_versions() -> list[Path]:
+    """Список всех state-версий (новые сверху)."""
+    return sorted(
+        _state_versions_dir().glob("*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
 
 
 def _try_load_autosave_state() -> dict[str, Any] | None:
@@ -3123,6 +3195,50 @@ def _render_active_section_editor() -> None:
         _render_blocks_editor(section.get("blocks", []), key_prefix=f"sec{idx}")
         _render_add_block_buttons(section.get("blocks", []), key_prefix=f"sec{idx}")
         _render_subsections_editor(section, idx)
+
+    _render_single_section_pdf_preview(section, idx)
+
+
+def _render_single_section_pdf_preview(
+    section: dict[str, Any], idx: int
+) -> None:
+    """Live-preview только активного раздела в PDF.
+
+    Быстрее, чем превью всего документа (LibreOffice конвертирует один
+    раздел вместо всей работы). Полезно при редактировании длинной
+    работы — итеративное обновление без ожидания.
+    """
+    st.divider()
+    with st.expander("Превью этого раздела (PDF)", expanded=False):
+        st.caption(
+            "Собирает мини-документ только из этого раздела и конвертирует "
+            "в PDF через LibreOffice. Полезно для быстрой проверки вёрстки."
+        )
+        if not st.button(
+            "Сгенерировать превью раздела",
+            key=f"preview_section_{idx}",
+        ):
+            return
+        try:
+            # Минимальный state с одним этим разделом.
+            full_state = _get_state()
+            mini_state = {
+                "title": (full_state.get("title") or "Предпросмотр"),
+                "author": full_state.get("author", ""),
+                "year": full_state.get("year", 2026),
+                "profile_id": full_state.get(
+                    "profile_id", "gost-7.32-2017"
+                ),
+                "sections": [section],
+                "style_overrides": full_state.get("style_overrides") or {},
+            }
+            # Если в разделе библиография, у профиля могут быть жёсткие
+            # требования к источникам — продолжаем с try/except.
+            data = _build_document_from_state(mini_state)
+        except Exception as exc:  # noqa: BLE001
+            st.error(f"Не удалось собрать раздел: {exc}")
+            return
+        _render_pdf_preview(data)
 
 
 def _render_blocks_editor(blocks: list[dict[str, Any]], *, key_prefix: str) -> None:
