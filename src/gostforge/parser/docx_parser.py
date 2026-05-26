@@ -574,12 +574,11 @@ def _paragraph_list_kind(dp: DocxParagraph) -> str | None:
     """Определить, является ли параграф элементом списка.
 
     Возвращает 'ordered' | 'bulleted' | None. Эвристика:
-    - <w:numPr> в <w:pPr> → есть привязка к списку Word. Тип определяется
-      по стилю абзаца (List Number → ordered, List Bullet → bulleted),
-      иначе по умолчанию ordered (Word обычно так).
-    - Стиль абзаца начинается с 'List Number' → ordered.
-    - Стиль абзаца начинается с 'List Bullet' → bulleted.
-    - Иначе None — обычный параграф.
+    1. Стиль абзаца 'List Number*' → ordered, 'List Bullet*' → bulleted.
+    2. <w:numPr> → разрешаем numId через numbering.xml: ищем abstractNum
+       по numId, читаем w:numFmt уровня 0 — 'bullet' → bulleted,
+       'decimal'/'lowerLetter'/etc → ordered.
+    3. Иначе None.
     """
     p_xml = dp._p
     num_pr = p_xml.find(f"{{{W_NS}}}pPr/{{{W_NS}}}numPr")
@@ -589,9 +588,73 @@ def _paragraph_list_kind(dp: DocxParagraph) -> str | None:
     if style_name.startswith("list bullet"):
         return "bulleted"
     if num_pr is not None:
-        # Привязка к списку без указания типа в стиле — считаем ordered.
+        kind_via_num = _resolve_numpr_kind(dp, num_pr)
+        if kind_via_num is not None:
+            return kind_via_num
+        # numbering.xml не доступен или не нашлось — берём ordered как
+        # совместимое поведение (так делает дефолтный шаблон Word).
         return "ordered"
     return None
+
+
+def _resolve_numpr_kind(dp: DocxParagraph, num_pr: Any) -> str | None:
+    """Определить ordered/bulleted по numId через numbering.xml.
+
+    Идём: numPr/numId → numbering_part: num[numId] → abstractNumId →
+    abstractNum: lvl[ilvl=0]/numFmt. 'bullet' → bulleted, прочее → ordered.
+    """
+    w_ns = W_NS
+    num_id_el = num_pr.find(f"{{{w_ns}}}numId")
+    if num_id_el is None:
+        return None
+    num_id = num_id_el.get(f"{{{w_ns}}}val")
+    if not num_id:
+        return None
+    try:
+        numbering_part = dp.part.numbering_part
+    except (AttributeError, KeyError):
+        return None
+    numbering_elem = getattr(numbering_part, "element", None)
+    if numbering_elem is None:
+        return None
+    # Найти <w:num w:numId="N">.
+    num_match = None
+    for n in numbering_elem.findall(f"{{{w_ns}}}num"):
+        if n.get(f"{{{w_ns}}}numId") == num_id:
+            num_match = n
+            break
+    if num_match is None:
+        return None
+    abstract_ref = num_match.find(f"{{{w_ns}}}abstractNumId")
+    if abstract_ref is None:
+        return None
+    abstract_id = abstract_ref.get(f"{{{w_ns}}}val")
+    # Найти соответствующий abstractNum.
+    for an in numbering_elem.findall(f"{{{w_ns}}}abstractNum"):
+        if an.get(f"{{{w_ns}}}abstractNumId") == abstract_id:
+            lvl = an.find(f"{{{w_ns}}}lvl")
+            if lvl is None:
+                return None
+            num_fmt = lvl.find(f"{{{w_ns}}}numFmt")
+            if num_fmt is None:
+                return None
+            fmt_val = num_fmt.get(f"{{{w_ns}}}val", "")
+            if fmt_val == "bullet":
+                return "bulleted"
+            return "ordered"
+    return None
+
+
+def _paragraph_num_id(dp: DocxParagraph) -> str | None:
+    """Вернуть numId параграфа, если у него есть <w:numPr>. Иначе None."""
+    p_xml = dp._p
+    num_pr = p_xml.find(f"{{{W_NS}}}pPr/{{{W_NS}}}numPr")
+    if num_pr is None:
+        return None
+    num_id_el = num_pr.find(f"{{{W_NS}}}numId")
+    if num_id_el is None:
+        return None
+    return num_id_el.get(f"{{{W_NS}}}val")
 
 
 # Regex-маркеры элементов текстовых списков, написанных через builder/
@@ -794,21 +857,37 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
     body = docx_doc.element.body
 
     # Буфер для группировки последовательных list-параграфов в один ListBlock.
-    list_buffer: list[tuple[str, list[InlineElement]]] = []  # (kind, content)
+    # Элемент: (kind, num_id, content). num_id используется для разделения
+    # разных списков подряд (например, нумерованный + маркированный
+    # сразу — не сольются в один ListBlock).
+    list_buffer: list[tuple[str, str | None, list[InlineElement]]] = []
 
     def flush_list_buffer() -> None:
-        """Если в буфере накопились list-параграфы — сделать из них ListBlock."""
+        """Если в буфере накопились list-параграфы — сделать из них ListBlock.
+
+        Дополнительно разрезает буфер по сменам (kind, num_id), чтобы
+        два подряд идущих списка разных типов (например, ordered и
+        bulleted) не слились в один.
+        """
         if not list_buffer:
             return
-        # Тип ordered определяется по большинству элементов буфера
-        ordered = sum(1 for k, _ in list_buffer if k == "ordered") >= len(list_buffer) / 2
-        counters.list += 1
-        list_block = ListBlock(
-            id=f"list-{counters.list}",
-            ordered=ordered,
-            items=[content for _, content in list_buffer],
-        )
-        _append_block(list_block, page_section, current_section)
+        # Группируем по (kind, num_id).
+        groups: list[tuple[str, list[list[InlineElement]]]] = []
+        cur_key: tuple[str, str | None] | None = None
+        for kind, num_id, content in list_buffer:
+            key = (kind, num_id)
+            if cur_key != key:
+                groups.append((kind, []))
+                cur_key = key
+            groups[-1][1].append(content)
+        for kind, items in groups:
+            counters.list += 1
+            list_block = ListBlock(
+                id=f"list-{counters.list}",
+                ordered=(kind == "ordered"),
+                items=items,
+            )
+            _append_block(list_block, page_section, current_section)
         list_buffer.clear()
 
     for child in body.iterchildren():
@@ -848,7 +927,8 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
                 if not runs and dp.text:
                     runs = [TextRun(text=dp.text)]
                 if runs:
-                    list_buffer.append((list_kind, runs))
+                    num_id = _paragraph_num_id(dp)
+                    list_buffer.append((list_kind, num_id, runs))
                 continue
 
             # Обычный параграф или figure — сначала закрываем накопленный список

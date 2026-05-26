@@ -198,22 +198,32 @@ def test_table_borders_disabled_via_profile(tmp_path: Path) -> None:
 # --- Lists: маркеры из профиля --------------------------------------------
 
 
+def _docx_numbering_xml(data: bytes) -> str:
+    """Достать word/numbering.xml из байтов docx."""
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        return zf.read("word/numbering.xml").decode("utf-8")
+
+
 def test_bullet_uses_dash_by_default(tmp_path: Path) -> None:
-    """По ГОСТ Р 7.32-2017 — маркер тире (–), не точка."""
+    """По ГОСТ Р 7.32-2017 — bullet-маркер тире (–).
+
+    После перехода на настоящие numPr-списки маркер живёт в
+    numbering.xml (lvlText), а не в тексте параграфа. Тест проверяет,
+    что в numbering.xml есть abstractNum с lvlText='–'.
+    """
     data = _build_demo_docx(tmp_path)
-    doc_xml = _docx_document_xml(data)
-    # У параграфа с «один» должно быть префиксное «– ».
-    assert re.search(r"<w:t[^>]*>–\s*</w:t>", doc_xml), (
-        "Тире-маркер не найден перед элементами списка"
+    numbering = _docx_numbering_xml(data)
+    assert re.search(r'<w:lvlText w:val="–"\s*/>', numbering), (
+        "Тире-маркер не найден в numbering.xml как lvlText"
     )
 
 
 def test_ordered_uses_paren_format_by_default(tmp_path: Path) -> None:
-    """ordered_format = "{n})" → первый пункт префикс «1) »."""
+    """ordered_format = "{n})" → lvlText='%1)' в numbering.xml."""
     data = _build_demo_docx(tmp_path)
-    doc_xml = _docx_document_xml(data)
-    assert re.search(r"<w:t[^>]*>1\)\s*</w:t>", doc_xml), (
-        "Префикс «1)» не найден перед нумерованным списком"
+    numbering = _docx_numbering_xml(data)
+    assert re.search(r'<w:lvlText w:val="%1\)"\s*/>', numbering), (
+        "Шаблон «%1)» не найден в numbering.xml"
     )
 
 
@@ -232,8 +242,8 @@ def test_custom_bullet_char_from_profile(tmp_path: Path) -> None:
     export_docx(doc, profile, out)
 
     with zipfile.ZipFile(out) as zf:
-        doc_xml = zf.read("word/document.xml").decode("utf-8")
-    assert re.search(r"<w:t[^>]*>•\s*</w:t>", doc_xml)
+        numbering = zf.read("word/numbering.xml").decode("utf-8")
+    assert re.search(r'<w:lvlText w:val="•"\s*/>', numbering)
 
 
 # --- Figure: alignment рисунка --------------------------------------------
