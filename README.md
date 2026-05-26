@@ -67,6 +67,12 @@
   [docs/api.md](docs/api.md) — руководство по деплою с nginx,
   [docs/phase-3-api-spec.md](docs/phase-3-api-spec.md) — спецификация
   endpoints.
+- **Production-деплой через Docker**: `Dockerfile` (API), `Dockerfile.ui`
+  (Streamlit UI), `docker compose up -d` поднимает оба сервиса.
+  Multi-stage образы на `python:3.11-slim` с non-root юзером и
+  HEALTHCHECK. См. [docs/api.md §5](docs/api.md#5-деплой-через-docker).
+- **CI на GitHub Actions** (`.github/workflows/ci.yml`):
+  тесты на Python 3.11/3.12, ruff/mypy, сборка Docker-образов.
 - **877+ тестов**, mypy --strict baseline, ruff без регресса.
 
 См. [docs/roadmap.md](docs/roadmap.md) — план фаз и текущий прогресс.

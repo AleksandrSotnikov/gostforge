@@ -121,25 +121,67 @@ curl -X POST http://localhost:8000/stats \
 
 ## 5. Деплой через Docker
 
-В корне репозитория лежат `Dockerfile` и `docker-compose.yml`.
+В корне репозитория лежат три файла для деплоя:
+
+* `Dockerfile` — REST API (порт 8000).
+* `Dockerfile.ui` — Streamlit UI (порт 8501).
+* `docker-compose.yml` — оба сервиса вместе.
 
 ```bash
 cp .env.example .env
 # отредактируйте .env: задайте GOSTFORGE_API_KEYS и GOSTFORGE_CORS_ORIGINS
 docker compose up -d
 docker compose logs -f api
+docker compose logs -f ui
 ```
 
-По умолчанию контейнер слушает только `127.0.0.1:8000` (для reverse-proxy).
-Чтобы открыть наружу — установите `GOSTFORGE_BIND=0.0.0.0` в `.env`
-**и обязательно поставьте перед сервисом TLS-прокси** (nginx / Caddy).
+По умолчанию контейнеры слушают только `127.0.0.1:8000` и
+`127.0.0.1:8501` (для reverse-proxy). Чтобы открыть наружу —
+установите `GOSTFORGE_BIND=0.0.0.0` и/или `GOSTFORGE_UI_BIND=0.0.0.0`
+в `.env` **и обязательно поставьте перед сервисами TLS-прокси**
+(nginx / Caddy).
 
-Образ:
+Можно поднять только один сервис:
+
+```bash
+docker compose up -d api     # только REST API
+docker compose up -d ui      # только Streamlit UI
+```
+
+Оба образа:
 
 * multi-stage build на `python:3.11-slim`,
 * non-root user `gostforge`,
-* embedded HEALTHCHECK через `/health`,
-* лимит ресурсов 1 CPU / 512 МБ через `deploy.resources` в compose.
+* embedded HEALTHCHECK,
+* лимит ресурсов через `deploy.resources` в compose
+  (API: 1 CPU / 512 МБ; UI: 1 CPU / 768 МБ — Streamlit прожорливее).
+
+### 5.1. Только UI без API
+
+Streamlit-UI работает автономно — он напрямую использует Python-API
+gostforge, не делая HTTP-запросов к REST. То есть UI-сервис можно
+запустить отдельно для пользователей-студентов, а REST API
+выставлять только для LMS-интеграции.
+
+### 5.2. Аутентификация UI
+
+Streamlit-UI **не имеет встроенной аутентификации** — он
+рассчитан на доверенную сеть или защищается reverse-proxy:
+
+```nginx
+# Basic auth перед Streamlit UI.
+location / {
+    auth_basic "gostforge";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+    proxy_pass http://127.0.0.1:8501;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+}
+```
+
+Для OAuth2/SAML используйте `oauth2-proxy` перед сервисом.
 
 ## 6. Деплой с reverse-proxy (nginx)
 

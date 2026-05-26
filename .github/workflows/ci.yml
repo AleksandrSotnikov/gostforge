@@ -80,10 +80,21 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile
           push: false
           tags: gostforge:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: Build UI image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.ui
+          push: false
+          tags: gostforge-ui:ci
+          cache-from: type=gha,scope=ui
+          cache-to: type=gha,scope=ui,mode=max
 
       - name: Validate docker-compose.yml
         run: docker compose config --quiet

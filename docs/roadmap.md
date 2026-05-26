@@ -235,10 +235,17 @@ inline-формула, библиографическая цитата.
       `/health` и `/docs`). Rate-limiting — на стороне reverse-proxy
       (готовый nginx-конфиг в [api.md](api.md)).
 - [x] **Docker и docker-compose** для production-деплоя.
-      Multi-stage Dockerfile на python:3.11-slim, non-root user,
-      HEALTHCHECK через `/health`, лимит ресурсов. Руководство по
-      деплою с nginx — [api.md](api.md).
-- [ ] Веб-версия — деплой Streamlit-UI как сервис.
+      Multi-stage Dockerfile (API) и Dockerfile.ui (Streamlit UI),
+      docker-compose с двумя сервисами, non-root юзер, HEALTHCHECK,
+      лимит ресурсов. Руководство по деплою с nginx — [api.md](api.md).
+- [x] **Streamlit-UI как Docker-сервис** — Dockerfile.ui +
+      сервис в docker-compose. UI работает автономно (не требует
+      REST API). Аутентификация — через reverse-proxy (basic auth
+      или oauth2-proxy).
+- [x] **CI на GitHub Actions** — тесты на Python 3.11/3.12 (matrix),
+      ruff/mypy в warn-only режиме, сборка обоих Docker-образов,
+      валидация docker-compose.yml. concurrency.group отменяет
+      устаревшие прогоны.
 - [ ] Командная работа: руководитель ↔ студент (комментарии,
       обсуждения, итерации).
 - [ ] Интеграция с LMS (Moodle, eLearning, и др.) — теперь
