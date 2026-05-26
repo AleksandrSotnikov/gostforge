@@ -1257,6 +1257,85 @@ def pdf(path: Path, output: Path, timeout: float) -> None:
     click.echo(f"PDF сохранён: {result}")
 
 
+@main.command("convert")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить результат (расширение определяет формат).",
+)
+@click.option(
+    "--to",
+    "target_format",
+    type=str,
+    default=None,
+    help="Целевой формат LibreOffice (docx/odt/rtf/txt/html/pdf). "
+    "По умолчанию выводится из расширения --output.",
+)
+@click.option(
+    "--timeout",
+    type=float,
+    default=120.0,
+    help="Таймаут конвертации в секундах.",
+)
+def convert_cmd(
+    path: Path, output: Path, target_format: str | None, timeout: float
+) -> None:
+    """Сконвертировать документ в другой формат через LibreOffice.
+
+    Главный сценарий — старый Word ``.doc`` → ``.docx`` (который
+    читает gostforge-парсер)::
+
+        gostforge convert work.doc -o work.docx
+
+    Также поддерживаются odt/rtf/txt/html/pdf. Формат выводится
+    из расширения ``--output`` или задаётся явно через ``--to``.
+
+    Требует установленного LibreOffice.
+    """
+    from gostforge.pdf_exporter import (  # noqa: PLC0415
+        LibreOfficeNotFoundError,
+        convert_document,
+    )
+
+    fmt = target_format or output.suffix.lstrip(".").lower()
+    if not fmt:
+        click.echo(
+            "Не удалось определить целевой формат. Укажите --to или "
+            "расширение в --output (например, -o out.docx).",
+            err=True,
+        )
+        sys.exit(2)
+
+    try:
+        result = convert_document(
+            path, output, target_format=fmt, timeout=timeout
+        )
+    except LibreOfficeNotFoundError as e:
+        click.echo(f"Ошибка: {e}", err=True)
+        sys.exit(3)
+    except subprocess.TimeoutExpired:
+        click.echo(
+            f"Конвертация прервана по таймауту ({timeout}s)", err=True
+        )
+        sys.exit(4)
+    except subprocess.CalledProcessError as e:
+        click.echo(
+            f"LibreOffice вернул ошибку (код {e.returncode}):", err=True
+        )
+        stderr = e.stderr or b""
+        click.echo(stderr.decode("utf-8", errors="replace"), err=True)
+        sys.exit(5)
+    except RuntimeError as e:
+        # LibreOffice формально завершился, но не создал ожидаемый файл
+        # (битый/неподдерживаемый вход).
+        click.echo(f"Конвертация не удалась: {e}", err=True)
+        sys.exit(5)
+    click.echo(f"Сконвертировано: {result}")
+
+
 @main.command()
 @click.argument("output", type=click.Path(path_type=Path))
 @click.option(
