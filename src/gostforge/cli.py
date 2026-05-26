@@ -1600,17 +1600,70 @@ def _section_to_md(
         _section_to_md(sub, depth=depth + 1, lines=lines)
 
 
+def _paragraph_to_md(block: dict[str, Any]) -> str:
+    """Сериализовать параграф (text или runs) в Markdown-строку.
+
+    Если block имеет 'runs' с bold/italic — оборачиваем фрагменты:
+    * bold + italic → '***x***'
+    * bold → '**x**'
+    * italic → '*x*'
+    * underline (MD не поддерживает нативно) → '_x_' (italic-fallback,
+      без потерь читаемости).
+
+    Для простого text= возвращаем как есть.
+    """
+    text = block.get("text", "")
+    runs = block.get("runs") or []
+    if not runs:
+        return text
+    out_parts: list[str] = []
+    for r in runs:
+        if r.get("kind") != "text":
+            # Для xref/citation/formula пока берём текст «как есть»
+            # (формулы → $...$, xref → [текст], citation → [N]).
+            if r.get("kind") == "formula":
+                out_parts.append(f"${r.get('latex', '')}$")
+            elif r.get("kind") == "citation":
+                sid = r.get("source_id", "")
+                page = r.get("page", "")
+                out_parts.append(
+                    f"[{sid}, с. {page}]" if page else f"[{sid}]"
+                )
+            elif r.get("kind") == "xref":
+                # xref в Markdown ёще нет нативного аналога — кладём
+                # placeholder. import-md его обратно не превратит,
+                # но текст не потеряется.
+                tgt = r.get("target_id", "")
+                prefix = r.get("prefix", "")
+                out_parts.append(f"{prefix}[→{tgt}]")
+            continue
+        t = r.get("text", "")
+        if not t:
+            continue
+        bold = bool(r.get("bold"))
+        italic = bool(r.get("italic"))
+        if bold and italic:
+            out_parts.append(f"***{t}***")
+        elif bold:
+            out_parts.append(f"**{t}**")
+        elif italic:
+            out_parts.append(f"*{t}*")
+        else:
+            out_parts.append(t)
+    return "".join(out_parts)
+
+
 def _block_to_md(block: dict[str, Any], *, lines: list[str]) -> None:
-    """Сериализовать один Block в Markdown-строки."""
+    """Сериализовать один Block в Markdown-строки.
+
+    Параграфы с rich-runs (bold/italic) экспортируются с
+    Markdown-разметкой: bold=True → ``**текст**``, italic=True →
+    ``*текст*``, bold+italic → ``***текст***``. Это даёт настоящий
+    rich-Markdown при export-md и round-trip через import-md.
+    """
     kind = block.get("kind", "")
     if kind == "paragraph":
-        text = block.get("text", "")
-        if not text and block.get("runs"):
-            text = "".join(
-                r.get("text", "")
-                for r in block["runs"]
-                if r.get("kind") == "text"
-            )
+        text = _paragraph_to_md(block)
         if text.strip():
             lines.append(text)
             lines.append("")
@@ -1830,6 +1883,49 @@ def import_md_cmd(
     )
 
 
+def _parse_md_inline(text: str) -> list[dict[str, Any]]:
+    """Разобрать inline Markdown в runs (text с bold/italic).
+
+    Поддерживает:
+    * '***x***' → bold+italic;
+    * '**x**' → bold;
+    * '*x*' / '_x_' → italic.
+
+    Простой scanner — для round-trip с export-md достаточно.
+    Не поддерживает: code spans (`x`), strikethrough (~~x~~),
+    ссылки [text](url) — текст сохраняется как есть.
+    """
+    import re  # noqa: PLC0415
+
+    # Регекс для трёх вариантов в порядке убывания специфичности:
+    # *** ... *** | ** ... ** | * ... * | _ ... _
+    pattern = re.compile(
+        r"(\*\*\*([^*]+)\*\*\*"
+        r"|\*\*([^*]+)\*\*"
+        r"|\*([^*]+)\*"
+        r"|_([^_]+)_)"
+    )
+    runs: list[dict[str, Any]] = []
+    last_end = 0
+    for m in pattern.finditer(text):
+        if m.start() > last_end:
+            runs.append({"kind": "text", "text": text[last_end : m.start()]})
+        if m.group(2) is not None:
+            runs.append(
+                {"kind": "text", "text": m.group(2), "bold": True, "italic": True}
+            )
+        elif m.group(3) is not None:
+            runs.append({"kind": "text", "text": m.group(3), "bold": True})
+        elif m.group(4) is not None:
+            runs.append({"kind": "text", "text": m.group(4), "italic": True})
+        elif m.group(5) is not None:
+            runs.append({"kind": "text", "text": m.group(5), "italic": True})
+        last_end = m.end()
+    if last_end < len(text):
+        runs.append({"kind": "text", "text": text[last_end:]})
+    return runs
+
+
 def _markdown_to_state(
     text: str,
     *,
@@ -1987,12 +2083,17 @@ def _markdown_to_state(
 
         # Обычный параграф (или пустая строка).
         if stripped:
-            # Игнорируем metadata-строки '**Автор:** ...' — они не нужны
-            # в blocks, парсятся отдельно сверху (TODO: парсить
-            # metadata после первого # title).
             blocks = current_blocks()
             if blocks is not None:
-                blocks.append({"kind": "paragraph", "text": stripped})
+                # Если параграф содержит rich-markdown (** / *), разбираем
+                # в runs. Иначе кладём как простой text.
+                runs = _parse_md_inline(stripped)
+                if runs and any(
+                    r.get("bold") or r.get("italic") for r in runs
+                ):
+                    blocks.append({"kind": "paragraph", "runs": runs})
+                else:
+                    blocks.append({"kind": "paragraph", "text": stripped})
         i += 1
 
     return state
