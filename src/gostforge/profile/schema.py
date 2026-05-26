@@ -74,6 +74,15 @@ class CaptionStyleProfile(BaseModel):
     # Доступные плейсхолдеры: {num}, {title}.
     format: str = "{num} — {title}"
     position: Literal["above", "below"] = "below"
+    # keep_together: все строки подписи на одной странице (Word
+    # не разорвёт длинную подпись пополам).
+    keep_together: bool = True
+    # keep_with_next: подпись не отрывается от следующего за ней
+    # параграфа. Для подписи таблицы (position=above) это значит
+    # «подпись и таблица всегда на одной странице»; для подписи
+    # рисунка (position=below) обычно не нужен (рисунок-параграф
+    # сам имеет keep_with_next перед подписью).
+    keep_with_next: bool = False
 
 
 class TableStyleProfile(BaseModel):
@@ -91,21 +100,43 @@ class TableStyleProfile(BaseModel):
     cell_size_pt: float | None = None
     # Жирная шапка.
     header_bold: bool = True
+    # Форматирование текста ячеек. Без явного контроля ячейки наследуют
+    # стиль Normal с justify, отступом красной строки 1.25 см и
+    # межстрочным 1.5 — в узких колонках это ломает читаемость.
+    # Стандартное оформление таблиц: текст слева/центр, без красной
+    # строки, single-spacing, без интервалов между параграфами.
+    cell_alignment: Literal["left", "right", "center", "justify"] = "left"
+    cell_first_line_indent_cm: float = 0.0
+    cell_line_spacing: float = 1.0
+    cell_space_before_pt: float = 0.0
+    cell_space_after_pt: float = 0.0
+    # Выравнивание текста в шапке — обычно центрирование.
+    header_alignment: Literal["left", "right", "center", "justify"] = "center"
     # Выравнивание подписи таблицы.
     caption: CaptionStyleProfile = Field(
         default_factory=lambda: CaptionStyleProfile(
             alignment="left",
             position="above",
             format="Таблица {num} — {title}",
+            keep_with_next=True,  # подпись таблицы вверху не отрывается
         )
     )
 
 
 class FigureStyleProfile(BaseModel):
-    """Параметры рисунков: выравнивание, подпись."""
+    """Параметры рисунков: выравнивание, подпись, ограничение размера."""
 
     # Выравнивание самого рисунка (центрирование — стандарт).
     alignment: Literal["left", "center", "right"] = "center"
+    # Максимальная ширина рисунка в см. При полях A4 (top/right/bottom=20мм,
+    # left=30мм по ГОСТ 7.32) ширина текстового поля = 210 - 30 - 15 = 165 мм
+    # = 16.5 см. Изображения шире уменьшаются пропорционально; уже —
+    # остаются как есть.
+    max_width_cm: float = 16.5
+    # keep_with_next: параграф с рисунком не отрывается от подписи под
+    # ним (Word не переносит рисунок отдельно на следующую страницу,
+    # оставляя подпись внизу прежней).
+    keep_with_next: bool = True
     caption: CaptionStyleProfile = Field(
         default_factory=lambda: CaptionStyleProfile(
             alignment="center",

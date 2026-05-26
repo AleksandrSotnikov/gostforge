@@ -528,6 +528,13 @@ def _write_caption_paragraph(
     pf.space_before = Pt(cfg.spacing_before_pt)
     pf.space_after = Pt(cfg.spacing_after_pt)
     pf.first_line_indent = Cm(0)
+    # keep_together: длинная подпись не разрывается между страницами.
+    # keep_with_next: подпись таблицы (position=above) не отрывается
+    # от таблицы под ней.
+    if cfg.keep_together:
+        pf.keep_together = True
+    if cfg.keep_with_next:
+        pf.keep_with_next = True
     # На уровне run-ов — шрифт/кегль (если в стиле Caption они сбиты).
     for run in docx_para.runs:
         run.font.name = cfg.font
@@ -572,6 +579,9 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
             cell = docx_table.rows[row_idx].cells[col_idx]
             cell.text = ""
             _write_runs(cell.paragraphs[0], cell_content)
+            _apply_cell_paragraph_format(
+                cell, cfg, is_header=True
+            )
             _apply_cell_font(cell, cfg)
             if header_bold:
                 for run in cell.paragraphs[0].runs:
@@ -584,8 +594,35 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
             cell = docx_table.rows[row_idx].cells[col_idx]
             cell.text = ""
             _write_runs(cell.paragraphs[0], cell_content)
+            _apply_cell_paragraph_format(cell, cfg, is_header=False)
             _apply_cell_font(cell, cfg)
         row_idx += 1
+
+
+def _apply_cell_paragraph_format(
+    cell: Any, cfg: Any, *, is_header: bool
+) -> None:
+    """Применить параграф-формат к ячейке таблицы.
+
+    Без этого ячейки наследуют стиль Normal (justify + красная строка
+    1.25 см + межстрочный 1.5), что в узких колонках ломает читаемость.
+    По ГОСТ Р 2.105-2019 в таблицах: текст слева/центр, без красной
+    строки, single-spacing, без интервалов между параграфами.
+
+    Параметры берутся из profile.styles.table: cell_alignment,
+    cell_first_line_indent_cm, cell_line_spacing, cell_space_before/
+    after_pt. Для шапки — header_alignment (обычно центр).
+    """
+    if cfg is None:
+        return
+    alignment = cfg.header_alignment if is_header else cfg.cell_alignment
+    for paragraph in cell.paragraphs:
+        pf = paragraph.paragraph_format
+        pf.alignment = _ALIGNMENT_MAP[alignment]
+        pf.first_line_indent = Cm(cfg.cell_first_line_indent_cm)
+        pf.line_spacing = cfg.cell_line_spacing
+        pf.space_before = Pt(cfg.cell_space_before_pt)
+        pf.space_after = Pt(cfg.cell_space_after_pt)
 
 
 def _apply_table_borders(docx_table: Any, cfg: Any) -> None:
@@ -661,9 +698,10 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
         paragraph.alignment = fig_alignment
         # Первый отступ убираем — это не текст, а рисунок.
         paragraph.paragraph_format.first_line_indent = Cm(0)
+        _apply_figure_paragraph_constraints(paragraph)
         run = paragraph.add_run()
         try:
-            run.add_picture(path)
+            _add_picture_with_max_width(run, path)
         except Exception:  # noqa: BLE001 — fallback на placeholder при любой ошибке
             paragraph.add_run(f"[Рисунок: {figure.id}]").italic = True
         _write_caption_paragraph(doc, figure.caption, caption_kind="figure")
@@ -673,8 +711,54 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
     placeholder = doc.add_paragraph()
     placeholder.alignment = fig_alignment
     placeholder.paragraph_format.first_line_indent = Cm(0)
+    _apply_figure_paragraph_constraints(placeholder)
     placeholder.add_run(f"[Рисунок: {figure.id}]").italic = True
     _write_caption_paragraph(doc, figure.caption, caption_kind="figure")
+
+
+def _apply_figure_paragraph_constraints(paragraph: Any) -> None:
+    """Применить параграф-формат к параграфу-рисунку.
+
+    Сейчас — только keep_with_next=True (из profile.styles.figure):
+    рисунок и подпись остаются на одной странице, Word не отрывает
+    подпись на следующую страницу.
+    """
+    if _current_profile is None:
+        return
+    fig_cfg = _current_profile.styles.figure
+    if fig_cfg.keep_with_next:
+        paragraph.paragraph_format.keep_with_next = True
+
+
+def _add_picture_with_max_width(run: Any, source: Any) -> None:
+    """Вставить картинку с ограничением максимальной ширины.
+
+    По умолчанию add_picture(path) использует оригинальный размер,
+    из-за чего большие сканы и скриншоты вылезают за поля страницы
+    или вообще выходят за лист. Сначала вставляем без явной ширины,
+    потом если она шире лимита из профиля — масштабируем
+    пропорционально (Word сам сохраняет aspect ratio при задании
+    одного измерения).
+    """
+    if _current_profile is None:
+        run.add_picture(source)
+        return
+    fig_cfg = _current_profile.styles.figure
+    max_width_cm = float(fig_cfg.max_width_cm)
+    picture = run.add_picture(source)
+    # picture.width — EMU (1 cm = 360000 EMU). Сравним с max.
+    try:
+        max_emu = Cm(max_width_cm).emu
+        if picture.width > max_emu:
+            # Сохраняем aspect ratio: ставим ширину, высота
+            # пересчитается автоматически python-docx-ом.
+            ratio = picture.height / picture.width
+            picture.width = max_emu
+            picture.height = int(max_emu * ratio)
+    except (AttributeError, TypeError):  # pragma: no cover
+        # На всякий случай — если picture не InlineShape (мок и пр.),
+        # не падаем; картинка останется оригинального размера.
+        return
 
 
 def _figure_alignment_from_profile() -> Any:
@@ -721,9 +805,10 @@ def _try_write_embedded_picture(
     paragraph = doc.add_paragraph()
     paragraph.alignment = _figure_alignment_from_profile()
     paragraph.paragraph_format.first_line_indent = Cm(0)
+    _apply_figure_paragraph_constraints(paragraph)
     run = paragraph.add_run()
     try:
-        run.add_picture(io.BytesIO(blob))
+        _add_picture_with_max_width(run, io.BytesIO(blob))
     except Exception:  # noqa: BLE001
         p_xml = paragraph._p
         parent = p_xml.getparent()
