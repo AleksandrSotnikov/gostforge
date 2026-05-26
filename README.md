@@ -13,7 +13,7 @@
 
 ## Статус
 
-**106 проверок в 15 категориях**, **15 автофиксеров**, **1332+ тестов**.
+**113 проверок в 16 категориях**, **18 автофиксеров**, **1500+ тестов**.
 
 Что уже работает:
 
@@ -21,8 +21,8 @@
 - **Парсер `.docx → Document`**: поля страницы, формат бумаги (A4/A3/A5/Letter/Legal), ориентация, метаданные, параграфы со стилями и runs, заголовки H1..H4, таблицы и рисунки со склейкой подписей, footer/header с полем PAGE, `<w:pgNumType>` (start + fmt), `<w:pageBreakBefore>`, OMML-формулы → `latex`, нумерованные и маркированные списки с распознаванием уровней (`<w:numPr><w:ilvl/>`), `<w:autoHyphenation>`, библиография с распарсенными полями (author, year, url, doi, access_date, place, language), DPI изображений через Pillow, alignment рисунков, **комментарии рецензента** из `word/comments.xml`, **style-cascade** (font/size/bold/italic/color наследуются от Heading{N} → Normal даже без явных run-атрибутов).
 - **Экспортёр `Document → .docx`**: round-trip без потерь, **настоящие numPr-списки** с `numbering.xml` и одноуровневая/многоуровневая нумерация (`item_levels`), компактный отступ маркер↔текст (`<w:suff w:val="space"/>` вместо Tab), **корректная вёрстка по ГОСТу**: чёрные заголовки Times New Roman (а не синие Cambria из шаблона Word), `<w:tblBorders>` у всех таблиц, центрированные подписи рисунков и левые подписи таблиц, межабзацный интервал 0 pt (без наследованных 10 pt от Word-defaults).
 - **Профили YAML** с полноценным наследованием (deep-merge): базовый `gost-7.32-2017`, `gost-r-2.105-2019` (ЕСКД), пример кафедрального `example-department`. Типизированная Pydantic-схема включает `HeadingStyleProfile`, `CaptionStyleProfile`, `TableStyleProfile`, `FigureStyleProfile`, `ListStyleProfile`, `BodyTextProfile` (с `space_before_pt`/`space_after_pt`).
-- **106 реализованных проверок** во всех 15 категориях: F (страница), T (текст, включая T.14 — интервалы между абзацами), S (структура), H (заголовки, включая проверку цвета H.01/H.02), I (рисунки), B (таблицы), M (формулы), L (списки), R (литература), C (перекрёстные ссылки), A (сокращения), P (приложения), K (колонтитулы), V (объём), X (стиль). Полный каталог — [docs/checks-catalog.md](docs/checks-catalog.md).
-- **15 автофиксеров**: безопасные правки (T.07–T.14, H.03, H.08 и др.). Применяются по `gostforge fix` или кнопкой «Применить автофиксы» в UI.
+- **113 реализованных проверок** в 16 категориях: F (страница), T (текст, вкл. T.14 — интервалы между абзацами), S (структура), H (заголовки, вкл. проверку цвета H.01/H.02), I (рисунки), B (таблицы, вкл. B.10 — пустые), M (формулы), L (списки), R (литература, вкл. R.14 — формат DOI/URL), C (перекрёстные ссылки), A (сокращения), P (приложения), K (колонтитулы), V (объём), X (стиль, вкл. X.06-X.08 — канцеляризмы/длинные предложения/повторы), U (единицы измерения, ГОСТ Р 8.000-2015). Полный каталог — [docs/checks-catalog.md](docs/checks-catalog.md).
+- **18 автофиксеров**: безопасные правки (T.03–T.14, H.03/H.04/H.08, L.04, F.04/F.06). Применяются по `gostforge fix`, кнопкой «Применить автофиксы» в UI или `gostforge apply-fixes`.
 
 ### Конструктор работ
 - **Fluent-API** (`gostforge.builder`) с тремя шаблонами (`coursework`/`bachelor_thesis`/`research_report`).
@@ -30,7 +30,7 @@
 - **Подразделы до 3-го уровня** через рекурсивный `.subsection(...)`.
 - **Разложение готовой .docx в конструктор** (`document_to_state`) — импортированную работу можно редактировать дальше как через UI, так и через CLI.
 
-### CLI (23 команды)
+### CLI (29 команд)
 | Команда | Что делает |
 |---|---|
 | `gostforge check` | Прогон нормоконтроля с цветным отчётом / Excel / Markdown |
@@ -42,8 +42,13 @@
 | `gostforge generate` | JSON-state → .docx |
 | `gostforge export-md` | JSON-state → Markdown (GFM, bold/italic, таблицы, формулы) |
 | `gostforge import-md` | Markdown → JSON-state (round-trip с export-md) |
+| `gostforge export-html` | JSON-state → HTML5 (standalone с CSS под печать / fragment) |
 | `gostforge apply-fixes` | Автофиксы прямо над state-файлом |
 | `gostforge diff-state` | Сравнение двух state — summary или unified diff |
+| `gostforge stats-state` | Метрики state без .docx (разделы, слова, --json) |
+| `gostforge check-state` | Нормоконтроль над state без .docx (быстро, exit 1 при ошибках) |
+| `gostforge state-versions` | Список/восстановление авто-версий state |
+| `gostforge convert` | Конвертация форматов через LibreOffice (DOC→DOCX и др.) |
 | `gostforge pdf` | .docx → PDF через LibreOffice |
 | `gostforge diff` | Сравнение двух submission-ов из истории |
 | `gostforge stats` | Числовые метрики структуры документа |
@@ -106,7 +111,7 @@
                      │   │ структура+контент  │   │
 ┌─────────────────┐  │   └────────────────────┘   │  ┌──────────────────┐
 │     Парсер      │──┘            ↑               └──│    Валидатор     │──→ Отчёт
-│ .docx → модель  │←── .docx      │                  │   106 проверок   │
+│ .docx → модель  │←── .docx      │                  │   113 проверок   │
 └─────────────────┘               │                  └──────────────────┘
                                   │
                           ┌───────────────┐

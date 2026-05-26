@@ -2149,6 +2149,21 @@ def _render_bulk_operations_sidebar() -> None:
         st.sidebar.success(f"Пронумеровано заголовков: {numbered}")
         st.rerun()
 
+    # Найти и заменить по всему документу.
+    with st.sidebar.expander("Найти и заменить", expanded=False):
+        find = st.text_input("Найти", key="bulk_find")
+        replace = st.text_input("Заменить на", key="bulk_replace")
+        if st.button("Заменить везде", key="bulk_replace_btn"):
+            if not find:
+                st.warning("Укажите, что искать.")
+            else:
+                n = _bulk_find_replace(state, find, replace)
+                if n:
+                    st.success(f"Выполнено замен: {n}")
+                    st.rerun()
+                else:
+                    st.info(f"«{find}» не найдено в документе.")
+
 
 def _bulk_remove_empty_paragraphs(state: dict[str, Any]) -> int:
     """Удалить пустые параграфы во всех разделах. Возвращает счётчик."""
@@ -2327,6 +2342,88 @@ def _bulk_reset_disabled_checks(state: dict[str, Any]) -> int:
             sec["disabled_checks"] = []
             reset += 1
     return reset
+
+
+def _bulk_find_replace(
+    state: dict[str, Any], find: str, replace: str
+) -> int:
+    """Заменить все вхождения ``find`` на ``replace`` во всём документе.
+
+    Проходит по заголовкам разделов, текстам параграфов (text и runs),
+    подписям/ячейкам таблиц, подписям рисунков, элементам списков,
+    библиографическим ссылкам — рекурсивно по всем уровням вложенности.
+
+    Возвращает число выполненных замен (число изменённых строк).
+    """
+    if not find:
+        return 0
+    count = 0
+
+    def repl(s: str) -> tuple[str, int]:
+        if find in s:
+            n = s.count(find)
+            return s.replace(find, replace), n
+        return s, 0
+
+    def process_block(b: dict[str, Any]) -> None:
+        nonlocal count
+        kind = b.get("kind", "")
+        if kind == "paragraph":
+            if "text" in b:
+                b["text"], n = repl(b.get("text", ""))
+                count += n
+            for run in b.get("runs") or []:
+                if run.get("kind") == "text":
+                    run["text"], n = repl(run.get("text", ""))
+                    count += n
+        elif kind == "list":
+            new_items = []
+            for item in b.get("items") or []:
+                new, n = repl(str(item))
+                count += n
+                new_items.append(new)
+            b["items"] = new_items
+        elif kind == "table":
+            b["caption"], n = repl(str(b.get("caption", "")))
+            count += n
+            new_headers = []
+            for h in b.get("headers") or []:
+                new_h, n = repl(str(h))
+                count += n
+                new_headers.append(new_h)
+            b["headers"] = new_headers
+            new_rows = []
+            for row in b.get("rows") or []:
+                new_row = []
+                for cell in row:
+                    new, n = repl(str(cell))
+                    count += n
+                    new_row.append(new)
+                new_rows.append(new_row)
+            b["rows"] = new_rows
+        elif kind == "figure":
+            b["caption"], n = repl(str(b.get("caption", "")))
+            count += n
+
+    def process_section(sec: dict[str, Any]) -> None:
+        nonlocal count
+        sec["heading"], n = repl(str(sec.get("heading", "")))
+        count += n
+        for b in sec.get("blocks") or []:
+            process_block(b)
+        if sec.get("is_bibliography"):
+            new_refs = []
+            for ref in sec.get("references") or []:
+                new, n = repl(str(ref))
+                count += n
+                new_refs.append(new)
+            sec["references"] = new_refs
+        for sub in sec.get("subsections") or []:
+            process_section(sub)
+
+    for sec in state.get("sections", []):
+        process_section(sec)
+    return count
 
 
 def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
