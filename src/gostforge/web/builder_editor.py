@@ -728,6 +728,7 @@ def document_to_state(document: Any) -> dict[str, Any]:
         LogicalSection,
         Paragraph,
         Table,
+        TableOfContents,
         TextRun,
     )
 
@@ -865,6 +866,12 @@ def document_to_state(document: Any) -> dict[str, Any]:
                 "kind": "formula",
                 "latex": block.latex or "",
                 "numbered": block.number is not None,
+            }
+        if isinstance(block, TableOfContents):
+            return {
+                "kind": "toc",
+                "min_level": block.min_level,
+                "max_level": block.max_level,
             }
         return None
 
@@ -1344,6 +1351,11 @@ def _apply_blocks(section_builder: SectionBuilder, blocks: list[dict[str, Any]])
             if not latex:
                 continue
             section_builder.formula(str(latex), numbered=bool(block.get("numbered", True)))
+        elif kind == "toc":
+            section_builder.table_of_contents(
+                min_level=int(block.get("min_level", 1)),
+                max_level=int(block.get("max_level", 3)),
+            )
 
 
 # --- Валидация для preview ---------------------------------------------------
@@ -1939,7 +1951,9 @@ _SECTION_TEMPLATES: dict[str, tuple[str, Any]] = {
         lambda: {
             "heading": "Содержание",
             "blocks": [
-                {"kind": "paragraph", "text": "Содержание формируется автоматически."},
+                # Word TOC-field — оглавление автоматически формируется
+                # при открытии .docx (F9 в Word/LibreOffice).
+                {"kind": "toc", "min_level": 1, "max_level": 3},
             ],
         },
     ),
@@ -3624,6 +3638,22 @@ def _render_generate_button() -> None:
     if not (state.get("title") or "").strip():
         st.warning("Укажите название работы в sidebar — иначе документ не собрать.")
         return
+
+    # Опция «Применить автофиксы перед скачиванием» — запоминаем выбор
+    # пользователя в session_state, чтобы он переживал rerun.
+    apply_fixes_before_export = st.checkbox(
+        "Применить автофиксы перед скачиванием",
+        value=bool(st.session_state.get("apply_fixes_before_export", True)),
+        key="apply_fixes_before_export",
+        help=(
+            "Перед записью .docx прогоняет fixer.fix() над state: "
+            "убирает двойные пробелы (T.08), хвостовые пробелы (T.09), "
+            "прямые кавычки (T.10), точки в конце заголовков (H.08), "
+            "лишние интервалы абзацев (T.14), нормализует пунктуацию "
+            "в списках (L.04) и др."
+        ),
+    )
+
     cols = st.columns(2)
     do_generate = cols[0].button("Сгенерировать .docx", key="builder_generate")
     do_preview = cols[1].button(
@@ -3634,6 +3664,16 @@ def _render_generate_button() -> None:
 
     if not (do_generate or do_preview):
         return
+
+    # Если включён auto-fix — применяем фиксы к state, потом собираем.
+    if apply_fixes_before_export:
+        try:
+            _apply_autofixes_to_state()
+        except Exception as exc:  # noqa: BLE001
+            st.warning(f"Автофиксы не применены (продолжаем без них): {exc}")
+        # _apply_autofixes_to_state мутирует session_state["builder_state"],
+        # перечитаем актуальную версию.
+        state = _get_state()
 
     try:
         data = _build_document_from_state(state)

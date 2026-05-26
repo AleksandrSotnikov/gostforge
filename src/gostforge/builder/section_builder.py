@@ -16,6 +16,7 @@ from gostforge.model import (
     LogicalSection,
     Paragraph,
     Table,
+    TableOfContents,
     TextRun,
 )
 
@@ -130,6 +131,36 @@ class SectionBuilder:
             id=self._root._next_id("list"),
             ordered=ordered,
             items=[[TextRun(text=item)] for item in items],
+        )
+        self._section.children.append(block)
+        return self
+
+    def table_of_contents(
+        self,
+        *,
+        min_level: int = 1,
+        max_level: int = 3,
+    ) -> SectionBuilder:
+        """Вставить автоматическое оглавление документа.
+
+        Реализуется через Word TOC-field. При открытии .docx Word
+        предложит обновить оглавление (или F9), и сформирует список
+        заголовков с номерами страниц.
+
+        Параметры:
+        * ``min_level`` / ``max_level`` — диапазон уровней заголовков
+          в оглавлении (default 1-3 — главы, подразделы, пункты).
+
+        Пример::
+
+            work("Курсовая", year=2026) \\
+                .section("Содержание").table_of_contents() \\
+                .section("Введение").paragraph("...")
+        """
+        block = TableOfContents(
+            id=self._root._next_id("toc"),
+            min_level=min_level,
+            max_level=max_level,
         )
         self._section.children.append(block)
         return self

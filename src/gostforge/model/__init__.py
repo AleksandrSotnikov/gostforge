@@ -97,6 +97,7 @@ class BlockType(str, Enum):
     LIST = "list"
     CODE = "code"
     FOOTNOTE = "footnote"
+    TOC = "toc"  # автоматическое оглавление через Word TOC-field
 
 
 @dataclass
@@ -174,6 +175,24 @@ class ListBlock(Block):
     # пишет multilevel abstractNum в numbering.xml с правильным ilvl,
     # парсер читает ilvl из <w:numPr><w:ilvl/> обратно.
     item_levels: list[int] = field(default_factory=list)
+
+
+@dataclass
+class TableOfContents(Block):
+    """Автоматическое оглавление документа.
+
+    Реализуется через Word TOC-field (``<w:fldSimple w:instr="TOC..."/>``):
+    Word/LibreOffice сами строят список заголовков с номерами страниц
+    при открытии файла (пользователь видит «обновить оглавление» при
+    F9). Содержимое блока в .docx — пустой placeholder; настоящий
+    список заголовков формируется приложением при рендере.
+    """
+
+    type: BlockType = BlockType.TOC
+    # Уровни заголовков, которые включаются в TOC. Default 1-3 —
+    # стандартное оглавление с главами, подразделами и пунктами.
+    min_level: int = 1
+    max_level: int = 3
 
 
 # --- Логические разделы -------------------------------------------------------

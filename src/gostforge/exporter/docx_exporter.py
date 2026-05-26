@@ -47,6 +47,7 @@ from gostforge.model import (
     PageSection,
     Paragraph,
     Table,
+    TableOfContents,
     TextRun,
 )
 from gostforge.profile import Profile
@@ -1292,6 +1293,32 @@ def _write_items(doc: DocxDocument, items: Sequence[LogicalSection | Block]) -> 
             _write_list(doc, item)
         elif isinstance(item, Formula):
             _write_formula(doc, item)
+        elif isinstance(item, TableOfContents):
+            _write_toc(doc, item)
+
+
+def _write_toc(doc: DocxDocument, toc: TableOfContents) -> None:
+    """Записать автоматическое оглавление через Word TOC-field.
+
+    OOXML: <w:p><w:fldSimple w:instr=" TOC \\o "1-3" \\h \\z "/>
+    с placeholder-параграфом «Оглавление будет здесь после обновления
+    (F9 в Word)» внутри fldSimple. При открытии файла Word строит
+    оглавление автоматически на основе Heading-стилей.
+
+    Опции TOC-field:
+    * \\o "min-max" — диапазон уровней (default 1-3);
+    * \\h — гиперссылки на заголовки;
+    * \\z — скрыть номера в Web-preview.
+    """
+    paragraph = doc.add_paragraph()
+    instr = f' TOC \\o "{toc.min_level}-{toc.max_level}" \\h \\z '
+    fld = etree.SubElement(paragraph._p, f"{{{W_NS}}}fldSimple")
+    fld.set(f"{{{W_NS}}}instr", instr)
+    # Placeholder-run внутри fldSimple — Word его заменит при первом
+    # обновлении поля (F9 или открытие документа с подтверждением).
+    inner_r = etree.SubElement(fld, f"{{{W_NS}}}r")
+    inner_t = etree.SubElement(inner_r, f"{{{W_NS}}}t")
+    inner_t.text = "Оглавление будет построено при открытии (F9 в Word)."
 
 
 def export_docx(
