@@ -276,8 +276,13 @@ inline-формула, библиографическая цитата.
       `unresolved_comments` в `GET /submissions/{id}`. CLI:
       `gostforge comment add/list/resolve/delete` + интеграция в
       `gostforge history --id N` (комментарии под violations).
-      Authorship: env `GOSTFORGE_DEFAULT_AUTHOR` или `getpass.getuser()`
-      по умолчанию; полноценный multi-user — отдельная миграция.
+      **Streamlit-режим «История»**: список submission-ов с фильтрами,
+      раскрывающиеся карточки с tab-ами «Нарушения» и «Обсуждение»,
+      форма добавления комментария с выбором роли, кнопки
+      Закрыть/Переоткрыть/Удалить на каждом сообщении, цветовая
+      кодировка ролей. Authorship: env `GOSTFORGE_DEFAULT_AUTHOR`
+      или `getpass.getuser()` по умолчанию; полноценный multi-user —
+      отдельная миграция.
 - [ ] Интеграция с LMS (Moodle, eLearning, и др.) — теперь
       технически возможна через REST API.
 - [ ] Маркетплейс профилей кафедр — публичный реестр (а не только
