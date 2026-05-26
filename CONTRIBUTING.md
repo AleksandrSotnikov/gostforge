@@ -40,6 +40,21 @@ python -m pytest -q
 запускать pytest именно через `python -m pytest` (без модульного
 запуска pytest не всегда видит editable-копию пакета).
 
+## CI
+
+`.github/workflows/ci.yml` запускает на каждом push / PR:
+
+* **test** — `python -m pytest -q` на Python 3.11 и 3.12 (matrix).
+* **lint** — `ruff check`, `ruff format --check`, `mypy --strict`.
+  Сейчас в warn-only режиме из-за pre-existing baseline; новые
+  изменения должны не ухудшать baseline (проверяется руками в PR).
+* **docker** — `docker build` + `docker compose config` (валидация
+  Dockerfile и compose-yaml; image публиковать не пытаемся).
+
+Если CI красный из-за чужих pre-existing baseline-ошибок — это
+нормально для warn-only шагов. Если упал именно pytest или docker
+build — нужно чинить перед merge.
+
 ## Коммиты
 
 Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
