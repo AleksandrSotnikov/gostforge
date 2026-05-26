@@ -1286,6 +1286,8 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
     line_spacing = _line_spacing_value(pf.line_spacing)
     indent_cm = _indent_cm(pf.first_line_indent)
     page_break_before = _page_break_before(p)
+    space_before_pt = _spacing_pt(pf.space_before)
+    space_after_pt = _spacing_pt(pf.space_after)
 
     content: list[InlineElement] = []
     style_font_name = _style_font_name(p)
@@ -1345,6 +1347,8 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
         line_spacing=line_spacing,
         first_line_indent_cm=indent_cm,
         page_break_before=page_break_before,
+        space_before_pt=space_before_pt,
+        space_after_pt=space_after_pt,
     )
 
 
@@ -1631,6 +1635,21 @@ def _alignment_to_literal(value: object | None) -> ParagraphAlignment | None:
     try:
         return _ALIGN_MAP.get(int(cast(Any, value)))
     except (TypeError, ValueError):
+        return None
+
+
+def _spacing_pt(value: object | None) -> float | None:
+    """Преобразовать docx-spacing (EMU/Twips object) в pt.
+
+    python-docx возвращает либо docx.shared.Pt-like объект (с .pt
+    атрибутом), либо None если атрибут не задан. Возвращаем pt или
+    None.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value.pt)  # type: ignore[attr-defined]
+    except (AttributeError, TypeError):
         return None
 
 

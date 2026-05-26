@@ -713,6 +713,97 @@ def check_auto_hyphenation_disabled(
     return []
 
 
+@register("T.14")
+def check_paragraph_spacing(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Проверка интервалов перед/после абзаца основного текста.
+
+    По ГОСТ Р 2.105-2019 и ГОСТ 7.32-2017 разделение абзацев
+    основного текста достигается красной строкой + полуторным
+    межстрочным интервалом — дополнительные ``w:spacing w:before``/
+    ``w:after`` должны быть 0. Если в документе у Normal-параграфов
+    задан space > 0 — нарушение.
+
+    Параметры профиля ``checks.T.14.params``:
+    * ``expected_before_pt`` (по умолчанию 0);
+    * ``expected_after_pt`` (по умолчанию 0);
+    * ``tolerance_pt`` (по умолчанию 0.5) — допуск из-за округлений.
+
+    Проверяются только Normal-параграфы (стиль не Heading*/Caption/
+    List*) — для заголовков spacing идёт через H.07.
+    """
+    config = profile.checks.get("T.14")
+    body = profile.styles.body
+    expected_before = float(body.space_before_pt)
+    expected_after = float(body.space_after_pt)
+    tolerance = 0.5
+    if config:
+        if config.params.get("expected_before_pt") is not None:
+            expected_before = float(config.params["expected_before_pt"])
+        if config.params.get("expected_after_pt") is not None:
+            expected_after = float(config.params["expected_after_pt"])
+        if config.params.get("tolerance_pt") is not None:
+            tolerance = float(config.params["tolerance_pt"])
+
+    violations: list[Violation] = []
+    for paragraph in _all_paragraphs(document):
+        # Только обычные абзацы — заголовки/подписи/списки имеют
+        # собственные правила интервалов.
+        style = (paragraph.style_name or "Normal").lower()
+        if any(
+            style.startswith(prefix)
+            for prefix in ("heading", "caption", "list", "footer", "header", "title")
+        ):
+            continue
+        # None = атрибут не задан, унаследован — пропускаем.
+        if paragraph.space_before_pt is not None:
+            diff = abs(paragraph.space_before_pt - expected_before)
+            if diff > tolerance:
+                violations.append(
+                    Violation(
+                        check_code="T.14",
+                        severity="warning",
+                        message=(
+                            f"Интервал перед абзацем {paragraph.space_before_pt:g} pt "
+                            f"вместо {expected_before:g} pt"
+                        ),
+                        location=f"paragraphs.{paragraph.id}.space_before_pt",
+                        suggestion=(
+                            f"Установить интервал перед абзацем = {expected_before:g} pt "
+                            "в стиле Normal"
+                        ),
+                        details={
+                            "expected": f"{expected_before:g}",
+                            "actual": f"{paragraph.space_before_pt:g}",
+                        },
+                    )
+                )
+        if paragraph.space_after_pt is not None:
+            diff = abs(paragraph.space_after_pt - expected_after)
+            if diff > tolerance:
+                violations.append(
+                    Violation(
+                        check_code="T.14",
+                        severity="warning",
+                        message=(
+                            f"Интервал после абзаца {paragraph.space_after_pt:g} pt "
+                            f"вместо {expected_after:g} pt"
+                        ),
+                        location=f"paragraphs.{paragraph.id}.space_after_pt",
+                        suggestion=(
+                            f"Установить интервал после абзаца = {expected_after:g} pt "
+                            "в стиле Normal"
+                        ),
+                        details={
+                            "expected": f"{expected_after:g}",
+                            "actual": f"{paragraph.space_after_pt:g}",
+                        },
+                    )
+                )
+    return violations
+
+
 __all__ = [
     "check_alignment",
     "check_auto_hyphenation_disabled",
@@ -723,6 +814,7 @@ __all__ = [
     "check_line_spacing",
     "check_nbsp_between_initials_and_surname",
     "check_nbsp_between_number_and_unit",
+    "check_paragraph_spacing",
     "check_no_consecutive_empty_paragraphs",
     "check_no_double_spaces",
     "check_no_trailing_spaces",

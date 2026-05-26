@@ -126,6 +126,11 @@ class Paragraph(Block):
     # True/False — задано явно (через w:pPr/w:pageBreakBefore у параграфа или
     # унаследовано от Word-стиля).
     page_break_before: bool | None = None
+    # Интервалы перед/после абзаца в пунктах (w:spacing w:before/w:after).
+    # None — атрибут не задан явно (наследуется от стиля). Используется
+    # проверкой T.14 для контроля «лишнего» интервала между абзацами.
+    space_before_pt: float | None = None
+    space_after_pt: float | None = None
 
 
 @dataclass
