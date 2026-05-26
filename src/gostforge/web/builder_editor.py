@@ -2721,36 +2721,105 @@ def _render_references_editor(section: dict[str, Any], sec_idx: int) -> None:
 
 
 def _render_generate_button() -> None:
-    """Кнопка генерации .docx + live-preview нарушений."""
+    """Кнопка генерации .docx + live-preview нарушений + превью PDF."""
     state = _get_state()
     st.divider()
     st.subheader("Генерация документа")
     if not (state.get("title") or "").strip():
         st.warning("Укажите название работы в sidebar — иначе документ не собрать.")
         return
-    if st.button("Сгенерировать .docx", key="builder_generate"):
-        try:
-            data = _build_document_from_state(state)
-        except Exception as exc:
-            st.error(f"Не удалось сгенерировать .docx: {exc}")
-            return
-        st.success(f"Готово — {len(data) // 1024} КБ")
-        st.download_button(
-            "Скачать .docx",
-            data=data,
-            file_name="work.docx",
-            mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
-            key="builder_download_docx",
+    cols = st.columns(2)
+    do_generate = cols[0].button("Сгенерировать .docx", key="builder_generate")
+    do_preview = cols[1].button(
+        "Сгенерировать + превью PDF",
+        key="builder_generate_preview",
+        help="Требует LibreOffice. Превращает .docx → .pdf для просмотра в браузере.",
+    )
+
+    if not (do_generate or do_preview):
+        return
+
+    try:
+        data = _build_document_from_state(state)
+    except Exception as exc:
+        st.error(f"Не удалось сгенерировать .docx: {exc}")
+        return
+
+    st.success(f"Готово — {len(data) // 1024} КБ")
+    st.download_button(
+        "Скачать .docx",
+        data=data,
+        file_name="work.docx",
+        mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+        key="builder_download_docx",
+    )
+
+    counts = _validate_state_bytes(data, state.get("profile_id", "gost-7.32-2017"))
+    total = sum(counts.values())
+    if total == 0:
+        st.info("Проверка профиля: нарушений не найдено")
+    else:
+        v_cols = st.columns(3)
+        v_cols[0].metric("Ошибок", counts.get("error", 0))
+        v_cols[1].metric("Предупр.", counts.get("warning", 0))
+        v_cols[2].metric("Инфо", counts.get("info", 0))
+
+    if do_preview:
+        _render_pdf_preview(data)
+
+
+def _render_pdf_preview(docx_data: bytes) -> None:
+    """Конвертировать docx → pdf и показать в Streamlit-iframe.
+
+    Требует LibreOffice (см. gostforge.pdf_exporter). При его
+    отсутствии — st.error без падения UI.
+    """
+    from gostforge.pdf_exporter import (  # noqa: PLC0415
+        LibreOfficeNotFoundError,
+        convert_to_pdf,
+    )
+
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+            tmp.write(docx_data)
+            docx_path = Path(tmp.name)
+        pdf_path = docx_path.with_suffix(".pdf")
+        convert_to_pdf(docx_path, pdf_path)
+        pdf_bytes = pdf_path.read_bytes()
+    except LibreOfficeNotFoundError:
+        st.error(
+            "LibreOffice не найден. Установите его, чтобы видеть PDF-превью "
+            "(на Windows — https://www.libreoffice.org/download/)."
         )
-        counts = _validate_state_bytes(data, state.get("profile_id", "gost-7.32-2017"))
-        total = sum(counts.values())
-        if total == 0:
-            st.info("Проверка профиля: нарушений не найдено")
-        else:
-            cols = st.columns(3)
-            cols[0].metric("Ошибок", counts.get("error", 0))
-            cols[1].metric("Предупр.", counts.get("warning", 0))
-            cols[2].metric("Инфо", counts.get("info", 0))
+        return
+    except Exception as exc:  # noqa: BLE001
+        st.error(f"Не удалось сгенерировать PDF: {exc}")
+        return
+
+    st.markdown("**Превью PDF:**")
+    # Кнопка скачивания PDF.
+    st.download_button(
+        "Скачать .pdf",
+        data=pdf_bytes,
+        file_name="work.pdf",
+        mime="application/pdf",
+        key="builder_download_pdf",
+    )
+    # Inline-просмотр через iframe + base64 data URL.
+    import base64  # noqa: PLC0415
+
+    b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    st.components.v1.html(
+        f"""
+        <iframe
+            src="data:application/pdf;base64,{b64}"
+            width="100%"
+            height="800px"
+            style="border: 1px solid #ddd; border-radius: 4px;">
+        </iframe>
+        """,
+        height=820,
+    )
 
 
 # --- Public entry point -----------------------------------------------------
