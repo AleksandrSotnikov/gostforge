@@ -806,7 +806,12 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
         effective_left = item_left_twips + item_level * 720
         ind = etree.SubElement(pPr, f"{{{W_NS}}}ind")
         ind.set(f"{{{W_NS}}}left", str(effective_left))
-        ind.set(f"{{{W_NS}}}hanging", str(item_hanging_twips))
+        # firstLine="0" нужен, чтобы перекрыть Normal-стиль (там 1.25 см
+        # красной строки). hanging пишем только при значении > 0.
+        if item_hanging_twips > 0:
+            ind.set(f"{{{W_NS}}}hanging", str(item_hanging_twips))
+        else:
+            ind.set(f"{{{W_NS}}}firstLine", "0")
         _write_runs(paragraph, item_content)
 
 
@@ -942,7 +947,11 @@ def _add_list_level(
     lvl_pPr = etree.SubElement(lvl, f"{{{W_NS}}}pPr")
     lvl_ind = etree.SubElement(lvl_pPr, f"{{{W_NS}}}ind")
     lvl_ind.set(f"{{{W_NS}}}left", str(left_twips))
-    lvl_ind.set(f"{{{W_NS}}}hanging", str(hanging_twips))
+    # При hanging=0 маркер на той же позиции, что и текст продолжения
+    # (это default ГОСТ 7.32-2017 — «запись с абзацного отступа»).
+    # При hanging>0 маркер «выпирает» левее на hanging twips.
+    if hanging_twips > 0:
+        lvl_ind.set(f"{{{W_NS}}}hanging", str(hanging_twips))
     if not ordered:
         lvl_rPr = etree.SubElement(lvl, f"{{{W_NS}}}rPr")
         lvl_rFonts = etree.SubElement(lvl_rPr, f"{{{W_NS}}}rFonts")

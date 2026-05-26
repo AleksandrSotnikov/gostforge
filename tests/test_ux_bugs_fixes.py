@@ -148,10 +148,11 @@ def test_heading_1_style_has_page_break_before(tmp_path: Path) -> None:
 # --- 3. Hanging-indent в параграфе списка ---
 
 
-def test_list_paragraph_has_explicit_left_hanging(tmp_path: Path) -> None:
-    """Каждый параграф списка имеет <w:ind w:left=N w:hanging=M/>,
-    а не <w:ind w:firstLine="0"/>. Без этого продолжение строки
-    списка получало красную строку 1.25 см от стиля Normal."""
+def test_list_paragraph_has_explicit_left(tmp_path: Path) -> None:
+    """Каждый параграф списка имеет явный <w:ind w:left=N .../>,
+    переопределяющий первый отступ из стиля Normal. По ГОСТ
+    7.32-2017 — left = 1.25 см (709 twips), hanging = 0 (маркер
+    ровно на абзацном отступе)."""
     b = work("X", year=2026).section("Введение").list(
         ["короткий", "длинный элемент списка, который точно перенесётся"],
         ordered=False,
@@ -159,8 +160,6 @@ def test_list_paragraph_has_explicit_left_hanging(tmp_path: Path) -> None:
     out = tmp_path / "list.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     doc_xml = _docx_xml(out, "word/document.xml")
-    # Найдём все pPr с numPr и проверим, что у них есть <w:ind>
-    # с w:left и w:hanging (не только firstLine="0").
     list_pprs = re.findall(
         r"<w:pPr>(?:(?!</w:pPr>).)*<w:numPr>.*?</w:pPr>", doc_xml, re.DOTALL
     )
@@ -170,14 +169,53 @@ def test_list_paragraph_has_explicit_left_hanging(tmp_path: Path) -> None:
         assert ind_match, f"<w:ind> отсутствует в pPr списка: {ppr[:200]}"
         ind = ind_match.group(0)
         assert 'w:left="' in ind, f"<w:ind> без w:left: {ind}"
-        assert 'w:hanging="' in ind, f"<w:ind> без w:hanging: {ind}"
+        # Либо hanging (если > 0), либо firstLine="0" (если hanging=0).
+        # Главное — не должно быть пустого <w:ind> или firstLine > 0.
+        assert (
+            'w:hanging="' in ind
+            or 'w:firstLine="0"' in ind
+        ), f"<w:ind> без hanging И без firstLine=0: {ind}"
 
 
-def test_list_paragraph_no_firstLine_zero_anymore(tmp_path: Path) -> None:
-    """Старая логика ставила <w:ind w:firstLine="0"/> на параграфы
-    списка — это перекрывало hanging из numbering.xml и ломало перенос
-    строки. Регрессионный guard: в pPr-блоке параграфа списка не
-    должно быть firstLine="0" (вместо него — left+hanging)."""
+def test_list_marker_at_1_25cm_by_default(tmp_path: Path) -> None:
+    """Default-профиль: маркер списка на позиции 1.25 см от поля
+    (как абзацный отступ — по ГОСТ 7.32-2017 п. 6.5 «запись с
+    абзацного отступа»). hanging_indent_cm = 0 → маркер и текст
+    продолжения на одной позиции.
+
+    1.25 cm = 709 twips (1 cm = 567 twips).
+    """
+    b = work("X", year=2026).section("Введение").list(["a", "b"], ordered=False)
+    out = tmp_path / "marker.docx"
+    export_docx(b.build(), load_profile("gost-7.32-2017"), out)
+
+    # numbering.xml: lvl ilvl=0 имеет left=709, hanging отсутствует.
+    numbering = _docx_xml(out, "word/numbering.xml")
+    last_lvl = re.findall(
+        r'<w:lvl w:ilvl="0">.*?</w:lvl>', numbering, re.DOTALL
+    )[-1]
+    nb_ind = re.search(r"<w:ind\b[^/]*/>", last_lvl).group(0)
+    assert 'w:left="709"' in nb_ind, f"Маркер не на 1.25см: {nb_ind}"
+    assert 'w:hanging="' not in nb_ind, (
+        f"hanging > 0 — маркер выпирает левее 1.25см: {nb_ind}"
+    )
+
+    # Параграф списка: left=709, firstLine=0 (перекрывает Normal).
+    doc_xml = _docx_xml(out, "word/document.xml")
+    list_pprs = re.findall(
+        r"<w:pPr>(?:(?!</w:pPr>).)*<w:numPr>.*?</w:pPr>", doc_xml, re.DOTALL
+    )
+    ind = re.search(r"<w:ind\b[^/]*/>", list_pprs[0]).group(0)
+    assert 'w:left="709"' in ind
+    assert 'w:firstLine="0"' in ind
+
+
+def test_list_paragraph_overrides_normal_first_line_indent(
+    tmp_path: Path,
+) -> None:
+    """Регрессионный guard: параграф списка должен перекрывать
+    Normal-стиль (где first_line_indent=1.25см). Это или через
+    hanging > 0, или через firstLine = 0."""
     b = work("X", year=2026).section("Введение").list(["a", "b"], ordered=True)
     out = tmp_path / "ord.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
@@ -187,9 +225,12 @@ def test_list_paragraph_no_firstLine_zero_anymore(tmp_path: Path) -> None:
     )
     for ppr in list_pprs:
         ind_match = re.search(r"<w:ind\b[^/]*/>", ppr)
-        if ind_match:
-            ind = ind_match.group(0)
-            # firstLine="0" допустимо только если есть left+hanging
-            # рядом — но мы теперь не пишем firstLine вообще.
-            # Проверим что hanging задан (это главное).
-            assert 'w:hanging="' in ind
+        assert ind_match
+        ind = ind_match.group(0)
+        # firstLine не должен быть > 0 (это означает красную строку
+        # на параграфе списка — не по ГОСТу).
+        firstLine_match = re.search(r'w:firstLine="(\d+)"', ind)
+        if firstLine_match:
+            assert int(firstLine_match.group(1)) == 0, (
+                f"firstLine > 0 в параграфе списка: {ind}"
+            )

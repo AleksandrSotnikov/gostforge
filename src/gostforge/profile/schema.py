@@ -123,10 +123,16 @@ class ListStyleProfile(BaseModel):
     bullet_char: str = "–"
     # Шаблон нумерации: {n} = номер. Примеры: "{n})", "{n}.", "{n}."
     ordered_format: str = "{n})"
-    # Отступ слева для всего списка (см).
+    # Позиция текста и маркера элементов списка.
+    # По ГОСТ 7.32-2017 п. 6.5 — «запись производят с абзацного отступа»,
+    # то есть маркер должен быть ровно на позиции абзацного отступа
+    # (1,25 см), как и красная строка обычного абзаца.
+    # OOXML: <w:ind w:left=left_indent_cm w:hanging=hanging_indent_cm/>
+    # Маркер выводится в позицию (left - hanging).
+    # При hanging_indent_cm = 0 маркер совпадает с left = 1.25 см.
+    # При hanging_indent_cm > 0 маркер «выпирает» левее на этот зазор.
     left_indent_cm: float = 1.25
-    # Отступ висячего абзаца (для длинных пунктов с переносом).
-    hanging_indent_cm: float = 0.5
+    hanging_indent_cm: float = 0.0
 
 
 class StylesProfile(BaseModel):
