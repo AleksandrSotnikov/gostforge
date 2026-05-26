@@ -72,6 +72,11 @@ _current_source_docx: Any | None = None
 # в `export_docx()` через try/finally, чтобы состояние не утекало между вызовами.
 _current_bibliography_index: dict[str, int] | None = None
 
+# Контекст одной операции экспорта: профиль для доступа к heading/caption/
+# table-стилям внутри функций записи. Заполняется в export_docx() и
+# сбрасывается через try/finally.
+_current_profile: Any | None = None
+
 _ALIGNMENT_MAP = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
     "right": WD_ALIGN_PARAGRAPH.RIGHT,
@@ -128,15 +133,144 @@ def _apply_page_size(doc: DocxDocument, page_section: PageSection) -> None:
 
 
 def _apply_normal_style(doc: DocxDocument, profile: Profile) -> None:
-    """Применить шрифт/кегль/интервалы к стилю Normal."""
+    """Применить шрифт/кегль/интервалы к стилю Normal.
+
+    Дополнительно зануляет theme-fonts (asciiTheme/hAnsiTheme),
+    которые Word из дефолтного шаблона ставит как majorHAnsi/minorHAnsi
+    и которые при render-е в Word/LibreOffice перекрывают явно
+    указанный font.name.
+    """
     body = profile.styles.body
     normal = doc.styles["Normal"]
     normal.font.name = body.font
     normal.font.size = Pt(body.size_pt)
-    # Интервалы и отступы — на уровне paragraph_format стиля Normal
+    # Снимаем theme-fonts со стиля Normal, иначе в Word шрифт может
+    # отображаться как Calibri/Cambria поверх явно указанного.
+    _clear_theme_fonts(normal.element, font_name=body.font)
     pf = normal.paragraph_format
     pf.line_spacing = body.line_spacing
     pf.first_line_indent = Cm(body.first_line_indent_cm)
+
+
+def _clear_theme_fonts(style_element: Any, *, font_name: str) -> None:
+    """Удалить theme-атрибуты у w:rFonts и проставить явный шрифт.
+
+    Word при создании документа через python-docx наследует stлей Normal
+    из бортового шаблона: rFonts с asciiTheme/hAnsiTheme = minorHAnsi
+    (Calibri). Это перекрывает явно заданный font.name при рендере.
+    Решение — найти w:rFonts в xml-элементе стиля, убрать
+    *Theme-атрибуты и проставить ascii/hAnsi/cs/eastAsia на нужный шрифт.
+    """
+    w_ns = W_NS
+    rPr = style_element.find(f"{{{w_ns}}}rPr")
+    if rPr is None:
+        return
+    rFonts = rPr.find(f"{{{w_ns}}}rFonts")
+    if rFonts is None:
+        rFonts = etree.SubElement(rPr, f"{{{w_ns}}}rFonts")
+    # Снимаем theme-атрибуты.
+    for attr in (
+        "asciiTheme",
+        "hAnsiTheme",
+        "cstheme",
+        "eastAsiaTheme",
+    ):
+        key = f"{{{w_ns}}}{attr}"
+        if key in rFonts.attrib:
+            del rFonts.attrib[key]
+    # Ставим явный шрифт для всех 4 наборов символов.
+    for attr in ("ascii", "hAnsi", "cs", "eastAsia"):
+        rFonts.set(f"{{{w_ns}}}{attr}", font_name)
+
+
+def _apply_heading_styles(doc: DocxDocument, profile: Profile) -> None:
+    """Переопределить стили Heading1..Heading4 параметрами из профиля.
+
+    python-docx наследует Heading-стили из бортового шаблона Word —
+    там они синие, Cambria, с большими before-spacing. Эта функция
+    их переписывает по `profile.styles.heading_N`.
+    """
+    levels = (
+        (1, profile.styles.heading_1),
+        (2, profile.styles.heading_2),
+        (3, profile.styles.heading_3),
+        (4, profile.styles.heading_4),
+    )
+    for level, cfg in levels:
+        style_id = f"Heading {level}"
+        try:
+            style = doc.styles[style_id]
+        except KeyError:  # pragma: no cover - python-docx делает Heading1..9
+            continue
+        # Font + theme cleanup.
+        style.font.name = cfg.font
+        style.font.size = Pt(cfg.size_pt)
+        style.font.bold = cfg.bold
+        style.font.italic = cfg.italic
+        # Цвет: 'auto' = снять явный цвет, иначе hex.
+        _apply_style_color(style.element, cfg.color)
+        _clear_theme_fonts(style.element, font_name=cfg.font)
+        # Параграф-формат.
+        pf = style.paragraph_format
+        pf.alignment = _ALIGNMENT_MAP[cfg.alignment]
+        pf.line_spacing = cfg.line_spacing
+        pf.space_before = Pt(cfg.spacing_before_pt)
+        pf.space_after = Pt(cfg.spacing_after_pt)
+        pf.first_line_indent = Cm(cfg.first_line_indent_cm)
+        pf.page_break_before = cfg.page_break_before
+        pf.keep_with_next = cfg.keep_with_next
+
+
+def _apply_style_color(style_element: Any, color: str) -> None:
+    """Установить или снять явный цвет шрифта на уровне стиля.
+
+    'auto' (или пустая строка) — снимает атрибут (Word возьмёт чёрный).
+    hex без # — ставит rgb-цвет.
+    """
+    w_ns = W_NS
+    rPr = style_element.find(f"{{{w_ns}}}rPr")
+    if rPr is None:
+        rPr = etree.SubElement(style_element, f"{{{w_ns}}}rPr")
+    color_elem = rPr.find(f"{{{w_ns}}}color")
+    if color in ("auto", "", None):
+        if color_elem is not None:
+            rPr.remove(color_elem)
+        # Также удалим theme-color если есть.
+        return
+    if color_elem is None:
+        color_elem = etree.SubElement(rPr, f"{{{w_ns}}}color")
+    # Удалим тема-атрибуты, чтобы наш val реально применился.
+    for attr in ("themeColor", "themeTint", "themeShade"):
+        key = f"{{{w_ns}}}{attr}"
+        if key in color_elem.attrib:
+            del color_elem.attrib[key]
+    color_elem.set(f"{{{w_ns}}}val", color.lstrip("#"))
+
+
+def _apply_caption_style(doc: DocxDocument, profile: Profile) -> None:
+    """Применить параметры подписи к стилю Caption (для figure и table).
+
+    Поскольку figure.caption и table.caption могут отличаться (центр
+    vs. лево, выше/ниже) — стиль Caption переписываем по figure.caption,
+    а отдельные настройки для подписи таблицы применяются прямо к
+    параграфу при записи таблицы (см. _write_table_caption).
+    """
+    cfg = profile.styles.figure.caption
+    try:
+        style = doc.styles["Caption"]
+    except KeyError:  # pragma: no cover
+        return
+    style.font.name = cfg.font
+    style.font.size = Pt(cfg.size_pt)
+    style.font.bold = cfg.bold
+    style.font.italic = cfg.italic
+    _clear_theme_fonts(style.element, font_name=cfg.font)
+    _apply_style_color(style.element, "auto")
+    pf = style.paragraph_format
+    pf.alignment = _ALIGNMENT_MAP[cfg.alignment]
+    pf.space_before = Pt(cfg.spacing_before_pt)
+    pf.space_after = Pt(cfg.spacing_after_pt)
+    pf.first_line_indent = Cm(0)
 
 
 def _write_runs(docx_paragraph: DocxParagraph, content: Sequence[InlineElement]) -> None:
@@ -267,17 +401,36 @@ def _write_paragraph(doc: DocxDocument, paragraph: Paragraph) -> None:
 
 
 def _write_logical_section(doc: DocxDocument, section: LogicalSection) -> None:
-    """Добавить заголовок логического раздела и рекурсивно записать его содержимое."""
+    """Добавить заголовок логического раздела и рекурсивно записать его содержимое.
+
+    Применяет UPPERCASE если профиль это требует для текущего уровня
+    (по умолчанию — для heading_1 в ГОСТ 7.32).
+    """
     heading_text = "".join(
         el.text for el in section.heading if isinstance(el, TextRun)
     )
     level = max(0, min(section.level, 4))  # docx supports 0..9, мы — 1..4
+    # Профиль-конфиг уровня: heading_1..heading_4 → uppercase, прочее.
+    if _current_profile is not None and 1 <= level <= 4:
+        cfg = getattr(_current_profile.styles, f"heading_{level}", None)
+        if cfg is not None and cfg.uppercase:
+            heading_text = heading_text.upper()
     doc.add_heading(heading_text, level=level)
     _write_items(doc, section.children)
 
 
-def _write_caption_paragraph(doc: DocxDocument, content: Sequence[InlineElement]) -> None:
-    """Записать подпись (Caption) отдельным параграфом со стилем «Caption»."""
+def _write_caption_paragraph(
+    doc: DocxDocument,
+    content: Sequence[InlineElement],
+    *,
+    caption_kind: Literal["figure", "table"] = "figure",
+) -> None:
+    """Записать подпись отдельным параграфом со стилем «Caption».
+
+    `caption_kind` определяет, какой `CaptionStyleProfile` использовать —
+    figure (по центру под рисунком) или table (слева над таблицей).
+    Без него используем стиль figure-подписи (исторический default).
+    """
     if not content:
         return
     try:
@@ -285,15 +438,36 @@ def _write_caption_paragraph(doc: DocxDocument, content: Sequence[InlineElement]
     except KeyError:
         docx_para = doc.add_paragraph()
     _write_runs(docx_para, content)
+    # Применяем alignment и spacing согласно профилю — стиль Caption общий,
+    # а для table-подписи нужны другие настройки (слева, перед таблицей).
+    if _current_profile is None:
+        return
+    if caption_kind == "table":
+        cfg = _current_profile.styles.table.caption
+    else:
+        cfg = _current_profile.styles.figure.caption
+    pf = docx_para.paragraph_format
+    pf.alignment = _ALIGNMENT_MAP[cfg.alignment]
+    pf.space_before = Pt(cfg.spacing_before_pt)
+    pf.space_after = Pt(cfg.spacing_after_pt)
+    pf.first_line_indent = Cm(0)
+    # На уровне run-ов — шрифт/кегль (если в стиле Caption они сбиты).
+    for run in docx_para.runs:
+        run.font.name = cfg.font
+        run.font.size = Pt(cfg.size_pt)
+        if cfg.bold:
+            run.bold = True
+        if cfg.italic:
+            run.italic = True
 
 
 def _write_table(doc: DocxDocument, table: Table) -> None:
     """Записать таблицу с подписью НАД ней (по ГОСТ).
 
-    Шапка пишется первой строкой со стилем bold. Дополнительные ряды — обычные.
-    Подписи рисунков идут под рисунком, подписи таблиц — над ней.
+    Применяет рамки и стиль ячеек из ``profile.styles.table``. Шапка
+    bold. Подпись таблицы — слева, ВЫШЕ таблицы (профиль).
     """
-    _write_caption_paragraph(doc, table.caption)
+    _write_caption_paragraph(doc, table.caption, caption_kind="table")
     column_count = len(table.headers) if table.headers else 0
     for row in table.rows:
         column_count = max(column_count, len(row))
@@ -304,14 +478,27 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
     if rows_total == 0:
         return
     docx_table = doc.add_table(rows=rows_total, cols=column_count)
+
+    # Применяем стиль таблицы (рамки + шрифт ячеек) из профиля.
+    cfg = (
+        _current_profile.styles.table
+        if _current_profile is not None
+        else None
+    )
+    if cfg is not None:
+        _apply_table_borders(docx_table, cfg)
+
     row_idx = 0
     if table.headers:
+        header_bold = cfg.header_bold if cfg is not None else True
         for col_idx, cell_content in enumerate(table.headers):
             cell = docx_table.rows[row_idx].cells[col_idx]
             cell.text = ""
             _write_runs(cell.paragraphs[0], cell_content)
-            for run in cell.paragraphs[0].runs:
-                run.bold = True
+            _apply_cell_font(cell, cfg)
+            if header_bold:
+                for run in cell.paragraphs[0].runs:
+                    run.bold = True
         row_idx += 1
     for row in table.rows:
         for col_idx, cell_content in enumerate(row):
@@ -320,7 +507,52 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
             cell = docx_table.rows[row_idx].cells[col_idx]
             cell.text = ""
             _write_runs(cell.paragraphs[0], cell_content)
+            _apply_cell_font(cell, cfg)
         row_idx += 1
+
+
+def _apply_table_borders(docx_table: Any, cfg: Any) -> None:
+    """Прокинуть рамки в OOXML таблицы через w:tblBorders.
+
+    python-docx позволяет задать ``table.style`` строкой ("Table Grid"),
+    но стиль может отсутствовать в bortоvom шаблоне. Надёжнее —
+    написать ``<w:tblBorders>`` напрямую в XML свойств таблицы.
+    """
+    if cfg.border_style == "none":
+        return
+    tbl_pr = docx_table._element.find(f"{{{W_NS}}}tblPr")
+    if tbl_pr is None:
+        tbl_pr = etree.SubElement(docx_table._element, f"{{{W_NS}}}tblPr")
+    # Если tblBorders уже есть — заменим, иначе создадим.
+    existing = tbl_pr.find(f"{{{W_NS}}}tblBorders")
+    if existing is not None:
+        tbl_pr.remove(existing)
+    borders = etree.SubElement(tbl_pr, f"{{{W_NS}}}tblBorders")
+    color = "auto" if cfg.border_color == "auto" else cfg.border_color.lstrip("#")
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = etree.SubElement(borders, f"{{{W_NS}}}{side}")
+        el.set(f"{{{W_NS}}}val", cfg.border_style)
+        el.set(f"{{{W_NS}}}sz", str(int(cfg.border_size)))
+        el.set(f"{{{W_NS}}}space", "0")
+        el.set(f"{{{W_NS}}}color", color)
+
+
+def _apply_cell_font(cell: Any, cfg: Any) -> None:
+    """Применить шрифт/кегль ячеек таблицы, если они заданы в профиле.
+
+    Если cell_font / cell_size_pt = None — оставляем дефолт от стиля Normal
+    (который уже Times New Roman через _apply_normal_style).
+    """
+    if cfg is None:
+        return
+    if cfg.cell_font is None and cfg.cell_size_pt is None:
+        return
+    for paragraph in cell.paragraphs:
+        for run in paragraph.runs:
+            if cfg.cell_font is not None:
+                run.font.name = cfg.cell_font
+            if cfg.cell_size_pt is not None:
+                run.font.size = Pt(cfg.cell_size_pt)
 
 
 def _write_figure(doc: DocxDocument, figure: Figure) -> None:
@@ -338,6 +570,8 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
     """
     path = figure.image_path
 
+    fig_alignment = _figure_alignment_from_profile()
+
     # Случай 1: embedded:rIdN с открытым source_docx.
     if path.startswith("embedded:") and _current_source_docx is not None:
         rid = path[len("embedded:"):]
@@ -347,19 +581,30 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
     # Случай 2: реальный файл на диске.
     if path and not path.startswith("embedded:") and Path(path).is_file():
         paragraph = doc.add_paragraph()
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.alignment = fig_alignment
+        # Первый отступ убираем — это не текст, а рисунок.
+        paragraph.paragraph_format.first_line_indent = Cm(0)
         run = paragraph.add_run()
         try:
             run.add_picture(path)
         except Exception:  # noqa: BLE001 — fallback на placeholder при любой ошибке
             paragraph.add_run(f"[Рисунок: {figure.id}]").italic = True
-        _write_caption_paragraph(doc, figure.caption)
+        _write_caption_paragraph(doc, figure.caption, caption_kind="figure")
         return
 
     # Случай 3: placeholder.
     placeholder = doc.add_paragraph()
+    placeholder.alignment = fig_alignment
+    placeholder.paragraph_format.first_line_indent = Cm(0)
     placeholder.add_run(f"[Рисунок: {figure.id}]").italic = True
-    _write_caption_paragraph(doc, figure.caption)
+    _write_caption_paragraph(doc, figure.caption, caption_kind="figure")
+
+
+def _figure_alignment_from_profile() -> Any:
+    """Вернуть выравнивание рисунка из профиля (или CENTER по умолчанию)."""
+    if _current_profile is None:
+        return WD_ALIGN_PARAGRAPH.CENTER
+    return _ALIGNMENT_MAP[_current_profile.styles.figure.alignment]
 
 
 def _write_formula(doc: DocxDocument, formula: Formula) -> None:
@@ -397,7 +642,8 @@ def _try_write_embedded_picture(
         return False
 
     paragraph = doc.add_paragraph()
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.alignment = _figure_alignment_from_profile()
+    paragraph.paragraph_format.first_line_indent = Cm(0)
     run = paragraph.add_run()
     try:
         run.add_picture(io.BytesIO(blob))
@@ -408,26 +654,63 @@ def _try_write_embedded_picture(
             parent.remove(p_xml)
         return False
 
-    _write_caption_paragraph(doc, figure.caption)
+    _write_caption_paragraph(doc, figure.caption, caption_kind="figure")
     return True
 
 
 def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
-    """Записать список (нумерованный/маркированный).
+    """Записать список (нумерованный/маркированный) с настройками из профиля.
 
-    Используем Word-стили ``List Number`` / ``List Bullet``, если они
-    доступны в шаблоне. Если стиль недоступен — fallback на обычный
-    параграф с текстовым префиксом «1. » или «• ».
+    Маркер и шаблон нумерации берутся из ``profile.styles.lists``
+    (по умолчанию по ГОСТ Р 7.32-2017: маркер = тире «–»,
+    нумерация = «N)»). Отступ слева и hanging — тоже из профиля.
+
+    Пишем как обычные параграфы с явным префиксом — это даёт полный
+    контроль над символом маркера. Word-стили «List Number/Bullet»
+    привязаны к numbering.xml-цепочке и не позволяют поменять
+    отдельный символ без пересоздания части документа.
     """
-    style_name = "List Number" if list_block.ordered else "List Bullet"
+    cfg = (
+        _current_profile.styles.lists if _current_profile is not None else None
+    )
+    bullet = cfg.bullet_char if cfg is not None else "–"
+    ordered_fmt = cfg.ordered_format if cfg is not None else "{n})"
+    left_indent_cm = cfg.left_indent_cm if cfg is not None else 1.25
+    hanging_indent_cm = cfg.hanging_indent_cm if cfg is not None else 0.5
+
     for idx, item_content in enumerate(list_block.items, start=1):
-        try:
-            paragraph = doc.add_paragraph(style=style_name)
-        except KeyError:
-            paragraph = doc.add_paragraph()
-            prefix = f"{idx}. " if list_block.ordered else "• "
-            paragraph.add_run(prefix)
+        paragraph = doc.add_paragraph()
+        # Отступы списка: первый отступ убираем (он только для абзацев Normal),
+        # вместо него — left_indent + hanging.
+        pf = paragraph.paragraph_format
+        pf.first_line_indent = Cm(0)
+        pf.left_indent = Cm(left_indent_cm)
+        # Hanging: контент после маркера выровнен по left_indent + hanging.
+        # python-docx не имеет отдельного API для hanging — кладём через
+        # negative first_line_indent, но мы first_line уже занулили.
+        # Для простоты MVP — без hanging; длинные строки переносятся
+        # под маркер. Это допустимо для большинства профилей.
+        prefix = (
+            ordered_fmt.format(n=idx) + " " if list_block.ordered else bullet + " "
+        )
+        paragraph.add_run(prefix)
         _write_runs(paragraph, item_content)
+        # Hanging реализуем правильно: ставим left_indent + hanging,
+        # тогда первая строка выезжает влево на hanging_indent_cm и
+        # маркер оказывается слева от текста.
+        if hanging_indent_cm > 0:
+            from docx.oxml.ns import qn  # type: ignore[import-not-found]
+
+            pPr = paragraph._p.get_or_add_pPr()
+            ind = pPr.find(qn("w:ind"))
+            if ind is None:
+                ind = etree.SubElement(pPr, f"{{{W_NS}}}ind")
+            # twips = pt*20 = cm * 567 (примерно), используем Cm.
+            twips_left = int(Cm(left_indent_cm).twips)
+            twips_hang = int(Cm(hanging_indent_cm).twips)
+            ind.set(f"{{{W_NS}}}left", str(twips_left))
+            ind.set(f"{{{W_NS}}}hanging", str(twips_hang))
+            ind.set(f"{{{W_NS}}}firstLine", "0")
 
 
 def _write_template_into_footer_paragraph(
@@ -580,7 +863,7 @@ def export_docx(
         достанет соответствующий media-blob из source_docx и вставит как
         реальное изображение. Иначе на месте картинки будет placeholder.
     """
-    global _current_source_docx, _current_bibliography_index
+    global _current_source_docx, _current_bibliography_index, _current_profile
     output_path = Path(output_path)
     doc = docx.Document()
 
@@ -606,6 +889,9 @@ def export_docx(
     try:
         _apply_page_geometry(doc, profile)
         _apply_normal_style(doc, profile)
+        _apply_heading_styles(doc, profile)
+        _apply_caption_style(doc, profile)
+        _current_profile = profile
 
         # Метаданные документа в docProps/core.xml.
         core = doc.core_properties
@@ -630,6 +916,7 @@ def export_docx(
     finally:
         _current_source_docx = None
         _current_bibliography_index = None
+        _current_profile = None
 
     # Post-processing на уровне zip: запись настроек, которые python-docx
     # не умеет менять напрямую (например, w:autoHyphenation в settings.xml).

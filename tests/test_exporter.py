@@ -84,7 +84,8 @@ def test_export_writes_heading_and_paragraph(tmp_path: Path) -> None:
 
     raw = python_docx.Document(str(out))
     texts = [p.text for p in raw.paragraphs]
-    assert "Введение" in texts
+    # Профиль gost-7.32 → heading_1 в верхнем регистре (uppercase=True).
+    assert any(t.upper() == "ВВЕДЕНИЕ" for t in texts)
     assert "Это вводный абзац." in texts
 
 

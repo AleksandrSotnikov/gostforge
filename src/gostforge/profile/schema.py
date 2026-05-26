@@ -31,11 +31,143 @@ class BodyTextProfile(BaseModel):
     hyphenation: bool = False
 
 
+class HeadingStyleProfile(BaseModel):
+    """Параметры одного уровня заголовка (применяются экспортёром
+    напрямую к стилям Heading1..N документа)."""
+
+    font: str = "Times New Roman"
+    size_pt: float = 14
+    bold: bool = True
+    italic: bool = False
+    uppercase: bool = False
+    # auto = «использовать default Word» (обычно чёрный). По ГОСТу — auto.
+    # Можно указать hex без # ("000000", "FF0000") для явного цвета.
+    color: str = "auto"
+    alignment: Literal["left", "right", "center", "justify"] = "left"
+    first_line_indent_cm: float = 0.0
+    line_spacing: float = 1.5
+    spacing_before_pt: float = 12
+    spacing_after_pt: float = 6
+    page_break_before: bool = False
+    keep_with_next: bool = True
+
+
+class CaptionStyleProfile(BaseModel):
+    """Параметры стиля подписи (для Caption и подписей рисунков/таблиц)."""
+
+    font: str = "Times New Roman"
+    size_pt: float = 12
+    italic: bool = False
+    bold: bool = False
+    alignment: Literal["left", "right", "center", "justify"] = "center"
+    spacing_before_pt: float = 6
+    spacing_after_pt: float = 6
+    # Шаблон форматирования номера и текста подписи.
+    # Доступные плейсхолдеры: {num}, {title}.
+    format: str = "{num} — {title}"
+    position: Literal["above", "below"] = "below"
+
+
+class TableStyleProfile(BaseModel):
+    """Параметры таблиц: рамки, выравнивание, шрифт ячеек."""
+
+    # Стиль рамок: 'single' — обычные линии (по ГОСТу), 'none' — без рамок.
+    border_style: Literal["single", "double", "dashed", "dotted", "none"] = "single"
+    # Толщина рамки в 1/8 pt — стандартное значение Word. 4 = 0.5pt.
+    border_size: int = 4
+    # Цвет рамки: 'auto' (чёрный) или hex без #.
+    border_color: str = "auto"
+    # Шрифт ячеек таблицы. None = использовать body.font.
+    cell_font: str | None = None
+    # Кегль ячеек. None = использовать body.size_pt.
+    cell_size_pt: float | None = None
+    # Жирная шапка.
+    header_bold: bool = True
+    # Выравнивание подписи таблицы.
+    caption: CaptionStyleProfile = Field(
+        default_factory=lambda: CaptionStyleProfile(
+            alignment="left",
+            position="above",
+            format="Таблица {num} — {title}",
+        )
+    )
+
+
+class FigureStyleProfile(BaseModel):
+    """Параметры рисунков: выравнивание, подпись."""
+
+    # Выравнивание самого рисунка (центрирование — стандарт).
+    alignment: Literal["left", "center", "right"] = "center"
+    caption: CaptionStyleProfile = Field(
+        default_factory=lambda: CaptionStyleProfile(
+            alignment="center",
+            position="below",
+            format="Рисунок {num} — {title}",
+        )
+    )
+
+
+class ListStyleProfile(BaseModel):
+    """Параметры маркированных и нумерованных списков."""
+
+    # Символ маркера для bullet-списков (•, –, *, ◦ и т. п.).
+    # По ГОСТ Р 7.32-2017 — тире (–). LibreOffice/Word нормально рендерит.
+    bullet_char: str = "–"
+    # Шаблон нумерации: {n} = номер. Примеры: "{n})", "{n}.", "{n}."
+    ordered_format: str = "{n})"
+    # Отступ слева для всего списка (см).
+    left_indent_cm: float = 1.25
+    # Отступ висячего абзаца (для длинных пунктов с переносом).
+    hanging_indent_cm: float = 0.5
+
+
 class StylesProfile(BaseModel):
     page: PageGeometryProfile = Field(default_factory=PageGeometryProfile)
     body: BodyTextProfile = Field(default_factory=BodyTextProfile)
-    # ... другие стили: headings, captions, lists, tables, etc.
-    extra: dict[str, Any] = Field(default_factory=dict)  # для расширений плагинов
+    # Заголовки уровней 1-4. Уровень 1 — главы (введение, главы, заключение).
+    # Уровни 2-4 — параграфы / подразделы.
+    heading_1: HeadingStyleProfile = Field(
+        default_factory=lambda: HeadingStyleProfile(
+            uppercase=True,
+            alignment="center",
+            spacing_before_pt=18,
+            spacing_after_pt=12,
+            page_break_before=True,
+        )
+    )
+    heading_2: HeadingStyleProfile = Field(
+        default_factory=lambda: HeadingStyleProfile(
+            uppercase=False,
+            alignment="left",
+            first_line_indent_cm=1.25,
+            spacing_before_pt=12,
+            spacing_after_pt=6,
+        )
+    )
+    heading_3: HeadingStyleProfile = Field(
+        default_factory=lambda: HeadingStyleProfile(
+            uppercase=False,
+            alignment="left",
+            first_line_indent_cm=1.25,
+            spacing_before_pt=10,
+            spacing_after_pt=4,
+        )
+    )
+    heading_4: HeadingStyleProfile = Field(
+        default_factory=lambda: HeadingStyleProfile(
+            uppercase=False,
+            italic=True,
+            alignment="left",
+            first_line_indent_cm=1.25,
+            spacing_before_pt=8,
+            spacing_after_pt=2,
+        )
+    )
+    figure: FigureStyleProfile = Field(default_factory=FigureStyleProfile)
+    table: TableStyleProfile = Field(default_factory=TableStyleProfile)
+    lists: ListStyleProfile = Field(default_factory=ListStyleProfile)
+    # Резерв для расширений плагинов.
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class SectionsTemplate(BaseModel):
