@@ -212,7 +212,14 @@ def main() -> None:
     help="Путь к отчёту. Формат определяется по расширению: .xlsx → Excel, .md → Markdown",
 )
 @click.option("--quiet", "-q", is_flag=True, help="Показать только сводку и список кодов")
-def check(path: Path, profile: str, report: Path | None, quiet: bool) -> None:
+@click.option(
+    "--no-record",
+    is_flag=True,
+    help="Не записывать результаты проверки в локальную БД истории.",
+)
+def check(
+    path: Path, profile: str, report: Path | None, quiet: bool, no_record: bool
+) -> None:
     """Проверить документ или папку документов на соответствие профилю."""
     try:
         prof = load_profile(profile)
@@ -262,12 +269,43 @@ def check(path: Path, profile: str, report: Path | None, quiet: bool) -> None:
         + f"за {elapsed:.2f} с"
     )
 
+    if not no_record:
+        _record_check_results(results, profile)
+
     if report:
         fmt = _write_report(results, report, profile)
         click.echo(click.style(f"{fmt}-отчёт сохранён: {report}", fg="green"))
 
     if total_errors > 0:
         sys.exit(1)
+
+
+def _record_check_results(
+    results: dict[str, list[Violation]], profile_id: str
+) -> None:
+    """Сохранить результаты прогона в локальную БД истории.
+
+    Ошибки БД (нет места, нет прав) логируются и проглатываются —
+    они не должны ломать основной workflow проверки.
+    """
+    try:
+        from gostforge.db import get_connection, record_submission
+    except ImportError:
+        return
+    try:
+        with get_connection() as conn:
+            for target, violations in results.items():
+                record_submission(
+                    conn,
+                    filename=Path(target).name,
+                    profile_id=profile_id,
+                    violations=violations,
+                )
+    except Exception as exc:  # pragma: no cover — не валим CLI на БД
+        click.echo(
+            click.style(f"Не удалось записать в БД истории: {exc}", fg="yellow"),
+            err=True,
+        )
 
 
 def _print_fixes(applied: list[FixApplied]) -> None:
@@ -592,6 +630,95 @@ def serve(host: str, port: int, reload: bool) -> None:
         port=port,
         reload=reload,
     )
+
+
+@main.command()
+@click.option("--limit", "-n", default=20, help="Сколько последних записей показать.")
+@click.option(
+    "--filename", "-f", default=None, help="Фильтр по имени файла (точное совпадение)."
+)
+@click.option(
+    "--id",
+    "submission_id",
+    type=int,
+    default=None,
+    help="Показать детали одного submission по id.",
+)
+def history(limit: int, filename: str | None, submission_id: int | None) -> None:
+    """История проверок из локальной БД.
+
+    Без параметров показывает последние ``--limit`` записей с
+    summary по severity. С ``--id`` показывает детали конкретного
+    submission со списком всех найденных нарушений.
+
+    БД лежит в ``~/.gostforge/gostforge.db`` (переопределяется env
+    ``GOSTFORGE_DB_PATH``) и автоматически создаётся при первом
+    ``gostforge check``.
+    """
+    try:
+        from gostforge.db import get_connection, get_submission, list_submissions
+    except ImportError as exc:  # pragma: no cover — db в stdlib
+        click.echo(f"Не удалось импортировать модуль БД: {exc}", err=True)
+        sys.exit(2)
+
+    with get_connection() as conn:
+        if submission_id is not None:
+            sub = get_submission(conn, submission_id)
+            if sub is None:
+                click.echo(f"Submission #{submission_id} не найден.", err=True)
+                sys.exit(1)
+            _print_submission_details(sub)
+            return
+
+        items = list_submissions(conn, limit=limit, filename=filename)
+        if not items:
+            click.echo("История пуста. Запустите 'gostforge check ...' для первой записи.")
+            return
+
+        click.echo(click.style(f"Последние {len(items)} проверок:\n", bold=True))
+        for s in items:
+            severity_str = (
+                f"{click.style(str(s.error_count), fg='red')}e/"
+                f"{click.style(str(s.warning_count), fg='yellow')}w/"
+                f"{click.style(str(s.info_count), fg='cyan')}i"
+            )
+            click.echo(
+                f"  #{s.id:>4}  {s.created_at}  {severity_str}  "
+                f"[{s.profile_id}]  {s.filename}"
+            )
+        click.echo(
+            "\nДля деталей: gostforge history --id <N>"
+        )
+
+
+def _print_submission_details(sub: object) -> None:
+    """Распечатать одну запись со списком violations."""
+    click.echo(click.style(f"Submission #{sub.id}", bold=True))  # type: ignore[attr-defined]
+    click.echo(f"  Файл:      {sub.filename}")  # type: ignore[attr-defined]
+    click.echo(f"  Профиль:   {sub.profile_id}")  # type: ignore[attr-defined]
+    click.echo(f"  Время:     {sub.created_at}")  # type: ignore[attr-defined]
+    click.echo(
+        f"  Сводка:    "
+        f"{click.style(str(sub.error_count), fg='red')} error / "  # type: ignore[attr-defined]
+        f"{click.style(str(sub.warning_count), fg='yellow')} warning / "  # type: ignore[attr-defined]
+        f"{click.style(str(sub.info_count), fg='cyan')} info"  # type: ignore[attr-defined]
+    )
+    if not sub.violations:  # type: ignore[attr-defined]
+        click.echo("\n  Нарушений нет.")
+        return
+    click.echo("\n  Нарушения:")
+    for v in sub.violations:  # type: ignore[attr-defined]
+        color = {"error": "red", "warning": "yellow", "info": "cyan"}.get(
+            v.severity, "white"
+        )
+        click.echo(
+            f"    {click.style(v.severity.upper(), fg=color)}  "
+            f"{v.code:>6}  {v.message}"
+        )
+        if v.location:
+            click.echo(click.style(f"            {v.location}", fg="bright_black"))
+        if v.suggestion:
+            click.echo(click.style(f"          → {v.suggestion}", fg="green"))
 
 
 def _normalize_message(text: str) -> str:
