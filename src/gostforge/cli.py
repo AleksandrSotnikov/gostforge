@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -1325,6 +1326,53 @@ def new(
 
     click.echo(f"Создан файл: {output}")
     click.echo("Откройте его в Word / LibreOffice и заполните плейсхолдеры.")
+
+
+@main.command("import-docx")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить JSON-state для конструктора.",
+)
+def import_docx_cmd(path: Path, output: Path) -> None:
+    """Разложить готовую работу .docx в JSON-state конструктора.
+
+    Это обратная операция к ``gostforge new``: парсит .docx и кладёт
+    результат в JSON-формат, который можно загрузить в Streamlit-
+    конструктор (sidebar → «Загрузить сохранение (.json)») или
+    использовать как промежуточный формат для скриптов.
+
+    Структура JSON: title/author/year/profile_id и sections[] с
+    блоками paragraph/table/figure/list/formula. Каждый раздел
+    может иметь disabled_checks: list[str] — фича-конструктор
+    «не проверять этот раздел нормоконтролем».
+
+    Пример::
+
+        gostforge import-docx work.docx -o draft.json
+        gostforge ui
+        # В UI: Загрузить сохранение (.json) → draft.json → редактируем
+
+    Ограничения: нумерованные списки текущей реализацией экспорта
+    пишутся как обычные параграфы с маркером — при импорте они
+    останутся параграфами. Это не теряет содержимое, но требует
+    собрать список заново в UI, если он нужен как list-блок.
+    """
+    from gostforge.web.builder_editor import document_to_state  # noqa: PLC0415
+
+    document = parse_docx(path)
+    state = document_to_state(document)
+    output.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    n_sec = len(state.get("sections", []))
+    click.echo(
+        f"Разложено {n_sec} разделов в {output}. "
+        f"Загрузите его через `gostforge ui` → «Загрузить сохранение (.json)»."
+    )
 
 
 if __name__ == "__main__":

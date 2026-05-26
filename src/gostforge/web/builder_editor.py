@@ -556,6 +556,242 @@ def _strip_caption_prefix(caption: str, *, kind: Literal["table", "figure"]) -> 
     return text
 
 
+# --- Document → state ---------------------------------------------------------
+
+
+def document_to_state(document: Any) -> dict[str, Any]:
+    """Разложить распарсенный Document обратно в state-dict конструктора.
+
+    Это обратная операция к :func:`_build_document_from_state`. Используется,
+    когда студент загружает чужой (или свой ранее экспортированный) .docx
+    в Streamlit-конструктор и хочет продолжить редактирование.
+
+    Маппинг:
+
+    * ``document.metadata`` → ``state['title']`` / ``author`` / ``year`` /
+      ``supervisor`` / ``organization`` / ``work_type``;
+    * ``document.profile_id`` → ``state['profile_id']`` (с fallback на
+      ``gost-7.32-2017``, если не задан);
+    * каждый ``LogicalSection`` верхнего уровня → элемент
+      ``state['sections']`` со структурой:
+        - ``heading``: текст заголовка,
+        - ``blocks``: list[dict] из Paragraph/Table/Figure/Formula/ListBlock,
+        - ``subsections``: list[dict] для секций уровня 2,
+        - ``is_bibliography``: True для раздела со списком источников,
+        - ``references``: list[str] (если is_bibliography),
+        - ``disabled_checks``: list[str] (фича-конструктор, для своих docx);
+    * ``document.bibliography`` (если есть) сводится в один отдельный
+      раздел ``is_bibliography=True``, если уже не вытащен через
+      LogicalSection.
+
+    Граничные кейсы:
+    * Пустой документ → возвращается state с пустым sections-списком
+      и дефолтными метаданными.
+    * InlineFormula/CrossRef в параграфах сохраняются как rich-runs
+      (поле ``runs`` в block-dict) — иначе при reconvert через
+      ``_build_document_from_state`` они потерялись бы.
+    """
+    from gostforge.model import (  # noqa: PLC0415
+        BibliographyEntry,
+        Citation,
+        CrossRef,
+        Document,
+        Figure,
+        Formula,
+        InlineFormula,
+        ListBlock,
+        LogicalSection,
+        Paragraph,
+        Table,
+        TextRun,
+    )
+
+    if not isinstance(document, Document):
+        raise TypeError(
+            f"document_to_state ожидает Document, получено {type(document).__name__}"
+        )
+
+    metadata = document.metadata
+    state: dict[str, Any] = {
+        "title": metadata.title or "",
+        "author": metadata.author or "",
+        "supervisor": metadata.supervisor or "",
+        "organization": metadata.organization or "",
+        "year": metadata.year or 2026,
+        "work_type": metadata.work_type or "coursework",
+        "profile_id": document.profile_id or "gost-7.32-2017",
+        "sections": [],
+    }
+
+    # Парсер может класть LogicalSection и blocks смешанно (если документ
+    # имеет «висячие» блоки до первого заголовка) — мы такие блоки
+    # игнорируем, потому что builder требует, чтобы каждый блок
+    # принадлежал какой-то секции.
+    top_sections: list[LogicalSection] = []
+    for ps in document.page_sections:
+        for item in ps.content:
+            if isinstance(item, LogicalSection):
+                top_sections.append(item)
+
+    # Эвристика для «раздела с библиографией»: заголовок попадает в
+    # известный список названий («Список использованных источников»,
+    # «Литература» и т. д.). Используем тот же набор алиасов, что и
+    # парсер для R/B-проверок.
+    bib_headings = {
+        "список использованных источников",
+        "список литературы",
+        "литература",
+        "список источников",
+        "библиографический список",
+    }
+
+    def _inline_to_runs(elements: list[Any]) -> list[dict[str, Any]]:
+        """Превратить inline-элементы в list[dict] (kind + поля)."""
+        runs: list[dict[str, Any]] = []
+        for el in elements:
+            if isinstance(el, TextRun):
+                run: dict[str, Any] = {"kind": "text", "text": el.text}
+                if el.bold:
+                    run["bold"] = True
+                if el.italic:
+                    run["italic"] = True
+                if el.underline:
+                    run["underline"] = True
+                runs.append(run)
+            elif isinstance(el, InlineFormula):
+                runs.append({"kind": "formula", "latex": el.latex})
+            elif isinstance(el, CrossRef):
+                runs.append(
+                    {
+                        "kind": "xref",
+                        "target_id": el.target_id,
+                        "prefix": el.prefix or "",
+                    }
+                )
+            elif isinstance(el, Citation):
+                runs.append(
+                    {
+                        "kind": "citation",
+                        "source_id": el.source_id,
+                        "page": el.page or "",
+                    }
+                )
+        return runs
+
+    def _heading_text(elements: list[Any]) -> str:
+        return "".join(el.text for el in elements if isinstance(el, TextRun))
+
+    def _block_to_dict(block: Any) -> dict[str, Any] | None:
+        """Один Block → dict в формате builder-state. None если не поддерживается."""
+        if isinstance(block, Paragraph):
+            # Если все inline — простые TextRun без форматирования, упростим
+            # до text-only (для UX в обычном редакторе). Если есть xref/
+            # citation/inline-formula или форматирование — runs.
+            simple = all(
+                isinstance(el, TextRun) and not el.bold and not el.italic and not el.underline
+                for el in block.content
+            )
+            if simple:
+                return {
+                    "kind": "paragraph",
+                    "text": "".join(
+                        el.text for el in block.content if isinstance(el, TextRun)
+                    ),
+                }
+            return {"kind": "paragraph", "runs": _inline_to_runs(block.content)}
+        if isinstance(block, Table):
+            return {
+                "kind": "table",
+                "headers": [_heading_text(h) for h in block.headers],
+                "rows": [[_heading_text(c) for c in r] for r in block.rows],
+                "caption": _heading_text(block.caption),
+            }
+        if isinstance(block, Figure):
+            return {
+                "kind": "figure",
+                "image_path": block.image_path or "",
+                "caption": _heading_text(block.caption),
+            }
+        if isinstance(block, ListBlock):
+            return {
+                "kind": "list",
+                "ordered": block.ordered,
+                "items": [_heading_text(it) for it in block.items],
+            }
+        if isinstance(block, Formula):
+            return {
+                "kind": "formula",
+                "latex": block.latex or "",
+                "numbered": block.number is not None,
+            }
+        return None
+
+    def _section_to_state(sec: LogicalSection) -> dict[str, Any]:
+        heading = _heading_text(sec.heading)
+        is_bib = heading.strip().lower() in bib_headings
+        out: dict[str, Any] = {
+            "heading": heading,
+            "blocks": [],
+            "subsections": [],
+            "disabled_checks": list(sec.disabled_checks),
+        }
+        if is_bib:
+            out["is_bibliography"] = True
+            out["references"] = []
+        for child in sec.children:
+            if isinstance(child, LogicalSection):
+                # Подразделы: рекурсия только на 1 уровень (builder
+                # поддерживает только subsection, не sub-subsection).
+                sub_state = _section_to_state(child)
+                # Подраздел не может быть библиографией.
+                sub_state.pop("is_bibliography", None)
+                sub_state.pop("references", None)
+                out["subsections"].append(sub_state)
+            else:
+                bd = _block_to_dict(child)
+                if bd is None:
+                    continue
+                # В библиографическом разделе обычные параграфы становятся
+                # references.
+                if is_bib and bd.get("kind") == "paragraph":
+                    ref_text = bd.get("text", "")
+                    if not ref_text and bd.get("runs"):
+                        ref_text = "".join(
+                            r.get("text", "")
+                            for r in bd["runs"]
+                            if r.get("kind") == "text"
+                        )
+                    if ref_text.strip():
+                        out["references"].append(ref_text)
+                else:
+                    out["blocks"].append(bd)
+        return out
+
+    for sec in top_sections:
+        state["sections"].append(_section_to_state(sec))
+
+    # Если в Document есть отдельная bibliography (после _extract_bibliography),
+    # но соответствующего LogicalSection-а нет в верхних — добавим.
+    if document.bibliography and not any(
+        s.get("is_bibliography") for s in state["sections"]
+    ):
+        state["sections"].append(
+            {
+                "heading": "Список использованных источников",
+                "blocks": [],
+                "subsections": [],
+                "is_bibliography": True,
+                "references": [
+                    e.fields.get("raw", "") for e in document.bibliography
+                    if isinstance(e, BibliographyEntry)
+                ],
+                "disabled_checks": [],
+            }
+        )
+
+    return state
+
+
 # --- state → Document → bytes -----------------------------------------------
 
 
@@ -1411,6 +1647,57 @@ def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
                 st.rerun()
             else:
                 st.sidebar.error("В JSON отсутствует ключ 'sections'")
+
+    # Загрузить готовую работу .docx и разложить в конструктор.
+    st.sidebar.markdown("---")
+    st.sidebar.caption(
+        "Загрузить готовую работу (.docx) и разложить её в конструктор "
+        "для дальнейшего редактирования"
+    )
+    docx_uploaded = st.sidebar.file_uploader(
+        "Загрузить .docx в конструктор",
+        type=["docx"],
+        key="builder_docx_import",
+    )
+    if docx_uploaded is not None:
+        _handle_docx_import(docx_uploaded.getvalue(), docx_uploaded.name)
+
+
+def _handle_docx_import(data: bytes, filename: str) -> None:
+    """Распарсить загруженный .docx и загрузить как builder-state.
+
+    Использует parse_docx → document_to_state. Если парсинг или
+    преобразование падает — показывает st.error и не трогает текущий
+    state (защищаемся от потери работы).
+    """
+    from gostforge.parser import parse_docx  # noqa: PLC0415
+
+    try:
+        with tempfile.NamedTemporaryFile(
+            suffix=".docx", delete=False
+        ) as tmp:
+            tmp.write(data)
+            tmp_path = Path(tmp.name)
+        document = parse_docx(tmp_path)
+        new_state = document_to_state(document)
+    except Exception as exc:  # pragma: no cover - UI feedback
+        st.sidebar.error(f"Не удалось разложить «{filename}»: {exc}")
+        return
+
+    if not new_state.get("sections"):
+        st.sidebar.warning(
+            f"В «{filename}» не нашлось ни одного раздела. "
+            "Возможно, работа без заголовков 1-го уровня."
+        )
+        return
+
+    _normalize_state_paragraphs(new_state)
+    st.session_state["builder_state"] = new_state
+    st.sidebar.success(
+        f"«{filename}» загружен в конструктор: "
+        f"{len(new_state['sections'])} разделов."
+    )
+    st.rerun()
 
 
 def _delete_section(idx: int) -> None:
