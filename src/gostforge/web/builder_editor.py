@@ -598,6 +598,13 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
                 for ref in sec.get("references") or []:
                     if isinstance(ref, str) and ref.strip():
                         sec_builder.reference(ref)
+            # Отключённые проверки раздела (UI: «Нормоконтроль раздела»).
+            disabled = sec.get("disabled_checks") or []
+            if isinstance(disabled, list) and disabled:
+                if "*" in disabled:
+                    sec_builder.skip_all_checks()
+                else:
+                    sec_builder.skip_checks(*[str(c) for c in disabled])
 
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         out_path = Path(tmp.name)
@@ -1438,6 +1445,110 @@ def _delete_section(idx: int) -> None:
 # --- UI: active section editor ----------------------------------------------
 
 
+# Группировка кодов проверок по категориям для UI multi-select.
+# Источник: gostforge.validator.engine.registered_checks() — но мы хотим
+# фиксированный человекочитаемый порядок и подписи. Если в реестре
+# появится новая категория — её надо добавить сюда.
+_CHECK_CATEGORIES: dict[str, str] = {
+    "F.": "Поля и страница",
+    "T.": "Типографика",
+    "H.": "Заголовки",
+    "S.": "Структура",
+    "R.": "Источники",
+    "B.": "Библиография",
+    "I.": "Рисунки/таблицы",
+    "L.": "Списки",
+    "C.": "Перекрёстные ссылки",
+    "M.": "Формулы",
+    "A.": "Сокращения",
+    "K.": "Колонтитулы",
+    "V.": "Объём",
+    "P.": "Приложения",
+    "X.": "Прочее",
+}
+
+
+def _list_available_check_codes() -> list[str]:
+    """Все зарегистрированные коды проверок (для multi-select)."""
+    from gostforge.validator.engine import registered_checks  # noqa: PLC0415
+
+    return registered_checks()
+
+
+def _render_section_validation_panel(
+    section: dict[str, Any], idx: int
+) -> None:
+    """Панель «Нормоконтроль раздела» — отключение проверок для конкретного раздела.
+
+    Студент может пометить раздел (титульный, реферат, приложения) как
+    «не подчиняющийся правилам ГОСТа» — указав конкретные коды проверок
+    или отключив все. UI хранит выбор в ``section["disabled_checks"]``
+    как list[str]. ``["*"]`` = отключить все.
+    """
+    section.setdefault("disabled_checks", [])
+    disabled: list[str] = list(section["disabled_checks"])
+    skip_all = "*" in disabled
+    selected_codes = [c for c in disabled if c != "*"]
+
+    with st.expander("Нормоконтроль раздела", expanded=False):
+        st.caption(
+            "Отключите проверки, которые не должны применяться к этому "
+            "разделу. Это нужно для титульного листа, реферата и приложений: "
+            "они оформляются по своим правилам и не по ГОСТу."
+        )
+
+        new_skip_all = st.checkbox(
+            "Не проверять этот раздел нормоконтролем",
+            value=skip_all,
+            key=f"sec_skip_all_{idx}",
+            help=(
+                "Все нарушения с location-ом, указывающим на этот раздел, "
+                "будут отфильтрованы. Глобальные нарушения "
+                "(структура документа, объём) останутся."
+            ),
+        )
+
+        if new_skip_all:
+            section["disabled_checks"] = ["*"]
+            st.info(
+                "Все проверки этого раздела отключены. "
+                "Снимите галочку выше, чтобы выбрать отдельные коды."
+            )
+            return
+
+        all_codes = _list_available_check_codes()
+        # Группируем по категориям для UX.
+        groups: dict[str, list[str]] = {}
+        for code in all_codes:
+            prefix = code[:2]  # "F.", "T.", ...
+            groups.setdefault(prefix, []).append(code)
+
+        st.caption(
+            "Или выберите конкретные проверки для отключения:"
+        )
+        new_selected: list[str] = []
+        for prefix, codes in groups.items():
+            label = _CHECK_CATEGORIES.get(prefix, prefix)
+            # Преселект текущих выбранных кодов из этой категории.
+            preselected = [c for c in codes if c in selected_codes]
+            picked = st.multiselect(
+                label,
+                options=codes,
+                default=preselected,
+                key=f"sec_disabled_{idx}_{prefix.strip('.')}",
+            )
+            new_selected.extend(picked)
+
+        section["disabled_checks"] = sorted(new_selected)
+
+        if new_selected:
+            st.success(
+                f"Отключено проверок: {len(new_selected)} "
+                f"({', '.join(new_selected[:5])}"
+                f"{'…' if len(new_selected) > 5 else ''})"
+            )
+
+
 def _render_active_section_editor() -> None:
     """Редактор активного раздела: heading, блоки, подразделы, references."""
     state = _get_state()
@@ -1458,6 +1569,8 @@ def _render_active_section_editor() -> None:
         value=section.get("heading", ""),
         key=f"edit_heading_{idx}",
     )
+
+    _render_section_validation_panel(section, idx)
 
     if section.get("is_bibliography"):
         _render_references_editor(section, idx)

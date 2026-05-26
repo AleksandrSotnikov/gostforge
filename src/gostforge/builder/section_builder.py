@@ -215,6 +215,40 @@ class SectionBuilder:
         """Закрыть текущий раздел и открыть новый раздел уровня 1."""
         return self._root.section(heading)
 
+    # --- Нормоконтроль раздела ----------------------------------------------
+
+    def skip_checks(self, *codes: str) -> SectionBuilder:
+        """Отключить указанные проверки для этого раздела.
+
+        Пример::
+
+            (work("Курсовая", year=2026)
+                .section("Титульный лист")
+                    .paragraph("...")
+                    .skip_checks("H.01", "T.04", "T.05")
+                .section("Введение")
+                    .paragraph("..."))
+
+        Принятые коды добавляются к ``LogicalSection.disabled_checks``,
+        дубликаты игнорируются. Валидатор не сообщит о нарушениях с
+        этими кодами для содержимого раздела (и его дочерних узлов).
+        """
+        existing = set(self._section.disabled_checks)
+        for code in codes:
+            existing.add(code)
+        self._section.disabled_checks = sorted(existing)
+        return self
+
+    def skip_all_checks(self) -> SectionBuilder:
+        """Отключить ВСЕ проверки для этого раздела.
+
+        Спецзначение ``"*"`` в ``disabled_checks``. Удобно для титульного
+        листа, реферата и приложений, которые оформляются по своим
+        правилам (или по шаблону кафедры), не по ГОСТу.
+        """
+        self._section.disabled_checks = ["*"]
+        return self
+
     # --- Терминальные операции ----------------------------------------------
 
     def build(self) -> Document:
