@@ -1657,6 +1657,258 @@ def _render_section_tree() -> None:
             st.rerun()
 
 
+# Готовые шаблоны разделов для быстрой вставки. Ключ = id, значение =
+# (label, фабрика → dict с heading/blocks). Используются в UI-кнопках
+# «+ Раздел из шаблона».
+_SECTION_TEMPLATES: dict[str, tuple[str, Any]] = {
+    "intro": (
+        "Введение",
+        lambda: {
+            "heading": "Введение",
+            "blocks": [
+                {"kind": "paragraph", "text": "Актуальность темы исследования..."},
+                {"kind": "paragraph", "text": "Цель работы — ..."},
+                {"kind": "paragraph", "text": "Задачи работы:"},
+                {
+                    "kind": "list",
+                    "ordered": True,
+                    "items": ["задача 1", "задача 2", "задача 3"],
+                },
+            ],
+        },
+    ),
+    "conclusion": (
+        "Заключение",
+        lambda: {
+            "heading": "Заключение",
+            "blocks": [
+                {
+                    "kind": "paragraph",
+                    "text": "В ходе работы достигнуты следующие результаты...",
+                }
+            ],
+        },
+    ),
+    "abstract": (
+        "Реферат",
+        lambda: {
+            "heading": "Реферат",
+            "blocks": [
+                {
+                    "kind": "paragraph",
+                    "text": (
+                        "Работа объёмом N страниц содержит N рисунков, N таблиц, "
+                        "N источников. Ключевые слова: ..."
+                    ),
+                }
+            ],
+        },
+    ),
+    "toc": (
+        "Содержание",
+        lambda: {
+            "heading": "Содержание",
+            "blocks": [
+                {"kind": "paragraph", "text": "Содержание формируется автоматически."},
+            ],
+        },
+    ),
+    "bib": (
+        "Список использованных источников",
+        lambda: {
+            "heading": "Список использованных источников",
+            "blocks": [],
+            "is_bibliography": True,
+            "references": [],
+        },
+    ),
+    "appendix": (
+        "Приложение А",
+        lambda: {
+            "heading": "Приложение А",
+            "blocks": [{"kind": "paragraph", "text": "Текст приложения..."}],
+            "disabled_checks": ["*"],  # приложения — не по ГОСТу
+        },
+    ),
+    "chapter": (
+        "Глава N",
+        lambda: {
+            "heading": "Глава 1. Название главы",
+            "blocks": [{"kind": "paragraph", "text": ""}],
+            "subsections": [
+                {
+                    "heading": "1.1 Подраздел",
+                    "blocks": [{"kind": "paragraph", "text": ""}],
+                }
+            ],
+        },
+    ),
+}
+
+
+def _render_section_templates_sidebar() -> None:
+    """Sidebar-блок: «+ Раздел из шаблона» — быстрая вставка готовых разделов.
+
+    Выпадающий список с шаблонами + кнопка «Вставить» добавляет
+    раздел в конец state['sections'] и переключает активный.
+    """
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Раздел из шаблона")
+    options = list(_SECTION_TEMPLATES.keys())
+    sel = st.sidebar.selectbox(
+        "Шаблон",
+        options=options,
+        format_func=lambda k: _SECTION_TEMPLATES[k][0],
+        key="section_template_pick",
+    )
+    if st.sidebar.button("+ Вставить раздел", key="insert_section_template"):
+        state = _get_state()
+        _, factory = _SECTION_TEMPLATES[sel]
+        new_section = factory()
+        state["sections"].append(new_section)
+        state["active_section_index"] = len(state["sections"]) - 1
+        st.rerun()
+
+
+def _render_bulk_operations_sidebar() -> None:
+    """Sidebar-блок: bulk-операции над всеми разделами.
+
+    Доступно:
+    * «Удалить пустые параграфы» — у всех разделов выбрасывает блоки
+      kind='paragraph' с пустым text/runs.
+    * «Заголовки в Title Case» — приводит heading-и всех разделов
+      к виду «Первое Слово Каждого Слова».
+    * «Сбросить все skip-checks» — очищает disabled_checks у всех
+      разделов.
+    """
+    state = _get_state()
+    if not state.get("sections"):
+        return
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Массовые операции")
+
+    if st.sidebar.button(
+        "Удалить пустые параграфы",
+        key="bulk_remove_empty",
+        help="Из всех разделов выбрасывает блоки kind='paragraph' "
+        "с пустым text/runs.",
+    ):
+        removed = _bulk_remove_empty_paragraphs(state)
+        if removed > 0:
+            st.sidebar.success(f"Удалено пустых параграфов: {removed}")
+        else:
+            st.sidebar.info("Пустых параграфов не найдено")
+        st.rerun()
+
+    if st.sidebar.button(
+        "Заголовки в Title Case",
+        key="bulk_title_case",
+        help="Привести все заголовки разделов к виду «Каждое Слово С Заглавной».",
+    ):
+        changed = _bulk_apply_title_case(state)
+        st.sidebar.success(f"Изменено заголовков: {changed}")
+        st.rerun()
+
+    if st.sidebar.button(
+        "Сбросить все skip-checks",
+        key="bulk_reset_skip",
+        help="Очищает disabled_checks у всех разделов (включить нормоконтроль везде).",
+    ):
+        reset = _bulk_reset_disabled_checks(state)
+        st.sidebar.info(f"Снято отключений у {reset} разделов")
+        st.rerun()
+
+
+def _bulk_remove_empty_paragraphs(state: dict[str, Any]) -> int:
+    """Удалить пустые параграфы во всех разделах. Возвращает счётчик."""
+    removed = 0
+    for sec in state.get("sections", []):
+        removed += _remove_empty_in_blocks(sec.get("blocks") or [])
+        for sub in sec.get("subsections") or []:
+            removed += _remove_empty_in_blocks(sub.get("blocks") or [])
+            for subsub in sub.get("subsections") or []:
+                removed += _remove_empty_in_blocks(subsub.get("blocks") or [])
+    return removed
+
+
+def _remove_empty_in_blocks(blocks: list[dict[str, Any]]) -> int:
+    """Мутирует blocks: удаляет пустые параграфы, возвращает счётчик."""
+    removed = 0
+    i = 0
+    while i < len(blocks):
+        b = blocks[i]
+        if b.get("kind") != "paragraph":
+            i += 1
+            continue
+        text = b.get("text", "")
+        if not text and b.get("runs"):
+            text = "".join(
+                r.get("text", "") for r in b["runs"] if r.get("kind") == "text"
+            )
+        if not text.strip():
+            blocks.pop(i)
+            removed += 1
+        else:
+            i += 1
+    return removed
+
+
+def _bulk_apply_title_case(state: dict[str, Any]) -> int:
+    """Привести все heading-и к Title Case. Возвращает счётчик изменённых."""
+    changed = 0
+    for sec in state.get("sections", []):
+        old = sec.get("heading", "")
+        new = _to_title_case(old)
+        if new != old:
+            sec["heading"] = new
+            changed += 1
+        for sub in sec.get("subsections") or []:
+            old = sub.get("heading", "")
+            new = _to_title_case(old)
+            if new != old:
+                sub["heading"] = new
+                changed += 1
+            for subsub in sub.get("subsections") or []:
+                old = subsub.get("heading", "")
+                new = _to_title_case(old)
+                if new != old:
+                    subsub["heading"] = new
+                    changed += 1
+    return changed
+
+
+def _to_title_case(text: str) -> str:
+    """Title case с учётом русского: «введение» → «Введение»,
+    «глава 1. анализ» → «Глава 1. Анализ».
+
+    Стандартный str.title() ломается на апострофах и цифрах, поэтому
+    делаем сами через split-capitalize-join, сохраняя ведущие/конечные
+    пробелы и разделители.
+    """
+    if not text:
+        return text
+    words = text.split(" ")
+    out: list[str] = []
+    for w in words:
+        if w:
+            # capitalize() ставит остальные в lower — это плохо для
+            # «1.1». Делаем: первая буква UP, остальные как есть.
+            out.append(w[0].upper() + w[1:] if w[0].isalpha() else w)
+        else:
+            out.append(w)
+    return " ".join(out)
+
+
+def _bulk_reset_disabled_checks(state: dict[str, Any]) -> int:
+    """Очистить disabled_checks у всех разделов. Возвращает счётчик."""
+    reset = 0
+    for sec in state.get("sections", []):
+        if sec.get("disabled_checks"):
+            sec["disabled_checks"] = []
+            reset += 1
+    return reset
+
+
 def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
     """Кнопки сохранения/загрузки JSON в sidebar.
 
@@ -2843,6 +3095,8 @@ def render_interactive_builder() -> None:
     # Авто-сохранение на диск не чаще 1 раза в 30 секунд.
     _autosave_now()
     _render_sidebar_metadata()
+    _render_section_templates_sidebar()
+    _render_bulk_operations_sidebar()
     _render_autosave_banner()
 
     st.title("gostforge — конструктор работ")

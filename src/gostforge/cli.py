@@ -1328,6 +1328,117 @@ def new(
     click.echo("Откройте его в Word / LibreOffice и заполните плейсхолдеры.")
 
 
+@main.command("new-state")
+@click.option(
+    "--template",
+    type=click.Choice(["coursework", "thesis", "research_report", "empty"]),
+    default="empty",
+    help="Тип шаблона (по умолчанию пустой каркас).",
+)
+@click.option(
+    "--title", type=str, default="Новая работа", help="Название работы."
+)
+@click.option("--author", type=str, default="", help="Автор.")
+@click.option(
+    "--year",
+    type=int,
+    default=None,
+    help="Год работы (по умолчанию текущий).",
+)
+@click.option(
+    "--profile", "profile_id", type=str, default="gost-7.32-2017",
+    help="Идентификатор профиля.",
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить JSON-state.",
+)
+def new_state_cmd(
+    template: str,
+    title: str,
+    author: str,
+    year: int | None,
+    profile_id: str,
+    output: Path,
+) -> None:
+    """Создать пустой JSON-state для конструктора по выбранному шаблону.
+
+    Зеркало команды ``gostforge new`` (которая создаёт .docx), но
+    результат — JSON для UI/CLI-цикла. Использует существующие
+    шаблоны из ``gostforge.builder.templates``.
+
+    Полный цикл: создать → отредактировать → собрать::
+
+        gostforge new-state --template coursework --title "Анализ X" -o state.json
+        gostforge ui    # правим в Streamlit
+        gostforge generate state.json -o work.docx
+    """
+    from datetime import date  # noqa: PLC0415
+
+    from gostforge.builder.templates import (  # noqa: PLC0415
+        bachelor_thesis_template,
+        coursework_template,
+        research_report_template,
+    )
+    from gostforge.web.builder_editor import document_to_state  # noqa: PLC0415
+
+    if year is None:
+        year = date.today().year
+
+    if template == "empty":
+        # Минимальный каркас: один раздел «Введение» + список источников.
+        state = {
+            "title": title,
+            "author": author,
+            "year": year,
+            "profile_id": profile_id,
+            "sections": [
+                {
+                    "heading": "Введение",
+                    "blocks": [
+                        {"kind": "paragraph", "text": ""}
+                    ],
+                },
+                {
+                    "heading": "Список использованных источников",
+                    "is_bibliography": True,
+                    "references": [],
+                },
+            ],
+        }
+    else:
+        # Используем существующий шаблон builder-а, собираем Document
+        # и конвертируем обратно в state. Это даёт ровно то же
+        # содержимое, что и `gostforge new --template=X`, но в формате
+        # для конструктора.
+        if template == "coursework":
+            builder = coursework_template(
+                title=title, author=author, year=year
+            )
+        elif template == "thesis":
+            builder = bachelor_thesis_template(
+                title=title, author=author, year=year
+            )
+        else:  # research_report
+            builder = research_report_template(title=title, year=year)
+        document = builder.build()
+        document.profile_id = profile_id
+        state = document_to_state(document)
+
+    output.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    n = len(state.get("sections", []))
+    click.echo(
+        f"Создан {output} ({n} разделов, шаблон '{template}'). "
+        f"Откройте в `gostforge ui` или редактируйте JSON напрямую."
+    )
+
+
 @main.command("generate")
 @click.argument("state_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
