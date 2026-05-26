@@ -380,9 +380,14 @@ def profiles() -> None:
 
 @profiles.command("list")
 def profiles_list() -> None:
-    """Показать доступные профили."""
+    """Показать доступные профили (builtin + установленные локально)."""
+    from gostforge.profile import is_custom_profile
+
     for profile_id in list_profiles():
-        click.echo(profile_id)
+        if is_custom_profile(profile_id):
+            click.echo(f"{profile_id}  " + click.style("[custom]", fg="green"))
+        else:
+            click.echo(f"{profile_id}  " + click.style("[builtin]", fg="cyan"))
 
 
 @profiles.command("show")
@@ -395,6 +400,84 @@ def profiles_show(profile_id: str) -> None:
         click.echo(f"Ошибка: {e}", err=True)
         sys.exit(2)
     click.echo(prof.model_dump_json(indent=2))
+
+
+@profiles.command("install")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    help="Перезаписать, если профиль с таким id уже установлен.",
+)
+def profiles_install(path: Path, overwrite: bool) -> None:
+    """Установить YAML-профиль в локальный реестр.
+
+    После установки профиль доступен всем командам по своему id
+    (gostforge check ... --profile <id>, REST API и т.д.). YAML
+    валидируется до записи в БД — неверная схема отвергается с
+    понятной ошибкой.
+    """
+    try:
+        from gostforge.db import get_connection, install_profile
+    except ImportError as exc:  # pragma: no cover — db в stdlib
+        click.echo(f"Ошибка импорта модуля БД: {exc}", err=True)
+        sys.exit(2)
+
+    yaml_content = path.read_text(encoding="utf-8")
+    try:
+        with get_connection() as conn:
+            rec = install_profile(
+                conn,
+                yaml_content=yaml_content,
+                source=str(path.resolve()),
+                overwrite=overwrite,
+            )
+    except ValueError as exc:
+        click.echo(click.style(f"Ошибка: {exc}", fg="red"), err=True)
+        sys.exit(2)
+
+    click.echo(
+        click.style("Профиль установлен:", fg="green", bold=True)
+        + f" {rec.profile_id}  ({rec.name}, v{rec.version})"
+    )
+    click.echo(f"  Источник:    {rec.source}")
+    click.echo(f"  Установлен:  {rec.installed_at}")
+    click.echo(
+        "\nИспользовать: gostforge check FILE.docx --profile "
+        + rec.profile_id
+    )
+
+
+@profiles.command("uninstall")
+@click.argument("profile_id")
+def profiles_uninstall(profile_id: str) -> None:
+    """Удалить custom-профиль из локального реестра.
+
+    Builtin-профили (gost-7.32-2017 и т. п.) удалить нельзя — они
+    лежат в каталоге пакета, не в БД. Команда даст ошибку, если
+    профиль не установлен локально.
+    """
+    try:
+        from gostforge.db import get_connection, uninstall_profile
+    except ImportError as exc:  # pragma: no cover
+        click.echo(f"Ошибка импорта модуля БД: {exc}", err=True)
+        sys.exit(2)
+
+    with get_connection() as conn:
+        removed = uninstall_profile(conn, profile_id)
+    if removed:
+        click.echo(
+            click.style(f"Профиль удалён: {profile_id}", fg="green", bold=True)
+        )
+    else:
+        click.echo(
+            click.style(
+                f"Профиль {profile_id!r} не установлен в локальный реестр.",
+                fg="yellow",
+            ),
+            err=True,
+        )
+        sys.exit(1)
 
 
 @profiles.command("validate")
