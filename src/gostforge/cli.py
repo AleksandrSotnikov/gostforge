@@ -1702,6 +1702,90 @@ def _block_to_md(block: dict[str, Any], *, lines: list[str]) -> None:
             lines.append("")
 
 
+@main.command("apply-fixes")
+@click.argument("state_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить исправленный state.",
+)
+@click.option(
+    "--only",
+    type=str,
+    default=None,
+    help="Применить только указанные фиксеры (через запятую, например 'T.08,T.09').",
+)
+def apply_fixes_cmd(
+    state_path: Path, output: Path, only: str | None
+) -> None:
+    """Применить автофиксы к state и сохранить результат.
+
+    Цикл: state → собрать docx → парсить → fixer.fix() → новый state.
+    Применяются все доступные фиксеры из gostforge.fixer (или только
+    указанные через --only).
+
+    Пример::
+
+        gostforge apply-fixes draft.json -o fixed.json
+        gostforge diff-state draft.json fixed.json    ## посмотреть изменения
+
+    Используется fixer-engine — тот же, что и в кнопке UI
+    «Применить автофиксы», но без перезаписи session-state.
+    """
+    import tempfile  # noqa: PLC0415
+
+    from gostforge.fixer.engine import fix as run_fix  # noqa: PLC0415
+    from gostforge.web.builder_editor import (  # noqa: PLC0415
+        _build_document_from_state,
+        document_to_state,
+    )
+
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        click.echo(f"Не удалось прочитать JSON: {exc}", err=True)
+        sys.exit(2)
+    if not isinstance(state, dict) or "sections" not in state:
+        click.echo("В state.json должен быть ключ 'sections'.", err=True)
+        sys.exit(2)
+
+    codes = None
+    if only:
+        codes = [c.strip() for c in only.split(",") if c.strip()]
+
+    try:
+        data = _build_document_from_state(state)
+    except (FileNotFoundError, ValueError) as exc:
+        click.echo(f"Сборка docx упала: {exc}", err=True)
+        sys.exit(3)
+
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+        tmp.write(data)
+        tmp_path = Path(tmp.name)
+
+    document = parse_docx(tmp_path)
+    profile_id = state.get("profile_id", "gost-7.32-2017")
+    profile = load_profile(profile_id)
+    applied = run_fix(document, profile, codes=codes)
+    new_state = document_to_state(document)
+    new_state["profile_id"] = profile_id
+
+    output.write_text(
+        json.dumps(new_state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    click.echo(f"Применено фиксов: {len(applied)}. Сохранён {output}.")
+    if applied:
+        # Группируем по коду для компактности.
+        from collections import Counter as _Counter  # noqa: PLC0415
+
+        by_code = _Counter(a.fixer_code for a in applied)
+        for code, n in sorted(by_code.items()):
+            click.echo(f"  {code}: {n}")
+
+
 @main.command("diff-state")
 @click.argument("state_a", type=click.Path(exists=True, path_type=Path))
 @click.argument("state_b", type=click.Path(exists=True, path_type=Path))
