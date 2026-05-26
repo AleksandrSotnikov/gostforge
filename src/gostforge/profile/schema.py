@@ -74,9 +74,29 @@ def _builtin_profiles_dir() -> Path:
 
 
 def load_profile(profile_id: str, search_paths: list[Path] | None = None) -> Profile:
-    """Загрузить профиль по ID. Если есть `extends` — рекурсивно слить с родителем."""
-    search_paths = search_paths or [_builtin_profiles_dir()]
+    """Загрузить профиль по ID. Если есть `extends` — рекурсивно слить с родителем.
 
+    Порядок поиска:
+
+    1. Локальный реестр в БД (custom_profiles) — для установленных
+       кафедральных профилей. Доступен, если модуль ``gostforge.db``
+       импортируется и таблица существует.
+    2. ``search_paths`` (по умолчанию — каталог встроенных профилей).
+    """
+    # 1. Сначала смотрим в БД (custom-профили перекрывают builtin
+    # для одноимённого id — это позволяет кафедре переопределить
+    # параметры базового стандарта).
+    custom_yaml = _load_from_db(profile_id)
+    if custom_yaml is not None:
+        data = yaml.safe_load(custom_yaml)
+        profile = Profile(**data)
+        if profile.extends:
+            parent = load_profile(profile.extends, search_paths)
+            profile = _merge_profile(parent, profile)
+        return profile
+
+    # 2. Файловые профили.
+    search_paths = search_paths or [_builtin_profiles_dir()]
     for path in search_paths:
         candidate = path / f"{profile_id}.yaml"
         if candidate.exists():
@@ -91,7 +111,7 @@ def load_profile(profile_id: str, search_paths: list[Path] | None = None) -> Pro
 
 
 def list_profiles(search_paths: list[Path] | None = None) -> list[str]:
-    """Список ID доступных профилей."""
+    """Список ID доступных профилей (builtin + установленные в БД)."""
     search_paths = search_paths or [_builtin_profiles_dir()]
     ids: set[str] = set()
     for path in search_paths:
@@ -99,7 +119,48 @@ def list_profiles(search_paths: list[Path] | None = None) -> list[str]:
             continue
         for f in path.glob("*.yaml"):
             ids.add(f.stem)
+    # Добавляем профили из БД.
+    ids |= set(_list_db_profile_ids())
     return sorted(ids)
+
+
+def _load_from_db(profile_id: str) -> str | None:
+    """Прочитать YAML кастомного профиля из БД (None если нет или БД недоступна).
+
+    Помещён в отдельную функцию с try/except, чтобы:
+      * избежать циклической зависимости gostforge.profile ↔ gostforge.db
+        (импорт ленивый, внутри функции);
+      * не валить весь load_profile, если БД недоступна (нет прав, нет
+        каталога) — fallback на файловые профили.
+    """
+    try:
+        from gostforge.db import get_connection, get_custom_profile
+    except ImportError:
+        return None
+    try:
+        with get_connection() as conn:
+            record = get_custom_profile(conn, profile_id)
+            return record.yaml_content if record is not None else None
+    except Exception:
+        return None
+
+
+def _list_db_profile_ids() -> list[str]:
+    """ID всех custom-профилей из БД ([] если БД недоступна)."""
+    try:
+        from gostforge.db import get_connection, list_custom_profiles
+    except ImportError:
+        return []
+    try:
+        with get_connection() as conn:
+            return [p.profile_id for p in list_custom_profiles(conn)]
+    except Exception:
+        return []
+
+
+def is_custom_profile(profile_id: str) -> bool:
+    """True если профиль установлен в локальном реестре (а не builtin)."""
+    return _load_from_db(profile_id) is not None
 
 
 def _deep_merge(parent: Any, child: Any) -> Any:

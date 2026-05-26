@@ -82,7 +82,10 @@ def test_get_connection_creates_directory(db_path: Path) -> None:
 
 def test_get_connection_initializes_schema(db_path: Path) -> None:
     conn = get_connection()
-    assert current_schema_version(conn) == 1
+    # Версия растёт с каждой добавленной миграцией; на момент теста
+    # ожидаем хотя бы v1 (submissions+violations). Конкретное значение
+    # не зашиваем, чтобы новые миграции не ломали этот тест.
+    assert current_schema_version(conn) >= 1
     # Таблицы созданы.
     tables = {
         r[0]

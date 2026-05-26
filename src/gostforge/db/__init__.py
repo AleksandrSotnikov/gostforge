@@ -22,6 +22,13 @@ INSERT/SELECT без сложных JOIN) stdlib ``sqlite3`` достаточн�
 from __future__ import annotations
 
 from .connection import default_db_path, get_connection
+from .custom_profiles import (
+    CustomProfileRecord,
+    get_custom_profile,
+    install_profile,
+    list_custom_profiles,
+    uninstall_profile,
+)
 from .schema import Submission, ViolationRecord
 from .submissions import (
     get_submission,
@@ -30,11 +37,16 @@ from .submissions import (
 )
 
 __all__ = [
+    "CustomProfileRecord",
     "Submission",
     "ViolationRecord",
     "default_db_path",
     "get_connection",
+    "get_custom_profile",
     "get_submission",
+    "install_profile",
+    "list_custom_profiles",
     "list_submissions",
     "record_submission",
+    "uninstall_profile",
 ]

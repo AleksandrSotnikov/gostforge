@@ -65,6 +65,26 @@ _MIGRATIONS: list[tuple[int, str]] = [
             ON violations(code);
         """,
     ),
+    (
+        2,
+        """
+        -- Пользовательские профили (маркетплейс кафедр).
+        -- profile_id — уникальный slug ("kafedra-prog-2026"),
+        -- совпадает с полем id внутри YAML.
+        CREATE TABLE IF NOT EXISTS custom_profiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_id TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            version TEXT NOT NULL DEFAULT '1.0',
+            yaml_content TEXT NOT NULL,
+            source TEXT NOT NULL DEFAULT '',
+            installed_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_custom_profiles_profile_id
+            ON custom_profiles(profile_id);
+        """,
+    ),
 ]
 
 
