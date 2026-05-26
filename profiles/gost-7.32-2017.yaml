@@ -201,6 +201,7 @@ checks:
         - studopedia.ru
         - studwood.net
         - studfile.net
+  R.14: {enabled: true}   # формат DOI и URL
   C.01: {enabled: true}
   C.02: {enabled: true}
   C.03: {enabled: true}
@@ -261,3 +262,8 @@ checks:
   X.03: {enabled: true}
   X.04: {enabled: true}
   X.05: {enabled: true}
+
+  # U.* — единицы измерения (ГОСТ Р 8.000-2015).
+  U.01: {enabled: true}   # неразрывный пробел между числом и единицей
+  U.02: {enabled: true}   # без знаков между числом и единицей
+  U.03: {enabled: true}   # без точки после единицы СИ

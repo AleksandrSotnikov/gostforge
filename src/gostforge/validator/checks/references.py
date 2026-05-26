@@ -907,12 +907,76 @@ def check_suspicious_domains(document: Document, profile: Profile) -> list[Viola
     return violations
 
 
+# Регексы валидации формата DOI/URL.
+# DOI: '10.NNNN/...' (стандарт https://www.doi.org/doi_handbook/2_Numbering.html).
+_DOI_FORMAT_RE = re.compile(r"^10\.\d{4,9}/\S+$")
+# URL: http(s):// + домен.
+_URL_FORMAT_RE = re.compile(r"^https?://[^\s/$.?#].\S*$", re.IGNORECASE)
+
+
+@register("R.14")
+def check_doi_url_format(document: Document, profile: Profile) -> list[Violation]:
+    """Валидация формата DOI и URL в записях библиографии.
+
+    DOI должен соответствовать паттерну ``10.NNNN/...`` (где NNNN —
+    4-9 цифр регистратора, дальше произвольный suffix).
+    URL должен начинаться с ``http://`` или ``https://`` и содержать
+    минимум один символ после ``//`` (валидный домен).
+
+    Severity = warning — это не критическая ошибка, но может
+    указать на опечатку (например, «https//» вместо «https://»).
+
+    Параметров профиля нет.
+    """
+    _ = profile
+    violations: list[Violation] = []
+    for idx, entry in enumerate(document.bibliography, start=1):
+        doi = entry.fields.get("doi")
+        if doi and not _DOI_FORMAT_RE.match(doi):
+            violations.append(
+                Violation(
+                    check_code="R.14",
+                    severity="warning",
+                    message=(
+                        f"Источник {idx}: DOI «{doi}» не соответствует "
+                        f"стандартному формату «10.NNNN/...»"
+                    ),
+                    location=f"bibliography[{entry.id}].doi",
+                    suggestion=(
+                        "Проверить формат DOI: должен быть «10.NNNN/...» "
+                        "(подробнее: https://www.doi.org)"
+                    ),
+                    details={"entry_id": entry.id, "doi": doi},
+                )
+            )
+        url = entry.fields.get("url")
+        if url and not _URL_FORMAT_RE.match(url):
+            violations.append(
+                Violation(
+                    check_code="R.14",
+                    severity="warning",
+                    message=(
+                        f"Источник {idx}: URL «{url}» не соответствует "
+                        f"формату «http(s)://domain/...»"
+                    ),
+                    location=f"bibliography[{entry.id}].url",
+                    suggestion=(
+                        "Проверить URL: должен начинаться с http:// "
+                        "или https:// и содержать валидный домен"
+                    ),
+                    details={"entry_id": entry.id, "url": url},
+                )
+            )
+    return violations
+
+
 __all__ = [
     "check_access_date_for_web",
     "check_bibliography_format",
     "check_bibliography_order",
     "check_citations_have_pages",
     "check_doi_or_url_for_modern",
+    "check_doi_url_format",
     "check_each_entry_referenced",
     "check_fresh_sources_share",
     "check_language_ratio",
