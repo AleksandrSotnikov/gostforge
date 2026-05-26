@@ -17,21 +17,30 @@ PAGE/STYLEREF, реальные изображения, OMML-формулы) —
 
 from __future__ import annotations
 
+import io
+import logging
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 import docx  # type: ignore[import-not-found]
 from docx.document import Document as DocxDocument  # type: ignore[import-not-found]
 from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-not-found]
-from docx.shared import Cm, Mm, Pt  # type: ignore[import-not-found]
+from docx.oxml import OxmlElement  # type: ignore[import-not-found]
+from docx.oxml.ns import qn  # type: ignore[import-not-found]
+from docx.shared import Cm, Mm, Pt, RGBColor  # type: ignore[import-not-found]
 from docx.text.paragraph import Paragraph as DocxParagraph  # type: ignore[import-not-found]
 
 from gostforge.model import (
     Block,
+    Citation,
     ContentTemplate,
+    CrossRef,
     Document,
     Figure,
+    Formula,
     InlineElement,
+    InlineFormula,
     ListBlock,
     LogicalSection,
     PageSection,
@@ -47,6 +56,21 @@ from lxml import etree  # type: ignore[import-untyped]
 
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+
+logger = logging.getLogger(__name__)
+
+# Контекст для одной операции экспорта: открытый исходный документ, из
+# которого парсился `document`. Используется только в _write_figure для
+# вставки реальных изображений (`embedded:rIdN`). Threading-небезопасно —
+# для CLI и тестов достаточно; при необходимости можно перенести в
+# ContextVar.
+_current_source_docx: Any | None = None
+
+# Контекст одной операции экспорта: 1-based индексы записей библиографии
+# по их id. Используется в `_write_runs` для рендеринга Citation. Сбрасывается
+# в `export_docx()` через try/finally, чтобы состояние не утекало между вызовами.
+_current_bibliography_index: dict[str, int] | None = None
 
 _ALIGNMENT_MAP = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
@@ -116,23 +140,105 @@ def _apply_normal_style(doc: DocxDocument, profile: Profile) -> None:
 
 
 def _write_runs(docx_paragraph: DocxParagraph, content: Sequence[InlineElement]) -> None:
-    """Записать список InlineElement как набор run-ов в docx-параграф."""
+    """Записать список InlineElement как набор run-ов в docx-параграф.
+
+    Поддерживаются 4 типа inline-элементов (см. `gostforge.model.InlineElement`):
+
+    * `TextRun` — обычный run с inline-форматированием.
+    * `CrossRef` — OOXML-поле `<w:fldSimple w:instr=" REF target_id \\h "/>`;
+      опциональный текст `prefix` добавляется как соседний run перед полем.
+    * `InlineFormula` — `<m:oMath>` внутри `<w:r>` того же параграфа.
+    * `Citation` — текстовый run «[N]» / «[N, с. P]», где N — 1-based индекс
+      `source_id` в `Document.bibliography` (берётся из модуля).
+    """
     for element in content:
         if isinstance(element, TextRun):
-            run = docx_paragraph.add_run(element.text)
-            if element.bold:
-                run.bold = True
-            if element.italic:
-                run.italic = True
-            if element.superscript:
-                run.font.superscript = True
-            if element.subscript:
-                run.font.subscript = True
-            if element.font:
-                run.font.name = element.font
-            if element.size_pt is not None:
-                run.font.size = Pt(element.size_pt)
-        # CrossRef в Фазе 0 не экспортируется — пропускаем
+            _write_text_run(docx_paragraph, element)
+        elif isinstance(element, CrossRef):
+            _write_cross_ref(docx_paragraph, element)
+        elif isinstance(element, InlineFormula):
+            _write_inline_formula(docx_paragraph, element)
+        elif isinstance(element, Citation):
+            _write_citation(docx_paragraph, element)
+
+
+def _write_text_run(docx_paragraph: DocxParagraph, element: TextRun) -> None:
+    """Записать TextRun со всеми его inline-атрибутами форматирования."""
+    run = docx_paragraph.add_run(element.text)
+    if element.bold:
+        run.bold = True
+    if element.italic:
+        run.italic = True
+    if element.underline:
+        run.underline = True
+    if element.superscript:
+        run.font.superscript = True
+    if element.subscript:
+        run.font.subscript = True
+    if element.font:
+        run.font.name = element.font
+    if element.size_pt is not None:
+        run.font.size = Pt(element.size_pt)
+    if element.color_hex:
+        # color_hex в модели хранится как "#RRGGBB"; RGBColor ждёт hex без "#".
+        hex_value = element.color_hex.lstrip("#")
+        try:
+            run.font.color.rgb = RGBColor.from_string(hex_value)
+        except (ValueError, TypeError):
+            # Невалидный цвет — игнорируем, не ломаем экспорт ради одного run.
+            logger.debug("Невалидный color_hex=%r, пропускаем", element.color_hex)
+
+
+def _write_cross_ref(docx_paragraph: DocxParagraph, element: CrossRef) -> None:
+    """Записать CrossRef как опциональный prefix-run + `<w:fldSimple>` с REF.
+
+    Display-текст внутри fldSimple — placeholder «[?]»: Word подменит его
+    реальной автонумерацией при первом пересчёте полей. Для проверок C.*
+    важно наличие правильного `w:instr` в OOXML.
+    """
+    if element.prefix:
+        docx_paragraph.add_run(element.prefix)
+    fld = OxmlElement("w:fldSimple")
+    # Стандартный синтаксис Word: REF <bookmark> \h (гиперссылка). Пробелы
+    # вокруг target_id критичны — без них Word не распарсит инструкцию.
+    fld.set(qn("w:instr"), f" REF {element.target_id} \\h ")
+    # Word рендерит fldSimple только при наличии хотя бы одного <w:r> внутри.
+    inner_run = OxmlElement("w:r")
+    inner_t = OxmlElement("w:t")
+    inner_t.text = "[?]"
+    inner_run.append(inner_t)
+    fld.append(inner_run)
+    docx_paragraph._p.append(fld)
+
+
+def _write_inline_formula(docx_paragraph: DocxParagraph, element: InlineFormula) -> None:
+    """Записать InlineFormula как `<m:oMath>` ВНУТРИ `<w:r>` параграфа.
+
+    В отличие от блочной `Formula`, inline-формула не оборачивается в
+    `<m:oMathPara>` и идёт в потоке текста. На Фазе 2.5 используется
+    простейший fallback: LaTeX-строка кладётся в `<m:t>` как обычный текст;
+    парсер уже умеет читать такой формат.
+    """
+    w_run = OxmlElement("w:r")
+    omath = etree.SubElement(w_run, f"{{{M_NS}}}oMath")
+    m_r = etree.SubElement(omath, f"{{{M_NS}}}r")
+    m_t = etree.SubElement(m_r, f"{{{M_NS}}}t")
+    m_t.text = element.latex
+    docx_paragraph._p.append(w_run)
+
+
+def _write_citation(docx_paragraph: DocxParagraph, element: Citation) -> None:
+    """Записать Citation как текстовый run «[N]» / «[N, с. P]».
+
+    Номер N вычисляется из модуль-level карты `_current_bibliography_index`,
+    проставленной `export_docx()`. Если карта пуста или источник не найден,
+    подставляем «?» (это всё ещё корректный текст, но проверка R.04 такой
+    цитаты не пропустит — что и нужно).
+    """
+    index_map = _current_bibliography_index or {}
+    n_value: int | str = index_map.get(element.source_id, "?")
+    text = element.template.format(n=n_value, pages=element.pages or "")
+    docx_paragraph.add_run(text)
 
 
 def _apply_paragraph_format(docx_para: DocxParagraph, paragraph: Paragraph) -> None:
@@ -220,12 +326,26 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
 def _write_figure(doc: DocxDocument, figure: Figure) -> None:
     """Записать рисунок и его подпись.
 
-    Если `figure.image_path` указывает на существующий файл — вставляем
-    реальное изображение через python-docx `add_picture`. Иначе пишем
-    placeholder-параграф `[Рисунок: <id>]`.
+    Стратегия выбора источника изображения:
+
+    1. ``image_path = "embedded:rIdN"`` — рисунок пришёл из парсера и
+       ссылается на media-blob исходного .docx. Если в текущем контексте
+       экспорта (`_current_source_docx`) открыт source_docx — копируем
+       blob и вставляем как настоящее изображение.
+    2. ``image_path`` указывает на существующий файл — `add_picture(path)`.
+    3. Иначе (пусто, не-файл, ошибка вставки) — placeholder-параграф
+       вида `[Рисунок: <id>]`.
     """
     path = figure.image_path
-    if path and Path(path).is_file():
+
+    # Случай 1: embedded:rIdN с открытым source_docx.
+    if path.startswith("embedded:") and _current_source_docx is not None:
+        rid = path[len("embedded:"):]
+        if _try_write_embedded_picture(doc, _current_source_docx, rid, figure):
+            return
+
+    # Случай 2: реальный файл на диске.
+    if path and not path.startswith("embedded:") and Path(path).is_file():
         paragraph = doc.add_paragraph()
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = paragraph.add_run()
@@ -233,10 +353,63 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
             run.add_picture(path)
         except Exception:  # noqa: BLE001 — fallback на placeholder при любой ошибке
             paragraph.add_run(f"[Рисунок: {figure.id}]").italic = True
-    else:
-        placeholder = doc.add_paragraph()
-        placeholder.add_run(f"[Рисунок: {figure.id}]").italic = True
+        _write_caption_paragraph(doc, figure.caption)
+        return
+
+    # Случай 3: placeholder.
+    placeholder = doc.add_paragraph()
+    placeholder.add_run(f"[Рисунок: {figure.id}]").italic = True
     _write_caption_paragraph(doc, figure.caption)
+
+
+def _write_formula(doc: DocxDocument, formula: Formula) -> None:
+    """Записать формулу как OOXML-OMath блок."""
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p_xml = paragraph._p
+
+    omath_para = etree.SubElement(p_xml, f"{{{M_NS}}}oMathPara")
+    omath = etree.SubElement(omath_para, f"{{{M_NS}}}oMath")
+    if formula.latex:
+        m_r = etree.SubElement(omath, f"{{{M_NS}}}r")
+        m_t = etree.SubElement(m_r, f"{{{M_NS}}}t")
+        m_t.text = formula.latex
+
+    if formula.number is not None:
+        run = paragraph.add_run(f"\t({formula.number})")
+        run.italic = False
+
+
+def _try_write_embedded_picture(
+    doc: DocxDocument, source_docx_obj: Any, rid: str, figure: Figure
+) -> bool:
+    """Попытка достать media-blob из source_docx и вставить как картинку."""
+    try:
+        image_part = source_docx_obj.part.related_parts.get(rid)
+    except Exception:  # noqa: BLE001
+        logger.debug("Не удалось получить related_parts для rId=%s", rid)
+        return False
+    if image_part is None:
+        return False
+    try:
+        blob = image_part.blob
+    except Exception:  # noqa: BLE001
+        return False
+
+    paragraph = doc.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = paragraph.add_run()
+    try:
+        run.add_picture(io.BytesIO(blob))
+    except Exception:  # noqa: BLE001
+        p_xml = paragraph._p
+        parent = p_xml.getparent()
+        if parent is not None:
+            parent.remove(p_xml)
+        return False
+
+    _write_caption_paragraph(doc, figure.caption)
+    return True
 
 
 def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
@@ -381,10 +554,17 @@ def _write_items(doc: DocxDocument, items: Sequence[LogicalSection | Block]) -> 
             _write_figure(doc, item)
         elif isinstance(item, ListBlock):
             _write_list(doc, item)
-        # Formula — Фаза 3 (OMML)
+        elif isinstance(item, Formula):
+            _write_formula(doc, item)
 
 
-def export_docx(document: Document, profile: Profile, output_path: str | Path) -> None:
+def export_docx(
+    document: Document,
+    profile: Profile,
+    output_path: str | Path,
+    *,
+    source_docx: str | Path | None = None,
+) -> None:
     """Собрать .docx из модели по профилю.
 
     Минимальная реализация: геометрия страницы, стиль Normal, параграфы и
@@ -393,30 +573,145 @@ def export_docx(document: Document, profile: Profile, output_path: str | Path) -
 
     Если у первой PageSection задан footer (например, после parse_docx
     плейсхолдер {page}) — он материализуется в OOXML-поле PAGE через lxml.
+
+    Параметры:
+      source_docx — путь к исходному .docx, из которого парсился document.
+        Если задан и у Figure.image_path == ``embedded:rIdN``, экспортёр
+        достанет соответствующий media-blob из source_docx и вставит как
+        реальное изображение. Иначе на месте картинки будет placeholder.
     """
+    global _current_source_docx, _current_bibliography_index
     output_path = Path(output_path)
     doc = docx.Document()
 
-    _apply_page_geometry(doc, profile)
-    _apply_normal_style(doc, profile)
+    # Открываем source_docx (если задан) и кладём его в модуль-level
+    # контекст — _write_figure читает оттуда. Try/finally гарантирует
+    # сброс контекста даже при исключении в середине экспорта.
+    _current_source_docx = None
+    if source_docx is not None:
+        try:
+            _current_source_docx = docx.Document(str(source_docx))
+        except Exception:
+            # Повреждённый или нечитаемый docx → пропускаем источник, картинки уйдут в placeholder.
+            logger.warning(
+                "Не удалось открыть source_docx=%s; картинки будут placeholder-ами",
+                source_docx,
+            )
+            _current_source_docx = None
 
-    # Footer и стартовая страница — берём из первой PageSection (на Фазе 1
-    # все PageSection кладутся в одну физическую секцию docx).
-    # Метаданные документа в docProps/core.xml.
-    core = doc.core_properties
-    if document.metadata.title:
-        core.title = document.metadata.title
-    if document.metadata.author:
-        core.author = document.metadata.author
+    # Карта source_id → 1-based номер для рендеринга Citation. Заполняется
+    # из Document.bibliography; пустая карта → все цитаты получат «?».
+    _current_bibliography_index = {entry.id: i + 1 for i, entry in enumerate(document.bibliography)}
 
-    if document.page_sections:
-        first = document.page_sections[0]
-        _apply_page_size(doc, first)
-        _apply_pgnumtype(doc, first)
-        if first.footer is not None:
-            _write_footer(doc, first.footer.default)
+    try:
+        _apply_page_geometry(doc, profile)
+        _apply_normal_style(doc, profile)
 
-    for page_section in document.page_sections:
-        _write_items(doc, page_section.content)
+        # Метаданные документа в docProps/core.xml.
+        core = doc.core_properties
+        if document.metadata.title:
+            core.title = document.metadata.title
+        if document.metadata.author:
+            core.author = document.metadata.author
 
-    doc.save(str(output_path))
+        if document.page_sections:
+            first = document.page_sections[0]
+            _apply_page_size(doc, first)
+            _apply_pgnumtype(doc, first)
+            if first.footer is not None:
+                _write_footer(doc, first.footer.default)
+            if first.header is not None:
+                _write_header(doc, first.header.default)
+
+        for page_section in document.page_sections:
+            _write_items(doc, page_section.content)
+
+        doc.save(str(output_path))
+    finally:
+        _current_source_docx = None
+        _current_bibliography_index = None
+
+    # Post-processing на уровне zip: запись настроек, которые python-docx
+    # не умеет менять напрямую (например, w:autoHyphenation в settings.xml).
+    _postprocess_zip(Path(output_path), document)
+
+
+def _postprocess_zip(output_path: Path, document: Document) -> None:
+    """Доработать .docx-архив после save(): записать настройки в settings.xml."""
+    if document.auto_hyphenation is None:
+        return
+    _patch_settings_auto_hyphenation(output_path, document.auto_hyphenation)
+
+
+def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
+    """Прописать/удалить <w:autoHyphenation/> в word/settings.xml внутри docx-zip."""
+    import shutil
+    import zipfile
+    settings_path = "word/settings.xml"
+    tmp_path = docx_path.with_suffix(".docx.tmp")
+    with zipfile.ZipFile(docx_path, "r") as zin, zipfile.ZipFile(
+        tmp_path, "w", zipfile.ZIP_DEFLATED
+    ) as zout:
+        names = zin.namelist()
+        if settings_path not in names:
+            settings_xml = (
+                b'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+                b'<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+                b"</w:settings>"
+            )
+        else:
+            settings_xml = zin.read(settings_path)
+
+        try:
+            root = etree.fromstring(settings_xml)
+            for existing in root.findall(f"{{{W_NS}}}autoHyphenation"):
+                root.remove(existing)
+            if value:
+                elem = etree.SubElement(root, f"{{{W_NS}}}autoHyphenation")
+                root.insert(0, elem)
+            new_xml = etree.tostring(
+                root, xml_declaration=True, encoding="UTF-8", standalone=True
+            )
+        except Exception:  # noqa: BLE001
+            new_xml = settings_xml
+
+        wrote_settings = False
+        for name in names:
+            if name == settings_path:
+                zout.writestr(name, new_xml)
+                wrote_settings = True
+            else:
+                zout.writestr(name, zin.read(name))
+        if not wrote_settings:
+            zout.writestr(settings_path, new_xml)
+
+    shutil.move(str(tmp_path), str(docx_path))
+
+
+def _write_header(doc: DocxDocument, header_template: ContentTemplate) -> None:
+    """Записать содержимое header первой секции (зеркально _write_footer)."""
+    section = doc.sections[0]
+    header = section.header
+    for p in list(header.paragraphs):
+        p_xml = p._p
+        if p_xml.getparent() is not None and not p.text and not list(p_xml):
+            p_xml.getparent().remove(p_xml)
+
+    slots: list[tuple[str, Sequence[InlineElement] | None]] = [
+        ("left", header_template.left),
+        ("center", header_template.center),
+        ("right", header_template.right),
+    ]
+
+    for slot, content in slots:
+        if not _has_text(content):
+            continue
+        assert content is not None
+        para = header.add_paragraph()
+        if slot == "center":
+            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        elif slot == "right":
+            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+        else:
+            para.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _write_template_into_footer_paragraph(para, content)

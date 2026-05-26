@@ -144,16 +144,37 @@ checks:
   H.08: {enabled: true}
   H.04: {enabled: true}
   H.05: {enabled: true}
+  H.06: {enabled: true}
+  H.07: {enabled: true}
   I.01: {enabled: true}
   I.02: {enabled: true}
   I.03: {enabled: true, params: {allow_dot_after_number: false}}
+  I.04: {enabled: true, params: {caption_size_pt: 12, caption_alignment: center}}
   I.05: {enabled: true}
   I.06: {enabled: true}
+  I.07: {enabled: true}
+  I.08: {enabled: true, params: {min_dpi: 150}}
+  I.09: {enabled: true, params: {alignment: center}}
+  I.10: {enabled: true}
   B.01: {enabled: true}
   B.02: {enabled: true}
   B.03: {enabled: true, params: {allow_dot_after_number: false}}
+  B.04: {enabled: true}
+  B.05: {enabled: true}
+  B.06: {enabled: true, params: {cell_font_size_pt: 12, cell_line_spacing: 1.0}}
+  B.07: {enabled: true, params: {allow_first_column_empty: false}}
   B.08: {enabled: true}
   B.09: {enabled: true}
+  R.01: {enabled: true}
+  R.02: {enabled: true, params: {order: alphabetical}}
+  R.03:
+    enabled: true
+    params:
+      required_by_type:
+        book: [author, year, place]
+        article: [author, year]
+        web: [url, access_date]
+        standard: [year]
   R.04:
     enabled: true
     params:
@@ -162,11 +183,28 @@ checks:
       require_final_dot: true
       require_separator: true
       require_url_marker_for_web: true
+  R.05: {enabled: true}
   R.06: {enabled: true}
+  R.07: {enabled: true}
   R.08: {enabled: true}
+  R.09: {enabled: true, params: {modern_year: 2020}}
+  R.10: {enabled: true, params: {fresh_year_threshold: 2015, min_fresh_share: 0.5}}
+  R.11: {enabled: true, params: {min_sources: 20}}
+  R.12: {enabled: true, params: {max_foreign_share: 0.5, min_foreign_share: 0.1}}
+  R.13:
+    enabled: true
+    params:
+      suspicious_domains:
+        - wikipedia.org
+        - ru.wikipedia.org
+        - studopedia.ru
+        - studwood.net
+        - studfile.net
   C.01: {enabled: true}
   C.02: {enabled: true}
+  C.03: {enabled: true}
   C.04: {enabled: true}
+  C.05: {enabled: true}
   P.01:
     enabled: true
     params:
@@ -175,7 +213,15 @@ checks:
     enabled: true
     params:
       known_abbreviations: []
+  A.02:
+    enabled: true
+    params:
+      threshold: 5
+  A.03: {enabled: true}
+  P.02: {enabled: true}
   P.03: {enabled: true}
+  P.04: {enabled: true}
+  P.05: {enabled: true}
   K.01: {enabled: true}
   K.02: {enabled: true}
   K.03: {enabled: true, params: {expected_start_value: 3}}
@@ -212,3 +258,5 @@ checks:
   X.01: {enabled: true}
   X.02: {enabled: true}
   X.03: {enabled: true}
+  X.04: {enabled: true}
+  X.05: {enabled: true}

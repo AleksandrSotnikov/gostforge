@@ -79,3 +79,10 @@ def registered_checks() -> list[str]:
 
 # Импорт самих проверок: их регистрация происходит при импорте модулей
 from . import checks  # noqa: E402,F401
+
+# Загружаем пользовательские плагины из ~/.gostforge/plugins/. Импорт
+# плагинов идёт через декораторы @register, описанные выше. Любой плагин
+# с битым кодом логируется и пропускается без падения валидатора.
+from gostforge.plugins import load_plugins as _load_plugins  # noqa: E402
+
+_load_plugins()

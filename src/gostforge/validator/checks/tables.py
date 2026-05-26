@@ -59,6 +59,55 @@ def _has_text(elements: Sequence[InlineElement]) -> bool:
     )
 
 
+@register("B.02")
+def check_table_caption_above(
+    document: Document,  # noqa: ARG001
+    profile: Profile,  # noqa: ARG001
+) -> list[Violation]:
+    """Подпись таблицы должна располагаться над таблицей (заглушка Фазы 2).
+
+    На Фазе 2 модель не сохраняет caption_position у Table: парсер делает
+    склейку и кладёт подпись сверху, если она была найдена выше таблицы.
+    Если caption присутствует — он уже «над таблицей». Если caption пуст —
+    это случай B.01, дублировать не нужно.
+
+    Когда парсер начнёт сохранять caption_position явно, здесь появится
+    логика: caption_position != "above" → Violation.
+    """
+    return []
+
+
+@register("B.04")
+def check_table_continuation_header(
+    document: Document,  # noqa: ARG001
+    profile: Profile,  # noqa: ARG001
+) -> list[Violation]:
+    """При переносе таблицы на новую страницу должен быть заголовок «Продолжение таблицы N» (заглушка Фазы 2).
+
+    На Фазе 2 — заглушка: парсер не сохраняет разбивку на страницы, без
+    рендеринга это нельзя проверить. Когда появится модель страниц
+    (PageBreak/PageLayout), здесь будет проверка наличия заголовка
+    «Продолжение таблицы N» на каждой странице, куда переносится таблица.
+    """
+    return []
+
+
+@register("B.05")
+def check_table_header_repeats(
+    document: Document,  # noqa: ARG001
+    profile: Profile,  # noqa: ARG001
+) -> list[Violation]:
+    """Шапка таблицы должна повторяться при переносе на новую страницу (заглушка Фазы 2).
+
+    В docx это атрибут `<w:tblHeader/>` у первой строки таблицы. Парсер
+    на Фазе 2 не сохраняет это в модели Table. Когда модель таблицы
+    получит поле `header_repeats: bool`, здесь появится проверка: если
+    таблица потенциально занимает больше страницы и header_repeats != True
+    — Violation.
+    """
+    return []
+
+
 @register("B.01")
 def check_table_has_caption(
     document: Document, profile: Profile  # noqa: ARG001
@@ -311,9 +360,164 @@ def check_table_referenced_in_text(
     return violations
 
 
+@register("B.06")
+def check_table_cell_font_size(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """В ячейках таблицы шрифт должен быть `cell_font_size_pt` (по умолчанию 12pt).
+
+    Параметры:
+    - `cell_font_size_pt` (float, default 12): ожидаемый кегль в ячейках.
+    - `cell_line_spacing` (float, default 1.0): не проверяется на Фазе 2
+      (line_spacing не хранится на уровне ячейки в текущей модели).
+
+    Для каждой Table проверяется любой TextRun в headers и rows с непустым
+    `size_pt`: если размер отличается от ожидаемого — порождается один
+    Violation на таблицу с указанием найденного размера. Если у TextRun
+    `size_pt is None`, размер наследуется от стиля и не проверяется.
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("B.06")
+    expected_size = 12.0
+    if config and config.params.get("cell_font_size_pt") is not None:
+        try:
+            expected_size = float(config.params["cell_font_size_pt"])
+        except (TypeError, ValueError):
+            expected_size = 12.0
+
+    for page_section, table in _all_tables(document):
+        wrong_size: float | None = None
+        for cell in _iter_table_cells(table):
+            for element in cell:
+                if not isinstance(element, TextRun):
+                    continue
+                if element.size_pt is None:
+                    continue
+                if element.size_pt != expected_size:
+                    wrong_size = element.size_pt
+                    break
+            if wrong_size is not None:
+                break
+
+        if wrong_size is None:
+            continue
+
+        violations.append(
+            Violation(
+                check_code="B.06",
+                severity="warning",
+                message=(
+                    f"В ячейках таблицы «{table.id}» найден кегль "
+                    f"{wrong_size} pt, ожидается {expected_size} pt"
+                ),
+                location=f"page_sections.{page_section.id}.table[{table.id}]",
+                suggestion=(
+                    f"Выставить шрифту в ячейках таблицы размер "
+                    f"{expected_size} pt"
+                ),
+                details={
+                    "table_id": table.id,
+                    "expected_pt": str(expected_size),
+                    "found_pt": str(wrong_size),
+                },
+            )
+        )
+
+    return violations
+
+
+def _iter_table_cells(table: Table) -> list[list[InlineElement]]:
+    """Все ячейки таблицы (headers + rows) как плоский список."""
+    cells: list[list[InlineElement]] = []
+    for header_cell in table.headers:
+        cells.append(header_cell)
+    for row in table.rows:
+        for cell in row:
+            cells.append(cell)
+    return cells
+
+
+def _cell_is_empty(cell: list[InlineElement]) -> bool:
+    """True, если в ячейке нет ни одного TextRun с непустым текстом."""
+    for element in cell:
+        if isinstance(element, TextRun) and element.text and element.text.strip():
+            return False
+    return True
+
+
+@register("B.07")
+def check_table_empty_cells_dash(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Пустые ячейки таблицы должны быть заполнены прочерком.
+
+    Параметры:
+    - `allow_first_column_empty` (bool, default False): если True, пустые
+      ячейки в первой колонке (col 0) допускаются (нумерация строк и т.п.).
+
+    Обходим headers и rows. Если найдена ячейка с полностью пустым текстом
+    (все TextRun-ы после strip пусты) — один Violation на таблицу с
+    указанием первой найденной координаты («row 2, col 3»).
+    """
+    violations: list[Violation] = []
+    config = profile.checks.get("B.07")
+    allow_first_col = False
+    if config and config.params.get("allow_first_column_empty") is not None:
+        allow_first_col = bool(config.params["allow_first_column_empty"])
+
+    for page_section, table in _all_tables(document):
+        # row=0 — это «строка заголовков» (headers); далее rows нумеруются от 1.
+        empty_coord: tuple[int, int] | None = None
+        for col_idx, header_cell in enumerate(table.headers):
+            if allow_first_col and col_idx == 0:
+                continue
+            if _cell_is_empty(header_cell):
+                empty_coord = (0, col_idx)
+                break
+        if empty_coord is None:
+            for row_idx, row in enumerate(table.rows, start=1):
+                for col_idx, cell in enumerate(row):
+                    if allow_first_col and col_idx == 0:
+                        continue
+                    if _cell_is_empty(cell):
+                        empty_coord = (row_idx, col_idx)
+                        break
+                if empty_coord is not None:
+                    break
+
+        if empty_coord is None:
+            continue
+
+        row_idx, col_idx = empty_coord
+        violations.append(
+            Violation(
+                check_code="B.07",
+                severity="info",
+                message=(
+                    f"В таблице «{table.id}» пустая ячейка "
+                    f"(row {row_idx}, col {col_idx}) — рекомендуется поставить прочерк"
+                ),
+                location=f"page_sections.{page_section.id}.table[{table.id}]",
+                suggestion="Заполнить пустую ячейку прочерком «—»",
+                details={
+                    "table_id": table.id,
+                    "row": str(row_idx),
+                    "col": str(col_idx),
+                },
+            )
+        )
+
+    return violations
+
+
 __all__ = [
+    "check_table_caption_above",
     "check_table_caption_format",
+    "check_table_cell_font_size",
+    "check_table_continuation_header",
+    "check_table_empty_cells_dash",
     "check_table_has_caption",
+    "check_table_header_repeats",
     "check_table_numbering_continuous",
     "check_table_referenced_in_text",
 ]

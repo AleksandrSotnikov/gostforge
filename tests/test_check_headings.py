@@ -6,6 +6,7 @@ from gostforge.model import (
     Document,
     LogicalSection,
     PageSection,
+    Paragraph,
     TextRun,
 )
 from gostforge.profile import load_profile
@@ -473,4 +474,67 @@ def test_h05_first_section_can_be_level_2() -> None:
     doc = _doc([_heading("Подраздел", level=2)])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.05"]
+    assert found == []
+
+
+# --- H.06 (заголовок не висит внизу страницы) ----------------------------
+
+
+def test_h06_registered() -> None:
+    assert "H.06" in registered_checks()
+
+
+def test_h06_heading_without_children_violation() -> None:
+    """Заголовок без content (children пустые) — висячий, warning."""
+    doc = _doc([_heading("Введение")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.06"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert "Введение" in found[0].message
+
+
+def test_h06_heading_with_paragraph_no_violation() -> None:
+    """Заголовок, под которым есть непустой абзац — нарушения нет."""
+    para = Paragraph(id="p-1", content=[TextRun(text="Содержательный текст раздела.")])
+    section = LogicalSection(
+        id="sec-1",
+        level=1,
+        heading=[TextRun(text="Введение")],
+        children=[para],
+    )
+    doc = _doc([section])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.06"]
+    assert found == []
+
+
+def test_h06_heading_with_empty_paragraph_violation() -> None:
+    """Заголовок, под которым пустой абзац — тоже warning."""
+    empty = Paragraph(id="p-1", content=[TextRun(text="   ")])
+    section = LogicalSection(
+        id="sec-1",
+        level=1,
+        heading=[TextRun(text="Введение")],
+        children=[empty],
+    )
+    doc = _doc([section])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.06"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+
+
+# --- H.07 (отступы до и после заголовка — заглушка) ----------------------
+
+
+def test_h07_registered() -> None:
+    assert "H.07" in registered_checks()
+
+
+def test_h07_returns_empty_phase2_stub() -> None:
+    """H.07 — заглушка Фазы 2 (нет полей spacing у Paragraph)."""
+    doc = _doc([_heading("Введение")])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.07"]
     assert found == []

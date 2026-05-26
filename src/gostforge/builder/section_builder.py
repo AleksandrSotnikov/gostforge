@@ -1,3 +1,5 @@
+# ruff: noqa: RUF002
+
 """Fluent-builder для одного логического раздела."""
 
 from __future__ import annotations
@@ -9,6 +11,7 @@ from gostforge.model import (
     Document,
     Figure,
     Formula,
+    InlineElement,
     ListBlock,
     LogicalSection,
     Paragraph,
@@ -62,10 +65,28 @@ class SectionBuilder:
     def paragraph(
         self, text: str, *, bold: bool = False, italic: bool = False
     ) -> SectionBuilder:
-        """Добавить параграф в текущий раздел."""
+        """Добавить параграф в текущий раздел.
+
+        Высокоуровневая обёртка для случая «один абзац = одна строка с
+        опциональным сквозным форматированием». Для inline-формул,
+        перекрёстных ссылок и mixed-форматирования используйте
+        :meth:`rich_paragraph`.
+        """
+        return self.rich_paragraph(
+            [TextRun(text=text, bold=bold, italic=italic)]
+        )
+
+    def rich_paragraph(self, elements: list[InlineElement]) -> SectionBuilder:
+        """Добавить параграф с готовым набором inline-элементов.
+
+        Низкоуровневая альтернатива :meth:`paragraph` для случаев, когда
+        нужны inline-формулы, перекрёстные ссылки, цитаты или смешанное
+        форматирование внутри одного абзаца. Принимает любую комбинацию
+        TextRun / CrossRef / InlineFormula / Citation в нужном порядке.
+        """
         para = Paragraph(
             id=self._root._next_id("p"),
-            content=[TextRun(text=text, bold=bold, italic=italic)],
+            content=list(elements),
         )
         self._section.children.append(para)
         return self

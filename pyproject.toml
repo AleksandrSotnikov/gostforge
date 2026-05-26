@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gostforge"
-version = "0.1.0"
+version = "0.2.0"
 description = "Конструктор и нормоконтролёр документов по ГОСТу"
 readme = "README.md"
 license = {text = "MIT"}
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["gost", "docx", "normocontrol", "thesis", "coursework"]
 classifiers = [
-    "Development Status :: 2 - Pre-Alpha",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Education",
     "License :: OSI Approved :: MIT License",
     "Natural Language :: Russian",
@@ -35,12 +35,21 @@ dependencies = [
 
 [project.optional-dependencies]
 ui = ["streamlit>=1.30"]
+api = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",
     "ruff>=0.1",
     "mypy>=1.7",
     "streamlit>=1.30",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+    "httpx>=0.27",
 ]
 
 [project.scripts]

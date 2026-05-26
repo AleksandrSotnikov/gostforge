@@ -105,6 +105,22 @@ def test_i01_nested_logical_sections() -> None:
     assert found[0].details["figure_id"] == "fig-deep"
 
 
+# --- I.02 (подпись под рисунком — заглушка) -----------------------------
+
+
+def test_i02_registered() -> None:
+    assert "I.02" in registered_checks()
+
+
+def test_i02_returns_empty_phase2_stub() -> None:
+    """I.02 — заглушка (парсер всегда даёт caption снизу, нет caption_position)."""
+    figure = Figure(id="fig-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.02"]
+    assert found == []
+
+
 # --- I.03 -------------------------------------------------------------------
 
 
@@ -212,6 +228,60 @@ def test_i03_caption_in_nested_section() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
     assert len(found) == 1
     assert found[0].details["figure_id"] == "fig-deep"
+
+
+# --- I.04 (подпись выровнена по центру, шрифт 12pt) ---------------------
+
+
+def test_i04_registered() -> None:
+    assert "I.04" in registered_checks()
+
+
+def test_i04_correct_size_no_violation() -> None:
+    """Подпись 12pt — нарушения нет."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема", size_pt=12)],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.04"]
+    assert found == []
+
+
+def test_i04_wrong_size_violation() -> None:
+    """Подпись 14pt — нарушение (ожидается 12pt)."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема", size_pt=14)],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.04"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert found[0].details["found"] == "14"
+
+
+def test_i04_unset_size_no_violation() -> None:
+    """Если size_pt у TextRun не задан — нарушения нет (наследуется)."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.04"]
+    assert found == []
+
+
+def test_i04_empty_caption_skipped() -> None:
+    """Пустая подпись — это случай I.01."""
+    figure = Figure(id="fig-1", caption=[])
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.04"]
+    assert found == []
 
 
 # --- I.05 (сквозная нумерация рисунков) ---------------------------------
@@ -409,4 +479,152 @@ def test_i06_reference_in_nested_section() -> None:
     doc = _doc_with_content([f1, inner])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.06"]
+    assert found == []
+
+
+# --- I.07 (ссылка предшествует появлению рисунка) -----------------------
+
+
+def test_i07_registered() -> None:
+    assert "I.07" in registered_checks()
+
+
+def test_i07_reference_before_figure_no_violation() -> None:
+    """Ссылка на рисунок ДО самого рисунка — нарушения нет."""
+    para = Paragraph(
+        id="p-1", content=[TextRun(text="Алгоритм представлен на рисунке 1.")]
+    )
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc = _doc_with_content([para, figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
+    assert found == []
+
+
+def test_i07_reference_after_figure_violation() -> None:
+    """Ссылка ПОСЛЕ рисунка — порядок нарушен, warning."""
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    para = Paragraph(
+        id="p-1", content=[TextRun(text="Как видно на рисунке 1, всё ясно.")]
+    )
+    doc = _doc_with_content([figure, para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+    assert found[0].details["number"] == "1"
+
+
+def test_i07_no_reference_at_all_skipped() -> None:
+    """Если ссылок совсем нет — это случай I.06, не дублируем."""
+    para = Paragraph(id="p-1", content=[TextRun(text="Просто абзац без ссылок.")])
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc = _doc_with_content([para, figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
+    assert found == []
+
+
+def test_i07_reference_before_and_after_no_violation() -> None:
+    """Если есть ссылка и до, и после — порядок не нарушен."""
+    before = Paragraph(
+        id="p-1", content=[TextRun(text="На рисунке 1 показана схема.")]
+    )
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    after = Paragraph(
+        id="p-2", content=[TextRun(text="Из рисунка 1 видно, что ...")]
+    )
+    doc = _doc_with_content([before, figure, after])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
+    assert found == []
+
+
+# --- I.10 (пустая строка между подписью и текстом — заглушка) ----------
+
+
+def test_i10_registered() -> None:
+    assert "I.10" in registered_checks()
+
+
+def test_i10_returns_empty_phase2_stub() -> None:
+    """I.10 — заглушка (парсер не сохраняет phantom-параграфы)."""
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    para = Paragraph(id="p-1", content=[TextRun(text="Текст после рисунка.")])
+    doc = _doc_with_content([figure, para])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.10"]
+    assert found == []
+
+
+# --- I.08 (DPI изображения) ------------------------------------------------
+
+
+def test_i08_registered() -> None:
+    assert "I.08" in registered_checks()
+
+
+def test_i08_dpi_above_minimum_no_violation() -> None:
+    """Рисунок с DPI=300 проходит проверку при min_dpi=150."""
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", dpi=300, caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.08"]
+    assert found == []
+
+
+def test_i08_low_dpi_violation() -> None:
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", dpi=72, caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.08"]
+    assert len(found) == 1
+    assert found[0].details["actual"] == "72"
+    assert "72" in found[0].message
+
+
+def test_i08_unknown_dpi_skipped() -> None:
+    """Если DPI=None (Pillow недоступен или формат без метаданных) — пропускаем."""
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", dpi=None, caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.08"]
+    assert found == []
+
+
+# --- I.09 (центрирование рисунка) ------------------------------------------
+
+
+def test_i09_registered() -> None:
+    assert "I.09" in registered_checks()
+
+
+def test_i09_centered_no_violation() -> None:
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", alignment="center", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.09"]
+    assert found == []
+
+
+def test_i09_left_aligned_violation() -> None:
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", alignment="left", caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.09"]
+    assert len(found) == 1
+    assert found[0].details["actual"] == "left"
+
+
+def test_i09_unset_alignment_skipped() -> None:
+    doc = Document()
+    fig = Figure(id="fig-1", image_path="embedded:rId1", alignment=None, caption=[TextRun(text="Рисунок 1 — Схема")])
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.09"]
     assert found == []

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 import time
 from collections import defaultdict
@@ -211,7 +213,14 @@ def main() -> None:
     help="Путь к отчёту. Формат определяется по расширению: .xlsx → Excel, .md → Markdown",
 )
 @click.option("--quiet", "-q", is_flag=True, help="Показать только сводку и список кодов")
-def check(path: Path, profile: str, report: Path | None, quiet: bool) -> None:
+@click.option(
+    "--no-record",
+    is_flag=True,
+    help="Не записывать результаты проверки в локальную БД истории.",
+)
+def check(
+    path: Path, profile: str, report: Path | None, quiet: bool, no_record: bool
+) -> None:
     """Проверить документ или папку документов на соответствие профилю."""
     try:
         prof = load_profile(profile)
@@ -261,12 +270,43 @@ def check(path: Path, profile: str, report: Path | None, quiet: bool) -> None:
         + f"за {elapsed:.2f} с"
     )
 
+    if not no_record:
+        _record_check_results(results, profile)
+
     if report:
         fmt = _write_report(results, report, profile)
         click.echo(click.style(f"{fmt}-отчёт сохранён: {report}", fg="green"))
 
     if total_errors > 0:
         sys.exit(1)
+
+
+def _record_check_results(
+    results: dict[str, list[Violation]], profile_id: str
+) -> None:
+    """Сохранить результаты прогона в локальную БД истории.
+
+    Ошибки БД (нет места, нет прав) логируются и проглатываются —
+    они не должны ломать основной workflow проверки.
+    """
+    try:
+        from gostforge.db import get_connection, record_submission
+    except ImportError:
+        return
+    try:
+        with get_connection() as conn:
+            for target, violations in results.items():
+                record_submission(
+                    conn,
+                    filename=Path(target).name,
+                    profile_id=profile_id,
+                    violations=violations,
+                )
+    except Exception as exc:  # pragma: no cover — не валим CLI на БД
+        click.echo(
+            click.style(f"Не удалось записать в БД истории: {exc}", fg="yellow"),
+            err=True,
+        )
 
 
 def _print_fixes(applied: list[FixApplied]) -> None:
@@ -328,7 +368,9 @@ def fix_cmd(
         click.echo(click.style("\n--dry-run: файл не записан.", fg="yellow"))
         return
 
-    export_docx(document, prof, output)
+    # Передаём source_docx=path, чтобы рисунки из исходного .docx
+    # переносились в выходной как реальные изображения (а не placeholder).
+    export_docx(document, prof, output, source_docx=path)
     click.echo(click.style(f"\nИсправленный документ сохранён: {output}", fg="green"))  # noqa: RUF001
 
 
@@ -339,9 +381,14 @@ def profiles() -> None:
 
 @profiles.command("list")
 def profiles_list() -> None:
-    """Показать доступные профили."""
+    """Показать доступные профили (builtin + установленные локально)."""
+    from gostforge.profile import is_custom_profile
+
     for profile_id in list_profiles():
-        click.echo(profile_id)
+        if is_custom_profile(profile_id):
+            click.echo(f"{profile_id}  " + click.style("[custom]", fg="green"))
+        else:
+            click.echo(f"{profile_id}  " + click.style("[builtin]", fg="cyan"))
 
 
 @profiles.command("show")
@@ -356,11 +403,251 @@ def profiles_show(profile_id: str) -> None:
     click.echo(prof.model_dump_json(indent=2))
 
 
+@profiles.command("install")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    help="Перезаписать, если профиль с таким id уже установлен.",
+)
+def profiles_install(path: Path, overwrite: bool) -> None:
+    """Установить YAML-профиль в локальный реестр.
+
+    После установки профиль доступен всем командам по своему id
+    (gostforge check ... --profile <id>, REST API и т.д.). YAML
+    валидируется до записи в БД — неверная схема отвергается с
+    понятной ошибкой.
+    """
+    try:
+        from gostforge.db import get_connection, install_profile
+    except ImportError as exc:  # pragma: no cover — db в stdlib
+        click.echo(f"Ошибка импорта модуля БД: {exc}", err=True)
+        sys.exit(2)
+
+    yaml_content = path.read_text(encoding="utf-8")
+    try:
+        with get_connection() as conn:
+            rec = install_profile(
+                conn,
+                yaml_content=yaml_content,
+                source=str(path.resolve()),
+                overwrite=overwrite,
+            )
+    except ValueError as exc:
+        click.echo(click.style(f"Ошибка: {exc}", fg="red"), err=True)
+        sys.exit(2)
+
+    click.echo(
+        click.style("Профиль установлен:", fg="green", bold=True)
+        + f" {rec.profile_id}  ({rec.name}, v{rec.version})"
+    )
+    click.echo(f"  Источник:    {rec.source}")
+    click.echo(f"  Установлен:  {rec.installed_at}")
+    click.echo(
+        "\nИспользовать: gostforge check FILE.docx --profile "
+        + rec.profile_id
+    )
+
+
+@profiles.command("uninstall")
+@click.argument("profile_id")
+def profiles_uninstall(profile_id: str) -> None:
+    """Удалить custom-профиль из локального реестра.
+
+    Builtin-профили (gost-7.32-2017 и т. п.) удалить нельзя — они
+    лежат в каталоге пакета, не в БД. Команда даст ошибку, если
+    профиль не установлен локально.
+    """
+    try:
+        from gostforge.db import get_connection, uninstall_profile
+    except ImportError as exc:  # pragma: no cover
+        click.echo(f"Ошибка импорта модуля БД: {exc}", err=True)
+        sys.exit(2)
+
+    with get_connection() as conn:
+        removed = uninstall_profile(conn, profile_id)
+    if removed:
+        click.echo(
+            click.style(f"Профиль удалён: {profile_id}", fg="green", bold=True)
+        )
+    else:
+        click.echo(
+            click.style(
+                f"Профиль {profile_id!r} не установлен в локальный реестр.",
+                fg="yellow",
+            ),
+            err=True,
+        )
+        sys.exit(1)
+
+
+@profiles.command("validate")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+def profiles_validate(path: Path) -> None:
+    """Проверить YAML-файл профиля на корректность.
+
+    Выводит сводку: число включённых проверок, сколько из них
+    реализовано в текущем gostforge, нет ли ссылок на отсутствующие коды.
+    """
+    import yaml
+    from gostforge.profile.schema import Profile
+
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as e:
+        click.echo(f"Ошибка парсинга YAML: {e}", err=True)
+        sys.exit(2)
+
+    try:
+        prof = Profile(**data)
+    except Exception as e:  # noqa: BLE001 — отображаем pydantic-ошибку как есть
+        click.echo(f"Профиль не прошёл валидацию схемы:", err=True)
+        click.echo(str(e), err=True)
+        sys.exit(2)
+
+    enabled_codes = {c for c, cfg in prof.checks.items() if cfg.enabled}
+    available = set(registered_checks())
+    runnable = enabled_codes & available
+    skipped = enabled_codes - available
+
+    click.echo(click.style(f"Профиль: {prof.id} v{prof.version}", bold=True))
+    click.echo(f"  Включено проверок: {len(enabled_codes)}")
+    click.echo(f"  Будет запущено: {len(runnable)}")
+    if skipped:
+        click.echo(
+            click.style(f"  Не реализованы ({len(skipped)}): ", fg="yellow")
+            + ", ".join(sorted(skipped))
+        )
+    if prof.extends:
+        click.echo(f"  Наследует от: {prof.extends}")
+    click.echo(click.style("[OK]", fg="green", bold=True) + " Файл валиден")
+
+
+@profiles.command("diff")
+@click.argument("profile_a")
+@click.argument("profile_b")
+def profiles_diff(profile_a: str, profile_b: str) -> None:
+    """Сравнить два профиля по списку проверок и стилям.
+
+    Выводит:
+    - какие проверки включены только в A, только в B;
+    - различия в параметрах общих проверок;
+    - различия в основных полях styles.page/body.
+    """
+    try:
+        a = load_profile(profile_a)
+        b = load_profile(profile_b)
+    except FileNotFoundError as e:
+        click.echo(f"Ошибка: {e}", err=True)
+        sys.exit(2)
+
+    a_enabled = {c for c, cfg in a.checks.items() if cfg.enabled}
+    b_enabled = {c for c, cfg in b.checks.items() if cfg.enabled}
+
+    only_a = sorted(a_enabled - b_enabled)
+    only_b = sorted(b_enabled - a_enabled)
+    common = sorted(a_enabled & b_enabled)
+
+    click.echo(click.style(f"=== {profile_a} vs {profile_b} ===", bold=True))
+
+    if only_a:
+        click.echo(click.style(f"\nТолько в {profile_a} ({len(only_a)}):", fg="cyan"))
+        click.echo("  " + ", ".join(only_a))
+    if only_b:
+        click.echo(click.style(f"\nТолько в {profile_b} ({len(only_b)}):", fg="cyan"))
+        click.echo("  " + ", ".join(only_b))
+
+    # Отличия в параметрах общих проверок
+    param_diffs = []
+    for code in common:
+        pa = a.checks[code].params
+        pb = b.checks[code].params
+        if pa != pb:
+            param_diffs.append((code, pa, pb))
+    if param_diffs:
+        click.echo(click.style(f"\nРазные параметры ({len(param_diffs)}):", fg="yellow"))
+        for code, pa, pb in param_diffs:
+            click.echo(f"  {code}:")
+            click.echo(f"    {profile_a}: {pa}")
+            click.echo(f"    {profile_b}: {pb}")
+
+    # Стили
+    style_diffs = []
+    if a.styles.page.margins_mm != b.styles.page.margins_mm:
+        style_diffs.append(("margins_mm", a.styles.page.margins_mm, b.styles.page.margins_mm))
+    for attr in ("font", "size_pt", "line_spacing", "first_line_indent_cm", "alignment"):
+        va = getattr(a.styles.body, attr)
+        vb = getattr(b.styles.body, attr)
+        if va != vb:
+            style_diffs.append((f"body.{attr}", va, vb))
+    if style_diffs:
+        click.echo(click.style(f"\nРазные стили ({len(style_diffs)}):", fg="yellow"))
+        for name, va, vb in style_diffs:
+            click.echo(f"  {name}: {profile_a}={va}, {profile_b}={vb}")
+
+    if not only_a and not only_b and not param_diffs and not style_diffs:
+        click.echo(click.style("\n[OK] Профили идентичны", fg="green"))
+
+
 @main.command("checks")
 def checks_list() -> None:
     """Показать список зарегистрированных проверок."""
     for code in registered_checks():
         click.echo(code)
+
+
+@main.group()
+def plugins() -> None:
+    """Управление пользовательскими плагинами проверок."""
+
+
+@plugins.command("list")
+def plugins_list() -> None:
+    """Показать загруженные плагины и предоставленные ими проверки."""
+    from gostforge.plugins import (
+        discover_plugin_files,
+        load_plugins,
+        plugins_dir,
+    )
+    from gostforge.validator.engine import _registry
+
+    directory = plugins_dir()
+    click.echo(f"Директория плагинов: {directory}")
+    if not directory.exists():
+        click.echo("  (не существует — создайте директорию для добавления плагинов)")
+        return
+
+    # Снимем снапшот текущего реестра, чтобы понять, какие проверки
+    # добавились именно сейчас при загрузке плагинов.
+    before = set(_registry)
+    files = discover_plugin_files()
+    load_plugins()
+    after = set(_registry)
+    added_codes = sorted(after - before)
+
+    if not files:
+        click.echo("  (плагинов не найдено)")
+        return
+
+    click.echo(f"\nНайдено файлов: {len(files)}")
+    for f in files:
+        click.echo(f"  - {f.name}")
+
+    if added_codes:
+        click.echo(f"\nДобавлены проверки: {', '.join(added_codes)}")
+
+
+@plugins.command("dir")
+def plugins_dir_cmd() -> None:
+    """Показать путь к директории плагинов (или создать её)."""
+    from gostforge.plugins import plugins_dir
+
+    d = plugins_dir()
+    if not d.exists():
+        d.mkdir(parents=True, exist_ok=True)
+        click.echo(f"Создана: {d}")
+    else:
+        click.echo(f"{d}")
 
 
 @main.command()
@@ -378,8 +665,6 @@ def ui(host: str, port: int) -> None:
         )
         sys.exit(2)
 
-    import subprocess
-
     # Импортируем модуль приложения, чтобы получить путь до его файла.
     # Импорт обёрнут в try/except: в нём, помимо streamlit, могут быть
     # ошибки конфигурации, которые имеет смысл показать.
@@ -396,6 +681,457 @@ def ui(host: str, port: int) -> None:
         str(port),
     ]
     subprocess.run(cmd, check=False)
+
+
+@main.command()
+@click.option("--host", default="127.0.0.1", help="Адрес для bind (по умолчанию 127.0.0.1).")
+@click.option("--port", default=8000, help="Порт (по умолчанию 8000).")
+@click.option(
+    "--reload", is_flag=True, help="Включить hot-reload для разработки."
+)
+def serve(host: str, port: int, reload: bool) -> None:
+    """Запустить REST API gostforge на FastAPI/uvicorn.
+
+    Опциональная зависимость: pip install -e ".[api]". Полный список
+    endpoints — docs/phase-3-api-spec.md. По умолчанию слушает только
+    127.0.0.1 (запуск из публичной сети — за reverse-proxy с auth).
+    """
+    try:
+        import uvicorn  # noqa: F401
+    except ImportError:
+        click.echo(
+            "FastAPI/uvicorn не установлены. Установите gostforge[api]:\n"
+            '  pip install -e ".[api]"',
+            err=True,
+        )
+        sys.exit(2)
+
+    import uvicorn
+
+    uvicorn.run(
+        "gostforge.api.app:app",
+        host=host,
+        port=port,
+        reload=reload,
+    )
+
+
+@main.command()
+@click.option("--limit", "-n", default=20, help="Сколько последних записей показать.")
+@click.option(
+    "--filename", "-f", default=None, help="Фильтр по имени файла (точное совпадение)."
+)
+@click.option(
+    "--id",
+    "submission_id",
+    type=int,
+    default=None,
+    help="Показать детали одного submission по id.",
+)
+def history(limit: int, filename: str | None, submission_id: int | None) -> None:
+    """История проверок из локальной БД.
+
+    Без параметров показывает последние ``--limit`` записей с
+    summary по severity. С ``--id`` показывает детали конкретного
+    submission со списком всех найденных нарушений.
+
+    БД лежит в ``~/.gostforge/gostforge.db`` (переопределяется env
+    ``GOSTFORGE_DB_PATH``) и автоматически создаётся при первом
+    ``gostforge check``.
+    """
+    try:
+        from gostforge.db import get_connection, get_submission, list_submissions
+    except ImportError as exc:  # pragma: no cover — db в stdlib
+        click.echo(f"Не удалось импортировать модуль БД: {exc}", err=True)
+        sys.exit(2)
+
+    with get_connection() as conn:
+        if submission_id is not None:
+            sub = get_submission(conn, submission_id)
+            if sub is None:
+                click.echo(f"Submission #{submission_id} не найден.", err=True)
+                sys.exit(1)
+            _print_submission_details(sub)
+            return
+
+        items = list_submissions(conn, limit=limit, filename=filename)
+        if not items:
+            click.echo("История пуста. Запустите 'gostforge check ...' для первой записи.")
+            return
+
+        click.echo(click.style(f"Последние {len(items)} проверок:\n", bold=True))
+        for s in items:
+            severity_str = (
+                f"{click.style(str(s.error_count), fg='red')}e/"
+                f"{click.style(str(s.warning_count), fg='yellow')}w/"
+                f"{click.style(str(s.info_count), fg='cyan')}i"
+            )
+            click.echo(
+                f"  #{s.id:>4}  {s.created_at}  {severity_str}  "
+                f"[{s.profile_id}]  {s.filename}"
+            )
+        click.echo(
+            "\nДля деталей: gostforge history --id <N>"
+        )
+
+
+@main.group()
+def comment() -> None:
+    """Комментарии к submission-ам (совместная работа)."""
+
+
+def _default_author() -> str:
+    """Имя автора по умолчанию — из env или getpass.getuser()."""
+    env = os.environ.get("GOSTFORGE_DEFAULT_AUTHOR", "").strip()
+    if env:
+        return env
+    try:
+        import getpass
+
+        return getpass.getuser()
+    except Exception:  # pragma: no cover - graceful
+        return ""
+
+
+@comment.command("add")
+@click.argument("submission_id", type=int)
+@click.argument("body")
+@click.option(
+    "--author",
+    default=None,
+    help="Имя автора. Если не задано — берётся из env GOSTFORGE_DEFAULT_AUTHOR "
+    "или getpass.getuser().",
+)
+@click.option(
+    "--role",
+    type=click.Choice(["student", "supervisor", "anonymous"]),
+    default="anonymous",
+    help="Роль автора (student/supervisor/anonymous).",
+)
+def comment_add(
+    submission_id: int, body: str, author: str | None, role: str
+) -> None:
+    """Добавить комментарий к submission.
+
+    Пример:
+
+        gostforge comment add 42 "Переделай введение" --role supervisor
+
+    Если submission_id не существует или body пустой — выходим с
+    кодом 2 + сообщением.
+    """
+    from gostforge.db import add_comment, get_connection
+
+    final_author = author if author is not None else _default_author()
+    try:
+        with get_connection() as conn:
+            c = add_comment(
+                conn,
+                submission_id=submission_id,
+                body=body,
+                author=final_author,
+                role=role,
+            )
+    except ValueError as exc:
+        click.echo(click.style(f"Ошибка: {exc}", fg="red"), err=True)
+        sys.exit(2)
+
+    click.echo(
+        click.style("Комментарий добавлен:", fg="green", bold=True)
+        + f" #{c.id} к submission #{c.submission_id}"
+    )
+    click.echo(f"  Автор: {c.author or '—'}  [{c.role}]")
+    click.echo(f"  Время: {c.created_at}")
+
+
+@comment.command("list")
+@click.argument("submission_id", type=int)
+@click.option(
+    "--unresolved",
+    is_flag=True,
+    help="Показать только незакрытые комментарии.",
+)
+def comment_list(submission_id: int, unresolved: bool) -> None:
+    """Показать все комментарии к submission.
+
+    Закрытые помечены ``✓``, открытые — ``●``.
+    """
+    from gostforge.db import get_connection, list_comments
+
+    with get_connection() as conn:
+        items = list_comments(
+            conn,
+            submission_id=submission_id,
+            include_resolved=not unresolved,
+        )
+    if not items:
+        click.echo("Комментариев нет.")
+        return
+    for c in items:
+        role_color = {
+            "supervisor": "magenta",
+            "student": "blue",
+            "anonymous": "bright_black",
+        }.get(c.role, "white")
+        role_label = click.style(f"[{c.role}]", fg=role_color)
+        status = (
+            click.style("✓", fg="green") if c.resolved else click.style("●", fg="yellow")
+        )
+        author = c.author or "—"
+        click.echo(
+            f"#{c.id} {status} {role_label} {author} "
+            + click.style(c.created_at, fg="bright_black")
+        )
+        for line in c.body.splitlines():
+            click.echo(f"    {line}")
+
+
+@comment.command("resolve")
+@click.argument("comment_id", type=int)
+@click.option(
+    "--reopen",
+    is_flag=True,
+    help="Снять отметку resolved (вернуть в открытые).",
+)
+def comment_resolve(comment_id: int, reopen: bool) -> None:
+    """Пометить комментарий как resolved (или снять отметку через --reopen)."""
+    from gostforge.db import get_connection, resolve_comment
+
+    with get_connection() as conn:
+        ok = resolve_comment(conn, comment_id, resolved=not reopen)
+    if not ok:
+        click.echo(
+            click.style(f"Комментарий #{comment_id} не найден.", fg="yellow"),
+            err=True,
+        )
+        sys.exit(1)
+    action = "переоткрыт" if reopen else "закрыт"
+    click.echo(
+        click.style(f"Комментарий #{comment_id} {action}.", fg="green", bold=True)
+    )
+
+
+@comment.command("delete")
+@click.argument("comment_id", type=int)
+def comment_delete(comment_id: int) -> None:
+    """Удалить комментарий."""
+    from gostforge.db import delete_comment, get_connection
+
+    with get_connection() as conn:
+        ok = delete_comment(conn, comment_id)
+    if not ok:
+        click.echo(
+            click.style(f"Комментарий #{comment_id} не найден.", fg="yellow"),
+            err=True,
+        )
+        sys.exit(1)
+    click.echo(
+        click.style(f"Комментарий #{comment_id} удалён.", fg="green", bold=True)
+    )
+
+
+def _print_submission_details(sub: object) -> None:
+    """Распечатать одну запись со списком violations и комментариев."""
+    click.echo(click.style(f"Submission #{sub.id}", bold=True))  # type: ignore[attr-defined]
+    click.echo(f"  Файл:      {sub.filename}")  # type: ignore[attr-defined]
+    click.echo(f"  Профиль:   {sub.profile_id}")  # type: ignore[attr-defined]
+    click.echo(f"  Время:     {sub.created_at}")  # type: ignore[attr-defined]
+    click.echo(
+        f"  Сводка:    "
+        f"{click.style(str(sub.error_count), fg='red')} error / "  # type: ignore[attr-defined]
+        f"{click.style(str(sub.warning_count), fg='yellow')} warning / "  # type: ignore[attr-defined]
+        f"{click.style(str(sub.info_count), fg='cyan')} info"  # type: ignore[attr-defined]
+    )
+    if not sub.violations:  # type: ignore[attr-defined]
+        click.echo("\n  Нарушений нет.")
+    else:
+        click.echo("\n  Нарушения:")
+        for v in sub.violations:  # type: ignore[attr-defined]
+            color = {"error": "red", "warning": "yellow", "info": "cyan"}.get(
+                v.severity, "white"
+            )
+            click.echo(
+                f"    {click.style(v.severity.upper(), fg=color)}  "
+                f"{v.code:>6}  {v.message}"
+            )
+            if v.location:
+                click.echo(
+                    click.style(f"            {v.location}", fg="bright_black")
+                )
+            if v.suggestion:
+                click.echo(click.style(f"          → {v.suggestion}", fg="green"))
+
+    _print_submission_comments(sub.id)  # type: ignore[attr-defined]
+
+
+def _print_submission_comments(submission_id: int) -> None:
+    """Распечатать ленту комментариев к submission (если есть)."""
+    try:
+        from gostforge.db import get_connection, list_comments
+    except ImportError:
+        return
+    try:
+        with get_connection() as conn:
+            comments = list_comments(conn, submission_id=submission_id)
+    except Exception:
+        return
+    if not comments:
+        return
+    click.echo("\n  " + click.style("Комментарии:", bold=True))
+    for c in comments:
+        role_color = {
+            "supervisor": "magenta",
+            "student": "blue",
+            "anonymous": "bright_black",
+        }.get(c.role, "white")
+        role_label = click.style(f"[{c.role}]", fg=role_color)
+        status = (
+            click.style(" ✓", fg="green") if c.resolved else click.style(" ●", fg="yellow")
+        )
+        author = c.author or "—"
+        click.echo(
+            f"    #{c.id}{status}  {role_label}  {author}  "
+            + click.style(c.created_at, fg="bright_black")
+        )
+        for line in c.body.splitlines():
+            click.echo(f"        {line}")
+
+
+def _normalize_message(text: str) -> str:
+    """Нормализовать текст сообщения для устойчивого сравнения нарушений.
+
+    Сжимает пробелы, обрезает пробелы по краям и приводит к нижнему регистру.
+    Это уменьшает ложные срабатывания «нарушение пропало / появилось» из-за
+    малозначимых отличий в форматировании сообщений.
+    """
+    return " ".join(text.split()).strip().lower()
+
+
+def _violation_fingerprint(v: Violation) -> tuple[str, str, str]:
+    """Отпечаток нарушения для сравнения двух документов.
+
+    Тройка `(check_code, location, normalize(message))` — компромисс между
+    стабильностью (одна и та же ошибка в двух прогонах даёт один и тот же
+    отпечаток) и уникальностью (две разные ошибки в одном месте отличаются
+    нормализованным сообщением).
+    """
+    return (v.check_code, v.location, _normalize_message(v.message))
+
+
+def _print_violations_brief(violations: list[Violation], indent: str = "  ") -> None:
+    """Кратко вывести список violations с цветовой пометкой по серьёзности."""
+    for v in violations:
+        _, style, short = _SEVERITY_STYLE.get(v.severity, ("", {}, v.severity.upper()))
+        tag = click.style(f"[{short}]", **style) if style else f"[{short}]"
+        code = click.style(v.check_code, bold=True)
+        click.echo(f"{indent}{tag} {code}  {v.message}")
+        if v.location:
+            click.echo(indent + "       " + click.style(v.location, fg="bright_black"))
+
+
+@main.command()
+@click.argument("file_a", type=click.Path(exists=True, path_type=Path))
+@click.argument("file_b", type=click.Path(exists=True, path_type=Path))
+@click.option("--profile", "-p", default="gost-7.32-2017", help="ID профиля для проверки")
+@click.option("--quiet", "-q", is_flag=True, help="Не показывать детали по нарушениям")
+def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
+    """Сравнить два .docx по списку нарушений.
+
+    Выводит:
+    - какие нарушения появились в B (не было в A)
+    - какие нарушения исчезли в A (нет в B)
+    - сводку: было N нарушений → стало M
+
+    Полезно для CI (стало ли нарушений меньше после правки), проверки
+    эффекта `gostforge fix`, анализа версий «черновик → финал».
+
+    Exit code: 0 если число error-нарушений в B не больше, чем в A;
+    1 если в B появились новые error-нарушения (регрессия).
+    """
+    try:
+        prof = load_profile(profile)
+    except FileNotFoundError as e:
+        click.echo(f"Ошибка: {e}", err=True)
+        sys.exit(2)
+
+    document_a = parse_docx(file_a)
+    document_b = parse_docx(file_b)
+    violations_a = validate(document_a, prof)
+    violations_b = validate(document_b, prof)
+
+    fingerprints_a = {_violation_fingerprint(v): v for v in violations_a}
+    fingerprints_b = {_violation_fingerprint(v): v for v in violations_b}
+
+    fixed_keys = set(fingerprints_a) - set(fingerprints_b)
+    new_keys = set(fingerprints_b) - set(fingerprints_a)
+
+    fixed = [fingerprints_a[k] for k in fixed_keys]
+    introduced = [fingerprints_b[k] for k in new_keys]
+
+    errors_a = sum(1 for v in violations_a if v.severity == "error")
+    errors_b = sum(1 for v in violations_b if v.severity == "error")
+
+    click.echo(
+        click.style("Профиль: ", bold=True) + profile + f" (v{prof.version})"
+    )
+    click.echo(
+        click.style("A: ", bold=True)
+        + f"{file_a.name} — {len(violations_a)} нарушений ({errors_a} ошибок)"
+    )
+    click.echo(
+        click.style("B: ", bold=True)
+        + f"{file_b.name} — {len(violations_b)} нарушений ({errors_b} ошибок)"
+    )
+
+    if not fixed and not introduced:
+        click.echo(click.style("\n[OK] Изменений в нарушениях нет.", fg="green", bold=True))
+        sys.exit(0)
+
+    if fixed:
+        click.echo(
+            "\n"
+            + click.style(f"Исчезло нарушений: {len(fixed)}", fg="green", bold=True)
+        )
+        if not quiet:
+            _print_violations_brief(fixed)
+
+    if introduced:
+        click.echo(
+            "\n"
+            + click.style(f"Появилось нарушений: {len(introduced)}", fg="red", bold=True)
+        )
+        if not quiet:
+            _print_violations_brief(introduced)
+
+    delta = errors_b - errors_a
+    if delta > 0:
+        click.echo(
+            "\n"
+            + click.style(
+                f"Регрессия: число error-нарушений выросло ({errors_a} → {errors_b}, +{delta}).",
+                fg="red",
+                bold=True,
+            )
+        )
+        sys.exit(1)
+    elif delta < 0:
+        click.echo(
+            "\n"
+            + click.style(
+                f"Прогресс: число error-нарушений уменьшилось ({errors_a} → {errors_b}, {delta}).",
+                fg="green",
+                bold=True,
+            )
+        )
+    else:
+        click.echo(
+            "\n"
+            + click.style(
+                f"Число error-нарушений не изменилось ({errors_a}).",
+                fg="yellow",
+            )
+        )
+    sys.exit(0)
 
 
 @main.command()
@@ -443,12 +1179,27 @@ def stats(path: Path) -> None:
     help="Куда сохранить .docx с inline-пометками.",
 )
 @click.option("--profile", "-p", default="gost-7.32-2017", help="ID профиля.")
-def annotate(path: Path, output: Path, profile: str) -> None:
-    """Создать .docx с inline-пометками о нарушениях.
+@click.option(
+    "--style",
+    type=click.Choice(["inline", "comments"]),
+    default="comments",
+    show_default=True,
+    help=(
+        "Стиль аннотации: настоящие комментарии Word (comments) или "
+        "inline-маркеры в тексте (inline)."
+    ),
+)
+def annotate(path: Path, output: Path, profile: str, style: str) -> None:
+    """Создать .docx с пометками о нарушениях.
 
-    Для каждого Violation в начало проблемного параграфа вставляется
-    маркер вида ``[F.01: <текст ошибки>]`` курсивом, красным цветом.
-    Пометки уровня документа уходят в первый параграф.
+    По умолчанию (``--style comments``) вставляются настоящие OOXML-комментарии
+    Word: в документе создаётся часть ``word/comments.xml`` и в проблемных
+    параграфах ставятся ``<w:commentRangeStart/End>`` + reference-run.
+    Word и LibreOffice отображают это как боковые выноски.
+
+    При ``--style inline`` используется старый режим: в начало проблемного
+    параграфа вставляется маркер вида ``[F.01: <текст ошибки>]`` курсивом,
+    красным цветом. Пометки уровня документа уходят в первый параграф.
     """
     from gostforge.annotator import annotate_docx
     try:
@@ -456,9 +1207,52 @@ def annotate(path: Path, output: Path, profile: str) -> None:
     except FileNotFoundError as e:
         click.echo(f"Ошибка: {e}", err=True)
         sys.exit(2)
-    n = annotate_docx(path, output, prof)
+    n = annotate_docx(path, output, prof, style=style)  # type: ignore[arg-type]
     click.echo(f"Создано пометок: {n}")
     click.echo(f"Аннотированный документ сохранён: {output}")
+
+
+@main.command()
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить .pdf.",
+)
+@click.option(
+    "--timeout",
+    type=float,
+    default=60.0,
+    help="Таймаут конвертации в секундах.",
+)
+def pdf(path: Path, output: Path, timeout: float) -> None:
+    """Конвертировать .docx → .pdf через LibreOffice headless.
+
+    Требует установленного LibreOffice. Полезно для генерации
+    PDF-версии работы после применения автофиксов.
+    """
+    from gostforge.pdf_exporter import LibreOfficeNotFoundError, convert_to_pdf
+
+    try:
+        result = convert_to_pdf(path, output, timeout=timeout)
+    except LibreOfficeNotFoundError as e:
+        click.echo(f"Ошибка: {e}", err=True)
+        sys.exit(3)
+    except subprocess.TimeoutExpired:
+        click.echo(
+            f"Конвертация прервана по таймауту ({timeout}s)", err=True
+        )
+        sys.exit(4)
+    except subprocess.CalledProcessError as e:
+        click.echo(
+            f"LibreOffice вернул ошибку (код {e.returncode}):", err=True
+        )
+        stderr = e.stderr or b""
+        click.echo(stderr.decode("utf-8", errors="replace"), err=True)
+        sys.exit(5)
+    click.echo(f"PDF сохранён: {result}")
 
 
 @main.command()

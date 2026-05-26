@@ -415,3 +415,172 @@ def test_b08_reference_in_nested_section() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "B.08"]
     assert found == []
+
+
+# --- B.02 (заглушка) -----------------------------------------------------
+
+
+def test_b02_registered() -> None:
+    """Заглушка B.02 зарегистрирована в реестре."""
+    assert "B.02" in registered_checks()
+
+
+# --- B.04 (заглушка) -----------------------------------------------------
+
+
+def test_b04_registered() -> None:
+    """Заглушка B.04 зарегистрирована в реестре."""
+    assert "B.04" in registered_checks()
+
+
+# --- B.05 (заглушка) -----------------------------------------------------
+
+
+def test_b05_registered() -> None:
+    """Заглушка B.05 зарегистрирована в реестре."""
+    assert "B.05" in registered_checks()
+
+
+# --- B.06 (шрифт 12pt в ячейках) ----------------------------------------
+
+
+def test_b06_registered() -> None:
+    """Проверка B.06 зарегистрирована в реестре."""
+    assert "B.06" in registered_checks()
+
+
+def test_b06_correct_font_size_no_violation() -> None:
+    """Все ячейки 12pt — нарушения нет."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H", size_pt=12.0)]],
+        rows=[[[TextRun(text="C", size_pt=12.0)]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.06"]
+    assert found == []
+
+
+def test_b06_wrong_font_size_violation() -> None:
+    """Ячейка 14pt вместо 12pt — нарушение."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H", size_pt=12.0)]],
+        rows=[[[TextRun(text="C", size_pt=14.0)]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.06"]
+    assert len(found) == 1
+    assert found[0].details["table_id"] == "t-1"
+    assert found[0].details["found_pt"] == "14.0"
+
+
+def test_b06_none_size_not_checked() -> None:
+    """TextRun с size_pt=None — наследуется от стиля, не проверяется."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H")]],
+        rows=[[[TextRun(text="C")]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.06"]
+    assert found == []
+
+
+def test_b06_param_override() -> None:
+    """Параметр cell_font_size_pt=10 принимает 10pt и отвергает 12pt."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H", size_pt=12.0)]],
+        rows=[[[TextRun(text="C", size_pt=12.0)]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["B.06"].params["cell_font_size_pt"] = 10
+    found = [v for v in validate(doc, profile) if v.check_code == "B.06"]
+    assert len(found) == 1
+    assert found[0].details["found_pt"] == "12.0"
+
+
+# --- B.07 (пустые ячейки заполнены прочерком) ---------------------------
+
+
+def test_b07_registered() -> None:
+    """Проверка B.07 зарегистрирована в реестре."""
+    assert "B.07" in registered_checks()
+
+
+def test_b07_no_empty_cells_no_violation() -> None:
+    """Все ячейки заполнены — нарушения нет."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H1")], [TextRun(text="H2")]],
+        rows=[
+            [[TextRun(text="1")], [TextRun(text="2")]],
+            [[TextRun(text="3")], [TextRun(text="—")]],
+        ],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.07"]
+    assert found == []
+
+
+def test_b07_empty_cell_violation() -> None:
+    """Пустая ячейка в данных — нарушение."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H1")], [TextRun(text="H2")]],
+        rows=[
+            [[TextRun(text="1")], [TextRun(text="2")]],
+            [[TextRun(text="3")], [TextRun(text="  ")]],  # пустая
+        ],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.07"]
+    assert len(found) == 1
+    assert found[0].details["row"] == "2"
+    assert found[0].details["col"] == "1"
+
+
+def test_b07_allow_first_column_empty() -> None:
+    """allow_first_column_empty=True пропускает пустые ячейки col 0."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="")], [TextRun(text="H2")]],  # col 0 пуст
+        rows=[
+            [[TextRun(text="")], [TextRun(text="2")]],  # col 0 пуст
+        ],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    profile.checks["B.07"].params["allow_first_column_empty"] = True
+    found = [v for v in validate(doc, profile) if v.check_code == "B.07"]
+    assert found == []
+
+
+def test_b07_empty_header_cell_violation() -> None:
+    """Пустая ячейка в шапке (row 0) — тоже нарушение."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — A")],
+        headers=[[TextRun(text="H1")], []],  # col 1 шапки пуст
+        rows=[[[TextRun(text="1")], [TextRun(text="2")]]],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.07"]
+    assert len(found) == 1
+    assert found[0].details["row"] == "0"
+    assert found[0].details["col"] == "1"

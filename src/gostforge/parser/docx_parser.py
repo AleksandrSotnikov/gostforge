@@ -29,13 +29,16 @@ from lxml import etree  # type: ignore[import-untyped]
 from gostforge.model import (
     BibliographyEntry,
     Block,
+    Citation,
     ContentTemplate,
+    CrossRef,
     Document,
     DocumentMetadata,
     Figure,
     Formula,
     HeaderConfig,
     InlineElement,
+    InlineFormula,
     ListBlock,
     LogicalSection,
     PageGeometry,
@@ -57,7 +60,11 @@ if TYPE_CHECKING:
 # Пространство имён OOXML wordprocessingml
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
-NSMAP = {"w": W_NS, "m": M_NS}
+# Пространство имён DrawingML и Office Relationships — нужны, чтобы достать
+# rId из <a:blip r:embed="rIdN"/> внутри <w:drawing>.
+A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+NSMAP = {"w": W_NS, "m": M_NS, "a": A_NS, "r": R_NS}
 
 # Шаблон номера формулы в скобках в конце текста параграфа: «(3)» или «(3.1)».
 _FORMULA_NUMBER_RE = re.compile(r"\((\d+(?:\.\d+)?)\)\s*$")
@@ -99,6 +106,79 @@ _BIB_LAW_RE = re.compile(
     r"\bзакон\b|\bфедер\.\s*закон\b|\bпостановление\b", re.IGNORECASE
 )
 
+# Регэкспы для извлечения структурных полей библиографической записи
+# по ГОСТ Р 7.0.100-2018. Поля заполняются опционально — отсутствие
+# совпадения не считается ошибкой парсера (валидаторы R.* проверят сами).
+_BIB_AUTHOR_RU_RE = re.compile(r"^[А-ЯЁ][а-яё]+\s[А-ЯЁ]\.\s?[А-ЯЁ]\.")
+_BIB_AUTHOR_EN_RE = re.compile(r"^[A-Z][a-z]+,?\s[A-Z]\.\s?[A-Z]\.")
+_BIB_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
+_BIB_URL_FULL_RE = re.compile(r"https?://\S+")
+_BIB_DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+")
+_BIB_ACCESS_DATE_RE = re.compile(
+    r"дата\s+обращения:\s*(\d{1,2}\.\d{1,2}\.\d{4})", re.IGNORECASE
+)
+# Эвристика места издания: «— Москва :», «— Санкт-Петербург :»,
+# «— Нижний Новгород :». Принимаем составные через дефис или пробел.
+_BIB_PLACE_RE = re.compile(r"—\s*([А-ЯЁ][а-яё]+(?:[ \-][А-ЯЁ][а-яё]+)?)\s*:")
+_BIB_CYRILLIC_START_RE = re.compile(r"^[А-ЯЁа-яё]")
+_BIB_LATIN_START_RE = re.compile(r"^[A-Za-z]")
+
+
+def _parse_bibliography_fields(text: str) -> dict[str, str]:
+    """Извлечь структурные поля из библиографической записи.
+
+    Возвращает словарь только с найденными полями (опциональные —
+    отсутствие паттерна означает, что поле просто не добавляется).
+
+    Извлекаемые поля по ГОСТ Р 7.0.100-2018:
+      - author: «Фамилия И. О.» в начале (русский или латинский вариант);
+      - year: четырёхзначный год (1900-2099);
+      - url: первая встреченная http(s)-ссылка;
+      - doi: идентификатор DOI вида 10.NNNN/...;
+      - access_date: «дата обращения: ДД.ММ.ГГГГ» (в любом регистре);
+      - place: место издания между «— » и «:» (для книг);
+      - language: «ru», если запись начинается с кириллицы; «en» — если с латиницы.
+    """
+    fields: dict[str, str] = {}
+
+    author_ru = _BIB_AUTHOR_RU_RE.match(text)
+    if author_ru is not None:
+        fields["author"] = author_ru.group(0).strip()
+    else:
+        author_en = _BIB_AUTHOR_EN_RE.match(text)
+        if author_en is not None:
+            fields["author"] = author_en.group(0).strip()
+
+    year_match = _BIB_YEAR_RE.search(text)
+    if year_match is not None:
+        fields["year"] = year_match.group(0)
+
+    url_match = _BIB_URL_FULL_RE.search(text)
+    if url_match is not None:
+        # Отрезаем закрывающие скобки / точку в конце URL — они обычно
+        # принадлежат окружающему тексту, а не самому адресу.
+        url = url_match.group(0).rstrip(").,;")
+        fields["url"] = url
+
+    doi_match = _BIB_DOI_RE.search(text)
+    if doi_match is not None:
+        fields["doi"] = doi_match.group(0).rstrip(").,;")
+
+    access_match = _BIB_ACCESS_DATE_RE.search(text)
+    if access_match is not None:
+        fields["access_date"] = access_match.group(1)
+
+    place_match = _BIB_PLACE_RE.search(text)
+    if place_match is not None:
+        fields["place"] = place_match.group(1).strip()
+
+    if _BIB_CYRILLIC_START_RE.match(text):
+        fields["language"] = "ru"
+    elif _BIB_LATIN_START_RE.match(text):
+        fields["language"] = "en"
+
+    return fields
+
 
 def parse_docx(path: str | Path) -> Document:
     """Прочитать .docx и вернуть модель документа.
@@ -117,6 +197,11 @@ def parse_docx(path: str | Path) -> Document:
     _populate_content(docx_doc, page_section)
     bibliography = _extract_bibliography([page_section])
     auto_hyphenation = _extract_auto_hyphenation(docx_doc)
+    _populate_image_dpi(docx_doc, page_section)
+    # Citation post-processing должен выполняться ПОСЛЕ заполнения
+    # bibliography, потому что эвристика «[N]» требует знать допустимый
+    # диапазон N (валидный 1-based индекс в Document.bibliography).
+    _annotate_citations([page_section], bibliography)
 
     return Document(
         metadata=metadata,
@@ -126,6 +211,46 @@ def parse_docx(path: str | Path) -> Document:
     )
 
 
+def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> None:
+    """Для каждой Figure с image_path вида 'embedded:rIdN' извлечь DPI.
+
+    Использует Pillow для определения разрешения media-file. Если Pillow
+    недоступен, оставляет dpi=None. DPI вычисляется как min(x_dpi, y_dpi)
+    из info['dpi'] или из физических размеров EMU vs пикселей (упрощённо —
+    только info['dpi']).
+    """
+    try:
+        from PIL import Image  # type: ignore[import-not-found]
+    except ImportError:
+        return
+
+    def _iter_figures(items: list[LogicalSection | Block]) -> list[Figure]:
+        out: list[Figure] = []
+        for item in items:
+            if isinstance(item, Figure):
+                out.append(item)
+            elif isinstance(item, LogicalSection):
+                out.extend(_iter_figures(item.children))
+        return out
+
+    figures = _iter_figures(page_section.content)
+    for fig in figures:
+        if not fig.image_path.startswith("embedded:"):
+            continue
+        rid = fig.image_path[len("embedded:"):]
+        try:
+            image_part = docx_doc.part.related_parts.get(rid)
+            if image_part is None:
+                continue
+            blob = image_part.blob
+            with Image.open(__import__("io").BytesIO(blob)) as im:
+                dpi_value = im.info.get("dpi")
+                if dpi_value:
+                    fig.dpi = int(min(dpi_value))
+        except Exception:  # noqa: BLE001 — повреждённый media-file не должен валить парсер
+            continue
+
+
 def _extract_auto_hyphenation(docx_doc: DocxDocument) -> bool | None:
     """Прочитать `<w:autoHyphenation/>` из word/settings.xml.
 
@@ -133,11 +258,12 @@ def _extract_auto_hyphenation(docx_doc: DocxDocument) -> bool | None:
     автоматический перенос. Отсутствие = выключен. На Фазе 1
     интерпретируем строго: элемент найден → True, иначе False.
     """
-    try:
-        settings_part = docx_doc.part.package.part_related_by(
-            "http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings"
-        )
-    except Exception:  # noqa: BLE001 — settings.xml не обязательная часть
+    settings_part = None
+    for rel in docx_doc.part.rels.values():
+        if rel.reltype.endswith("/relationships/settings"):
+            settings_part = rel.target_part
+            break
+    if settings_part is None:
         return None
     settings_xml = settings_part.blob
     try:
@@ -579,14 +705,26 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
 
     Приоритет распознавания:
     1. <w:drawing> → Figure (рисунок).
-    2. <m:oMath> или <m:oMathPara> → Formula (формула).
-    3. Иначе — обычный Paragraph.
+    2. <m:oMathPara> → блочная Formula (формула как отдельный блок).
+       Голый <m:oMath> без <m:oMathPara> считается inline-формулой
+       и обрабатывается в _build_paragraph.
+    3. Иначе — обычный Paragraph (возможно с InlineFormula в content).
     """
     drawings = dp._p.findall(f".//{{{W_NS}}}drawing")
     if drawings:
         counters.figure += 1
-        return Figure(id=f"fig-{counters.figure}", image_path="", caption=[])
-    omml_text = _extract_omml_text(dp._p)
+        image_path = _extract_drawing_rid(drawings[0])
+        alignment = _alignment_to_literal(dp.paragraph_format.alignment)
+        return Figure(
+            id=f"fig-{counters.figure}",
+            image_path=image_path,
+            caption=[],
+            alignment=alignment,
+        )
+    # Блочная формула: <m:oMathPara> существует. Тогда весь параграф
+    # становится Formula. Внутри <m:oMathPara> может быть несколько
+    # <m:oMath>; склеиваем их текст.
+    omml_text = _extract_block_omml_text(dp._p)
     if omml_text is not None:
         counters.formula += 1
         return Formula(
@@ -598,22 +736,62 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
     return _build_paragraph(dp, idx=counters.paragraph)
 
 
-def _extract_omml_text(p_elem: Any) -> str | None:
-    """Склейка `<m:t>` элементов из всех `<m:oMath>` в параграфе.
+def _extract_drawing_rid(drawing_elem: Any) -> str:
+    """Извлечь relationship-id изображения из <w:drawing>.
 
-    Это не настоящий LaTeX — Фаза 1 ограничивается видимым математическим
-    текстом (операнды и константы). Если ни одного `<m:oMath>` в параграфе
-    нет, возвращаем None.
+    Внутри <w:drawing> есть <a:blip r:embed="rIdN"/> (или r:link для
+    внешних ссылок). Возвращает идентификатор вида 'embedded:rIdN'.
+    Если не нашли — пустую строку (тогда экспортёр напишет placeholder).
     """
-    omath_elements = p_elem.findall(f".//{{{M_NS}}}oMath")
-    if not omath_elements:
+    for blip in drawing_elem.iter(f"{{{A_NS}}}blip"):
+        embed = blip.get(f"{{{R_NS}}}embed")
+        if embed:
+            return f"embedded:{embed}"
+        link = blip.get(f"{{{R_NS}}}link")
+        if link:
+            return f"linked:{link}"
+    return ""
+
+
+def _extract_block_omml_text(p_elem: Any) -> str | None:
+    """Склейка `<m:t>` из `<m:oMath>`, лежащих внутри `<m:oMathPara>`.
+
+    На Фазе 2.5 различаем блочные и inline-формулы:
+      - `<m:oMath>` внутри `<m:oMathPara>` → блочная формула, весь
+        параграф конвертируется в Formula.
+      - `<m:oMath>` напрямую как ребёнок `<w:p>` (без `<m:oMathPara>`) →
+        inline-формула, обрабатывается в _build_paragraph.
+
+    Возвращает None, если блочной формулы в параграфе нет.
+    Это не настоящий LaTeX — берём только видимый математический
+    текст (операнды и константы), как и в предыдущих фазах.
+    """
+    omath_para_elements = p_elem.findall(f".//{{{M_NS}}}oMathPara")
+    if not omath_para_elements:
         return None
     parts: list[str] = []
-    for omath in omath_elements:
-        for t in omath.findall(f".//{{{M_NS}}}t"):
+    for omath_para in omath_para_elements:
+        for t in omath_para.findall(f".//{{{M_NS}}}t"):
             if t.text:
                 parts.append(t.text)
     return "".join(parts)
+
+
+def _extract_inline_formula_latex(omath_elem: Any) -> str:
+    """Собрать LaTeX из `<m:oMath>` для inline-формулы.
+
+    Снимает обрамляющие `$...$` (если экспортёр их добавил), оставляет
+    содержимое `<m:t>` как есть.
+    """
+    parts: list[str] = []
+    for t in omath_elem.findall(f".//{{{M_NS}}}t"):
+        if t.text:
+            parts.append(t.text)
+    latex = "".join(parts)
+    # Снять долларовые ограничители, если экспортёр их применил.
+    if len(latex) >= 2 and latex.startswith("$") and latex.endswith("$"):
+        latex = latex[1:-1]
+    return latex
 
 
 def _extract_formula_number(dp: DocxParagraph) -> int | None:
@@ -751,7 +929,21 @@ def _heading_level(p: DocxParagraph) -> int | None:
 
 
 def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
-    """Сконвертировать docx-параграф в модель Paragraph."""
+    """Сконвертировать docx-параграф в модель Paragraph.
+
+    Идём по детям `<w:p>` в порядке появления (document order). Для каждого
+    типа ребёнка строим соответствующий InlineElement:
+      - `<w:r>` → TextRun (с bold/italic/underline/font/size/color из `<w:rPr>`).
+      - `<m:oMath>` без обёртки `<m:oMathPara>` → InlineFormula.
+      - `<w:fldSimple w:instr=" REF target_id ...">` → CrossRef.
+      - Прочие служебные элементы (`<w:pPr>`, `<w:bookmarkStart>` и т. п.)
+        пропускаются.
+
+    После того как content собран, выполняется эвристика «prefix у CrossRef»:
+    если непосредственно перед CrossRef стоит TextRun, чей текст оканчивается
+    на «(см. », « (» или подобный «открывающий» хвост — этот хвост переносится
+    в `CrossRef.prefix`, а TextRun.text укорачивается.
+    """
     style_name = p.style.name if p.style is not None else None
     pf = p.paragraph_format
     alignment = _alignment_to_literal(pf.alignment)
@@ -763,21 +955,43 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
     style_font_name = _style_font_name(p)
     style_font_size_pt = _style_font_size_pt(p)
 
-    for run in p.runs:
-        text = run.text or ""
-        font_name = run.font.name or style_font_name
-        size_pt: float | None = (
-            float(run.font.size.pt) if run.font.size is not None else style_font_size_pt
-        )
-        content.append(
-            TextRun(
-                text=text,
-                bold=bool(run.bold) if run.bold is not None else None,
-                italic=bool(run.italic) if run.italic is not None else None,
-                font=font_name,
-                size_pt=size_pt,
+    p_xml = p._p
+    for child in p_xml.iterchildren():
+        tag = etree.QName(child.tag).localname
+        ns = etree.QName(child.tag).namespace
+
+        if ns == W_NS and tag == "r":
+            # Внутри <w:r> может лежать <m:oMath> — экспортёр пишет inline-формулу
+            # именно так. В этом случае run становится InlineFormula (не TextRun).
+            nested_omath = child.find(f"{{{M_NS}}}oMath")
+            if nested_omath is not None:
+                latex = _extract_inline_formula_latex(nested_omath)
+                content.append(InlineFormula(latex=latex))
+                continue
+            text_run = _text_run_from_w_r(
+                child, style_font_name=style_font_name, style_font_size_pt=style_font_size_pt
             )
-        )
+            if text_run is not None:
+                content.append(text_run)
+        elif ns == M_NS and tag == "oMath":
+            # Inline-формула: <m:oMath> прямой ребёнок <w:p>, не обёрнутый в
+            # <m:oMathPara> (блочные формулы обработаны в _block_from_paragraph).
+            latex = _extract_inline_formula_latex(child)
+            content.append(InlineFormula(latex=latex))
+        elif ns == W_NS and tag == "fldSimple":
+            cross_ref = _cross_ref_from_fld_simple(child)
+            if cross_ref is not None:
+                content.append(cross_ref)
+            else:
+                # fldSimple без распознаваемой REF-инструкции — берём
+                # внутренний текст как обычный TextRun, чтобы не потерять
+                # содержимое (например, PAGE-поле внутри тела документа).
+                inner_text = _fld_simple_inner_text(child)
+                if inner_text:
+                    content.append(TextRun(text=inner_text))
+        # Прочие элементы (`<w:pPr>`, `<w:bookmarkStart>`, и т. п.) — игнорируем.
+
+    _attach_cross_ref_prefixes(content)
 
     return Paragraph(
         id=f"p-{idx}",
@@ -788,6 +1002,202 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
         first_line_indent_cm=indent_cm,
         page_break_before=page_break_before,
     )
+
+
+def _text_run_from_w_r(
+    w_r_elem: Any,
+    *,
+    style_font_name: str | None,
+    style_font_size_pt: float | None,
+) -> TextRun | None:
+    """Построить TextRun из `<w:r>` элемента, читая `<w:rPr>` и `<w:t>`.
+
+    Возвращает None, если у run нет видимого текста — такие пустые run-ы
+    Word оставляет после удаления (бывают, например, после bookmark-маркеров).
+    Атрибуты форматирования читаются ТОЛЬКО из `<w:rPr>` самого run-а;
+    унаследованные от стиля абзаца игнорируются, кроме font и size (для
+    обратной совместимости с предыдущим поведением парсера).
+    """
+    # Текст: склейка всех <w:t> внутри run-а.
+    texts: list[str] = []
+    for t in w_r_elem.findall(f"{{{W_NS}}}t"):
+        if t.text:
+            texts.append(t.text)
+    text = "".join(texts)
+    if not text:
+        return None
+
+    rpr = w_r_elem.find(f"{{{W_NS}}}rPr")
+
+    bold = _rpr_toggle(rpr, "b")
+    italic = _rpr_toggle(rpr, "i")
+    underline = _rpr_underline(rpr)
+    color_hex = _rpr_color(rpr)
+
+    # font и size: сначала из rPr, иначе из стиля абзаца.
+    font_name = _rpr_font(rpr) or style_font_name
+    size_pt = _rpr_size_pt(rpr)
+    if size_pt is None:
+        size_pt = style_font_size_pt
+
+    return TextRun(
+        text=text,
+        bold=bold,
+        italic=italic,
+        underline=underline,
+        font=font_name,
+        size_pt=size_pt,
+        color_hex=color_hex,
+    )
+
+
+def _rpr_toggle(rpr_elem: Any, tag: str) -> bool | None:
+    """Прочитать toggle-свойство (`<w:b/>`, `<w:i/>`) из `<w:rPr>`.
+
+    OOXML toggle: элемент с val="0"/"false" — отключено; иначе — включено.
+    Отсутствие элемента — None (наследуется).
+    """
+    if rpr_elem is None:
+        return None
+    el = rpr_elem.find(f"{{{W_NS}}}{tag}")
+    if el is None:
+        return None
+    val = el.get(f"{{{W_NS}}}val")
+    return val not in {"0", "false"}
+
+
+def _rpr_underline(rpr_elem: Any) -> bool | None:
+    """Прочитать `<w:u>` из `<w:rPr>`. underline=True если val != "none"."""
+    if rpr_elem is None:
+        return None
+    el = rpr_elem.find(f"{{{W_NS}}}u")
+    if el is None:
+        return None
+    val = el.get(f"{{{W_NS}}}val")
+    # Отсутствие val или val != "none" — подчёркивание включено.
+    return bool(val != "none")
+
+
+def _rpr_color(rpr_elem: Any) -> str | None:
+    """Прочитать `<w:color>` из `<w:rPr>` и вернуть '#RRGGBB' или None.
+
+    Значения "auto" и пустые — None (цвет наследуется или автоматический).
+    """
+    if rpr_elem is None:
+        return None
+    el = rpr_elem.find(f"{{{W_NS}}}color")
+    if el is None:
+        return None
+    val = el.get(f"{{{W_NS}}}val")
+    if not val or val.lower() == "auto":
+        return None
+    # Word хранит цвет как hex без «#», верхний регистр. Нормализуем.
+    return f"#{val.upper()}"
+
+
+def _rpr_font(rpr_elem: Any) -> str | None:
+    """Прочитать имя шрифта из `<w:rFonts>` (ascii > hAnsi > cs)."""
+    if rpr_elem is None:
+        return None
+    rfonts = rpr_elem.find(f"{{{W_NS}}}rFonts")
+    if rfonts is None:
+        return None
+    for attr in ("ascii", "hAnsi", "cs"):
+        name = rfonts.get(f"{{{W_NS}}}{attr}")
+        if name:
+            return str(name)
+    return None
+
+
+def _rpr_size_pt(rpr_elem: Any) -> float | None:
+    """Прочитать размер шрифта из `<w:sz>`. Значение — половинки пункта."""
+    if rpr_elem is None:
+        return None
+    sz = rpr_elem.find(f"{{{W_NS}}}sz")
+    if sz is None:
+        return None
+    val = sz.get(f"{{{W_NS}}}val")
+    if val is None:
+        return None
+    try:
+        return float(val) / 2.0
+    except (TypeError, ValueError):
+        return None
+
+
+# --- CrossRef -----------------------------------------------------------------
+
+
+# Парсер ищет инструкцию вида « REF <bookmark> [\h] ». Толерантно к лишним
+# пробелам и регистру (Word нормализует REF, но другие конвертеры — не всегда).
+_FLD_REF_INSTR_RE = re.compile(r"^\s*REF\s+([^\s\\]+)", re.IGNORECASE)
+
+
+def _cross_ref_from_fld_simple(fld_elem: Any) -> CrossRef | None:
+    """Построить CrossRef из `<w:fldSimple w:instr=" REF target_id ...">`.
+
+    Возвращает None, если инструкция не REF (например, PAGE) — такой
+    fldSimple обрабатывается отдельно (его текст-плейсхолдер кладётся как TextRun).
+    """
+    instr = fld_elem.get(f"{{{W_NS}}}instr") or ""
+    match = _FLD_REF_INSTR_RE.match(instr)
+    if match is None:
+        return None
+    target_id = match.group(1)
+    return CrossRef(target_id=target_id)
+
+
+def _fld_simple_inner_text(fld_elem: Any) -> str:
+    """Склейка `<w:t>` внутри `<w:fldSimple>` (для не-REF полей)."""
+    parts: list[str] = []
+    for t in fld_elem.iter(f"{{{W_NS}}}t"):
+        if t.text:
+            parts.append(t.text)
+    return "".join(parts)
+
+
+# Эвристика «хвост-prefix» CrossRef: список окончаний TextRun-а, которые
+# уместно перенести в CrossRef.prefix. Порядок важен — сначала более
+# длинные шаблоны, чтобы не сматчить «(см. » раньше « (см. ».
+_CROSS_REF_PREFIX_SUFFIXES: tuple[str, ...] = (
+    " (см. ",
+    "(см. ",
+    " (",
+)
+
+
+def _attach_cross_ref_prefixes(content: list[InlineElement]) -> None:
+    """Пост-обработка: переносит «хвост» предыдущего TextRun-а в CrossRef.prefix.
+
+    Эвристика консервативная: prefix присваивается только тогда, когда хвост
+    однозначно опознан как «открывающий» (входит в `_CROSS_REF_PREFIX_SUFFIXES`).
+    Во всех остальных случаях оставляем CrossRef.prefix=None.
+    """
+    for i, element in enumerate(content):
+        if not isinstance(element, CrossRef):
+            continue
+        if i == 0:
+            continue
+        prev = content[i - 1]
+        if not isinstance(prev, TextRun):
+            continue
+        prefix, remainder = _split_cross_ref_prefix(prev.text)
+        if prefix is None:
+            continue
+        element.prefix = prefix
+        prev.text = remainder
+
+
+def _split_cross_ref_prefix(text: str) -> tuple[str | None, str]:
+    """Если `text` оканчивается на «(см. » / « (» — отщепить этот хвост.
+
+    Возвращает (prefix, remainder). Если ни один из шаблонов не подошёл —
+    (None, text) без изменений.
+    """
+    for suffix in _CROSS_REF_PREFIX_SUFFIXES:
+        if text.endswith(suffix):
+            return suffix, text[: -len(suffix)]
+    return None, text
 
 
 def _page_break_before(p: DocxParagraph) -> bool | None:
@@ -919,6 +1329,9 @@ def _extract_bibliography(page_sections: list[PageSection]) -> list[Bibliography
        `ref-{idx}`, где idx — сквозной счётчик по всем найденным записям.
     4. Тип записи определяется эвристически по содержимому текста.
     5. `fields["raw"]` — полный текст параграфа (минимум для Фазы 1).
+    6. Через `_parse_bibliography_fields` извлекаются опциональные
+       структурные поля (author, year, url, doi, access_date, place,
+       language) — используются проверками R.02/R.03/R.08-R.13.
 
     Пустые параграфы пропускаются. Параграфы из раздела остаются на месте
     в `LogicalSection.children` — модель сознательно дублирует данные
@@ -941,11 +1354,13 @@ def _extract_bibliography(page_sections: list[PageSection]) -> list[Bibliography
                 if not raw:
                     continue
                 idx += 1
+                fields = {"raw": raw}
+                fields.update(_parse_bibliography_fields(raw))
                 entries.append(
                     BibliographyEntry(
                         id=f"ref-{idx}",
                         type=_detect_bibliography_type(raw),
-                        fields={"raw": raw},
+                        fields=fields,
                     )
                 )
     return entries
@@ -974,3 +1389,127 @@ def _detect_bibliography_type(
     if _BIB_ARTICLE_RE.search(raw):
         return "article"
     return "book"
+
+
+# --- Citation post-processing -------------------------------------------------
+
+
+# «[N]» либо «[N, с. P]» / «[N, с.P]». N — 1-3 цифры. P — допускаем «12»,
+# «12-15», «12, 17-20» (любые цифры, тире, запятые, пробелы). Запрещены
+# вложенные скобки.
+# Регистр «с»/«С» — нечувствительно.
+_CITATION_PATTERN_RE = re.compile(
+    r"\[(\d{1,3})(?:,\s*[сС]\.\s*([\d,\s\-–—]+?))?\]"
+)
+
+
+def _annotate_citations(
+    page_sections: list[PageSection], bibliography: list[BibliographyEntry]
+) -> None:
+    """Заменить в TextRun-ах подстроки «[N]» / «[N, с. P]» на Citation.
+
+    Срабатывает только когда N валидный 1-based индекс bibliography
+    (1 ≤ N ≤ len(bibliography)). Иначе TextRun не модифицируется.
+    Применяется ко всем Paragraph во всех PageSection и LogicalSection
+    рекурсивно (включая children внутри Figure.caption / Table.caption —
+    обработать позже при необходимости; на Фазе 2.5 ограничиваемся
+    Paragraph.content).
+    """
+    if not bibliography:
+        return
+    for ps in page_sections:
+        _annotate_citations_in_items(ps.content, bibliography)
+
+
+def _annotate_citations_in_items(
+    items: list[LogicalSection | Block], bibliography: list[BibliographyEntry]
+) -> None:
+    """Рекурсивно обойти элементы и заменить citations в Paragraph.content."""
+    for item in items:
+        if isinstance(item, LogicalSection):
+            _annotate_citations_in_items(item.children, bibliography)
+        elif isinstance(item, Paragraph):
+            item.content = _annotate_citations_in_inline(item.content, bibliography)
+
+
+def _annotate_citations_in_inline(
+    content: list[InlineElement], bibliography: list[BibliographyEntry]
+) -> list[InlineElement]:
+    """Заменить «[N]»/«[N, с. P]» в TextRun-ах на Citation там, где N валиден."""
+    result: list[InlineElement] = []
+    for element in content:
+        if not isinstance(element, TextRun):
+            result.append(element)
+            continue
+        result.extend(_split_text_run_by_citations(element, bibliography))
+    return result
+
+
+def _split_text_run_by_citations(
+    run: TextRun, bibliography: list[BibliographyEntry]
+) -> list[InlineElement]:
+    """Разрезать один TextRun на (TextRun, Citation, TextRun, ...) по паттерну.
+
+    Атрибуты форматирования (`bold`, `italic`, `font`, ...) копируются
+    в каждый получившийся фрагмент TextRun-а — это сохраняет визуальное
+    оформление при обратном раунд-трипе.
+    """
+    text = run.text
+    matches = list(_CITATION_PATTERN_RE.finditer(text))
+    if not matches:
+        return [run]
+
+    pieces: list[InlineElement] = []
+    cursor = 0
+    changed = False
+    for match in matches:
+        try:
+            n_value = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        # Эвристика: N должен быть валидным 1-based индексом bibliography.
+        if n_value < 1 or n_value > len(bibliography):
+            continue
+        source_id = bibliography[n_value - 1].id
+        pages_raw = match.group(2)
+        pages = _normalize_citation_pages(pages_raw) if pages_raw else None
+
+        # Текст ДО найденного match-а сохраняем как TextRun с тем же оформлением.
+        if match.start() > cursor:
+            pieces.append(_clone_text_run(run, text[cursor : match.start()]))
+        template = "[{n}, с. {pages}]" if pages else "[{n}]"
+        pieces.append(
+            Citation(source_id=source_id, pages=pages, template=template)
+        )
+        cursor = match.end()
+        changed = True
+
+    if not changed:
+        return [run]
+
+    if cursor < len(text):
+        pieces.append(_clone_text_run(run, text[cursor:]))
+
+    # Удалить возможные пустые TextRun-ы (когда citation шёл встык).
+    return [p for p in pieces if not (isinstance(p, TextRun) and not p.text)]
+
+
+def _normalize_citation_pages(raw: str) -> str:
+    """Привести «с. 12-15» к каноническому виду «12-15» (убрать лишние пробелы)."""
+    # Сжимаем подряд идущие пробелы и убираем краевые.
+    return " ".join(raw.split()).strip()
+
+
+def _clone_text_run(template_run: TextRun, new_text: str) -> TextRun:
+    """Скопировать TextRun, заменив только text. Используется при сплите по citations."""
+    return TextRun(
+        text=new_text,
+        bold=template_run.bold,
+        italic=template_run.italic,
+        underline=template_run.underline,
+        superscript=template_run.superscript,
+        subscript=template_run.subscript,
+        font=template_run.font,
+        size_pt=template_run.size_pt,
+        color_hex=template_run.color_hex,
+    )

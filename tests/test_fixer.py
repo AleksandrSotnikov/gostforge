@@ -419,3 +419,194 @@ def test_fix_with_codes_filter() -> None:
     text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
     # T.08 сработал: двойной пробел схлопнулся; T.10 не запускался — кавычки на месте.
     assert text_runs[0].text == '"a b"'
+
+
+# --- T.07 fix_consecutive_empty_paragraphs ---------------------------------
+
+
+def test_t07_fix_registered() -> None:
+    """T.07 фиксер зарегистрирован в реестре."""
+    from gostforge.fixer.engine import registered_fixers
+    assert "T.07" in registered_fixers()
+
+
+def test_t07_removes_extra_empty_paragraphs() -> None:
+    """3 пустых абзаца подряд → останется только 1 (max_consecutive_empty=1)."""
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main", name="m", type="main",
+            content=[
+                Paragraph(id="p1", content=[TextRun(text="Раздел 1")]),
+                Paragraph(id="p2", content=[]),
+                Paragraph(id="p3", content=[TextRun(text="")]),
+                Paragraph(id="p4", content=[TextRun(text="   ")]),
+                Paragraph(id="p5", content=[TextRun(text="Раздел 2")]),
+            ],
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    fixes = run_fix(doc, profile, codes=["T.07"])
+    assert len(fixes) == 2  # удалены 2 лишних пустых
+    assert all(f.fixer_code == "T.07" for f in fixes)
+    # В content остался 1 пустой + 2 непустых = 3 параграфа
+    assert len(doc.page_sections[0].content) == 3
+
+
+def test_t07_keeps_single_empty_paragraph() -> None:
+    """1 пустой абзац подряд при max=1 — не удаляется."""
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main", name="m", type="main",
+            content=[
+                Paragraph(id="p1", content=[TextRun(text="A")]),
+                Paragraph(id="p2", content=[]),
+                Paragraph(id="p3", content=[TextRun(text="B")]),
+            ],
+        )
+    )
+    profile = load_profile("gost-7.32-2017")
+    fixes = run_fix(doc, profile, codes=["T.07"])
+    assert fixes == []
+
+
+# --- T.06 fix_disable_auto_hyphenation -------------------------------------
+
+
+def test_t06_fix_registered() -> None:
+    from gostforge.fixer.engine import registered_fixers
+    assert "T.06" in registered_fixers()
+
+
+def test_t06_disables_auto_hyphenation() -> None:
+    """auto_hyphenation=True → False после фиксера."""
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document
+    from gostforge.profile import load_profile
+
+    doc = Document(auto_hyphenation=True)
+    profile = load_profile("gost-7.32-2017")
+    applied = run_fix(doc, profile, codes=["T.06"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "T.06"
+    assert doc.auto_hyphenation is False
+
+
+def test_t06_noop_when_already_disabled() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document
+    from gostforge.profile import load_profile
+
+    doc = Document(auto_hyphenation=False)
+    profile = load_profile("gost-7.32-2017")
+    assert run_fix(doc, profile, codes=["T.06"]) == []
+
+
+def test_t06_noop_when_unset() -> None:
+    """None означает «не определено», фиксер не трогает."""
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document
+    from gostforge.profile import load_profile
+
+    doc = Document(auto_hyphenation=None)
+    profile = load_profile("gost-7.32-2017")
+    assert run_fix(doc, profile, codes=["T.06"]) == []
+
+
+def test_export_writes_auto_hyphenation_setting(tmp_path: Path) -> None:
+    """Round-trip: auto_hyphenation=True сохраняется через экспорт."""
+    from gostforge.exporter import export_docx
+    from gostforge.model import Document, PageSection
+    from gostforge.parser import parse_docx
+    from gostforge.profile import load_profile
+
+    doc = Document(auto_hyphenation=True)
+    doc.page_sections.append(PageSection(id="main", name="m", type="main"))
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+    reparsed = parse_docx(out)
+    assert reparsed.auto_hyphenation is True
+
+
+# --- T.03 / T.04 / T.05 — выравнивание/интервал/отступ -----------------------
+
+
+def test_t03_fix_registered() -> None:
+    from gostforge.fixer.engine import registered_fixers
+    assert "T.03" in registered_fixers()
+
+
+def test_t03_corrects_line_spacing_to_profile_default() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="Текст")], style_name="Normal", line_spacing=1.0)
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    applied = run_fix(doc, profile, codes=["T.03"])
+    assert len(applied) == 1
+    assert p.line_spacing == 1.5
+
+
+def test_t03_skips_heading() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="Заголовок")], style_name="Heading 1", line_spacing=1.0)
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    assert run_fix(doc, profile, codes=["T.03"]) == []
+
+
+def test_t04_corrects_first_line_indent() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=0.0)
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    applied = run_fix(doc, profile, codes=["T.04"])
+    assert len(applied) == 1
+    assert p.first_line_indent_cm == 1.25
+
+
+def test_t05_corrects_alignment_to_justify() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", alignment="left")
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    applied = run_fix(doc, profile, codes=["T.05"])
+    assert len(applied) == 1
+    assert p.alignment == "justify"
+
+
+def test_t04_noop_when_already_correct() -> None:
+    from gostforge.fixer import fix as run_fix
+    from gostforge.model import Document, PageSection, Paragraph, TextRun
+    from gostforge.profile import load_profile
+
+    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=1.25)
+    doc = Document()
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
+    profile = load_profile("gost-7.32-2017")
+    assert run_fix(doc, profile, codes=["T.04"]) == []

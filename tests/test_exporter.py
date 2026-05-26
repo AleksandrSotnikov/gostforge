@@ -399,3 +399,123 @@ def test_export_inserts_real_picture_when_image_exists(tmp_path: Path) -> None:
     with zipfile.ZipFile(str(out)) as z:
         document_xml = z.read("word/document.xml").decode("utf-8")
     assert "w:drawing" in document_xml
+
+
+def test_export_roundtrip_formula(tmp_path: Path) -> None:
+    """Round-trip Formula → export → parse сохраняет latex и number."""
+    from gostforge.model import Formula
+    from gostforge.parser import parse_docx
+    from gostforge.profile import load_profile
+
+    doc = Document()
+    fml = Formula(id="formula-1", latex="E=mc^2", number=3)
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", content=[fml])
+    )
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    reparsed = parse_docx(out)
+    formulas = [b for b in reparsed.page_sections[0].content if isinstance(b, Formula)]
+    assert len(formulas) == 1
+    assert "E=mc^2" in formulas[0].latex
+    assert formulas[0].number == 3
+
+
+def test_export_formula_without_number(tmp_path: Path) -> None:
+    """Формула без номера — никаких текстовых хвостов."""
+    from gostforge.model import Formula
+    from gostforge.profile import load_profile
+
+    doc = Document()
+    fml = Formula(id="formula-1", latex="x+y", number=None)
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", content=[fml])
+    )
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    raw = python_docx.Document(str(out))
+    # Должен быть параграф с центрированием, содержащий формулу,
+    # но без хвостовой текстовой части вида "(N)"
+    paragraphs = raw.paragraphs
+    assert len(paragraphs) >= 1
+    # текст параграфа не содержит "(" если нет номера
+    assert "(" not in paragraphs[0].text
+
+
+def test_export_with_source_docx_preserves_image(tmp_path: Path) -> None:
+    """Round-trip: создаём .docx с PNG → parse → export(source_docx=src) → в out есть реальный media."""
+    from gostforge.parser import parse_docx
+    from gostforge.profile import load_profile
+
+    try:
+        from PIL import Image  # type: ignore[import-not-found]
+    except ImportError:
+        import pytest
+        pytest.skip("Pillow не установлен — тест требует генерации PNG")
+
+    img = tmp_path / "pixel.png"
+    Image.new("RGB", (16, 16), color="green").save(img)
+
+    src = tmp_path / "in.docx"
+    raw = python_docx.Document()
+    raw.add_paragraph("Перед рисунком.")
+    raw.add_picture(str(img))
+    raw.add_paragraph("Рисунок 1 — Тест")
+    raw.save(str(src))
+
+    document = parse_docx(src)
+    figures = [
+        item
+        for ps in document.page_sections
+        for item in ps.content
+        if hasattr(item, "image_path")
+    ]
+    assert figures, "Парсер не нашёл ни одного рисунка"
+    assert figures[0].image_path.startswith("embedded:"), (
+        f"Ожидали embedded:rIdN, получили {figures[0].image_path!r}"
+    )
+
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(document, profile, out, source_docx=src)
+
+    import zipfile
+    with zipfile.ZipFile(str(out)) as z:
+        names = z.namelist()
+        document_xml = z.read("word/document.xml").decode("utf-8")
+        media_names = [n for n in names if n.startswith("word/media/")]
+        assert media_names, f"В выходном .docx нет media: {names}"
+        for media_name in media_names:
+            assert len(z.read(media_name)) > 0, f"Media {media_name} пустой"
+
+    assert "w:drawing" in document_xml
+    assert "[Рисунок:" not in document_xml, (
+        "В document.xml оказался placeholder — экспортёр не воспользовался source_docx"
+    )
+
+
+def test_export_with_embedded_path_without_source_docx_uses_placeholder(tmp_path: Path) -> None:
+    """Если image_path начинается с embedded:, но source_docx не задан, рисуем placeholder."""
+    from gostforge.model import Figure
+    from gostforge.profile import load_profile
+
+    doc = Document()
+    fig = Figure(
+        id="fig-7",
+        image_path="embedded:rId99",
+        caption=[TextRun(text="Рисунок 7 — Должен стать placeholder-ом")],
+    )
+    doc.page_sections.append(
+        PageSection(id="main", name="m", type="main", content=[fig])
+    )
+    profile = load_profile("gost-7.32-2017")
+    out = tmp_path / "out.docx"
+    export_docx(doc, profile, out)
+
+    raw = python_docx.Document(str(out))
+    texts = [p.text for p in raw.paragraphs]
+    assert any("[Рисунок: fig-7]" in t for t in texts)

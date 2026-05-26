@@ -109,8 +109,8 @@
 
 ### CLI
 
-9 команд: `check`, `fix`, `annotate`, `new`, `stats`, `ui`, `profiles`,
-`checks`. Полный help — `gostforge --help`.
+11 операций: `check`, `fix`, `annotate`, `new`, `stats`, `ui`,
+`checks`, `profiles list/show/validate/diff`. Полный help — `gostforge --help`.
 
 - [x] `--report report.xlsx` (Excel через openpyxl) и `--report report.md`
       (Markdown). Формат определяется по расширению.
@@ -129,50 +129,178 @@
 
 ### Тестирование
 
-- [x] 527+ unit-тестов; все проходят на каждом коммите.
+- [x] 666+ unit-тестов; все проходят на каждом коммите.
 - [x] Синтетические фикстуры через `tests/conftest.py::make_docx`.
 - [~] Регрессионный набор из 20+ реальных анонимизированных работ —
       собирается с пилотной кафедрой (требует данных от пользователей).
 
-## Фаза 2 — Расширение покрытия и продакшен — 6–10 недель
+## Фаза 2 — Расширение покрытия и продакшен (завершена)
 
-Текущие приоритеты:
+**Покрытие каталога: 104 проверки (100%).** Все 15 категорий закрыты
+полностью: F (6), T (13), S (8), H (8), I (10), B (9), M (5), L (4),
+R (13), C (5), A (3), P (5), K (6), V (4), X (5).
 
-- [ ] **Оставшиеся ~6 проверок** до полного покрытия каталога:
-      H.06 (заголовок не висит внизу), H.07 (отступы),
-      I.02/I.04/I.07–I.10 (рисунки: подпись под, шрифт подписи,
-      порядок ссылок, DPI, центрирование),
-      B.02/B.04–B.07 (таблицы), R.01–R.13 (расширенный набор для
-      литературы), C.03/C.05, A.02/A.03, P.02–P.05, X.04/X.05.
-- [ ] **Парсер**: реальные изображения (`embedded:rIdN` → media-file),
-      перекрёстные ссылки (внутренняя модель), нумерация заголовков
-      из `<w:numPr>` (нумерация Word, а не текстовая).
-- [ ] **Экспортёр**: формулы (LaTeX → OMML), реальные изображения
-      из `Figure.image_path` в media-папку docx, корректные PageSection
-      с разными колонтитулами через `sectPr` и отдельные header/footer-parts.
-- [ ] **Конструктор**: визуальный редактор (PyQt6 или Tauri+Web)
-      поверх существующего API.
+- [x] **+10 проверок** до полного покрытия: H.06, H.07, I.02/I.04/I.07/I.10,
+      B.02/B.04–B.07.
+- [x] **+8 проверок** в категории B (таблицы) — все 9 теперь реализованы.
+- [x] **+10 проверок**: A.02/A.03, P.02–P.05, C.03/C.05, X.04/X.05.
+- [x] **I.08** (DPI ≥ 150) — парсер извлекает DPI из embedded media через Pillow.
+- [x] **I.09** (центрирование рисунка) — парсер сохраняет alignment.
+- [x] **R.01–R.13** — все 13 проверок литературы, включая порядок,
+      обязательные поля, даты обращения, DOI, свежесть, подозрительные
+      домены. Парсер расширен на распознавание полей
+      `BibliographyEntry.fields` (author, year, url, doi, access_date,
+      place, language) по ГОСТ Р 7.0.100-2018.
+- [x] **9 фиксеров** автоисправления: T.07–T.13, H.03, H.08.
+- [x] CLI расширен: `gostforge profiles validate`, `gostforge profiles diff`.
+- [x] Парсер: `embedded:rIdN` для изображений, чтение `<m:oMath>` формул,
+      `<w:autoHyphenation>` из settings.xml.
+
+Осталось на следующие итерации:
+
 - [ ] **Аннотатор**: настоящие OOXML-комментарии Word
       (`<w:commentRangeStart>` + `comments.xml`-part), не только
       inline-маркеры.
-- [ ] **Менеджер библиографии**: парсинг полей BibliographyEntry
-      (автор, заглавие, год, издательство, страницы) из raw-текста
-      по ГОСТ Р 7.0.100-2018; импорт по DOI/ISBN.
+- [ ] **Конструктор**: визуальный редактор (PyQt6 или Tauri+Web)
+      поверх существующего fluent-API.
+- [ ] **Экспортёр**: формулы (LaTeX → OMML), реальные изображения
+      из `Figure.image_path` в media-папку docx, корректные PageSection
+      с разными колонтитулами через `sectPr` и отдельные header/footer-parts.
 - [ ] **Плагины проверок**: динамическая загрузка из
       `~/.gostforge/plugins/`.
 - [ ] **Экспорт PDF** через LibreOffice headless.
 - [ ] **Регрессионный набор** из 20+ реальных анонимизированных
       работ от пилотной кафедры.
 
+## Фаза 2.5 — Пословное редактирование в визуальном конструкторе (завершена)
+
+> **Статус:** реализована.
+> **Полная спецификация:** [docs/phase-2.5-spec.md](phase-2.5-spec.md).
+
+Цель достигнута: редактирование контента в визуальном конструкторе
+переведено с уровня «целый абзац строкой» на уровень
+**inline-элементов** — форматированный фрагмент, перекрёстная ссылка,
+inline-формула, библиографическая цитата.
+
+Реализовано:
+
+- [x] **Модель:** новые типы `InlineFormula`, `Citation`,
+      `CrossRef.prefix`, `TextRun.underline`, `TextRun.color_hex`;
+      bump `SCHEMA_VERSION → 0.3.0`.
+- [x] **Builder:** `SectionBuilder.rich_paragraph(elements)` рядом
+      с существующим `.paragraph(text)` (тонкая обёртка).
+- [x] **Экспортёр:** inline-формулы (`<m:oMath>` внутри `<w:r>`),
+      `<w:fldSimple w:instr=" REF target_id \h "/>` для CrossRef с
+      опц. prefix-run, текстовые run-ы «[N]» / «[N, с. P]» для
+      Citation. Bibliography-индекс через
+      module-level `_current_bibliography_index`.
+- [x] **Парсер:** распознавание inline-формул (m:oMath без oMathPara),
+      эвристика для цитат `[N]` / `[N, с. P]` в TextRun-ах (только при
+      валидном N), извлечение CrossRef.prefix из предыдущего run,
+      чтение `<w:u>` и `<w:color>`.
+- [x] **UI:** полноценный inline-редактор параграфа
+      (`_render_paragraph_inline_editor`) — список run-ов с
+      собственными редакторами, кнопками ↑/↓/× и панелью добавления
+      (+ Текст / + Формула / + Ссылка / + Цитата).
+- [x] **Совместимость:** `_normalize_paragraph_state` —
+      `{kind: paragraph, text: ...}` из Phase 2 автоматически
+      конвертируется в `{kind: paragraph, runs: [...]}`.
+- [x] **Undo/Redo:** кольцевой буфер на 50 snapshot-ов, ленивый
+      `_auto_snapshot_if_changed`, кнопки в sidebar с правильным
+      disabled-состоянием, обратимое branch-and-truncate.
+- [x] **Auto-save:** `~/.gostforge/autosave/last-session.json`, не
+      чаще раза в 30 секунд, баннер восстановления при старте UI
+      (если файл свежее 24 часов и state ещё дефолтный).
+- [x] **Тесты:** **+97 новых** (8 model + 6 builder + 10 exporter +
+      14 parser + 23 web-state + 13 web-editor + 13 undo/redo +
+      10 autosave). Общая база — **843 теста**.
+- [x] **Документация:** `docs/builder.md §4.1 «Пословное
+      редактирование»` с таблицами и примерами,
+      `docs/architecture.md` с таблицей InlineElement ↔ OOXML, README.
+
+**Definition of Done выполнен:** round-trip state → `Document` →
+`.docx` → парс → state без потерь inline-элементов, генерируемая
+конструктором работа проходит проверки `gost-7.32-2017` без
+регрессий, mypy --strict baseline не сдвинулся.
+
 ## Фаза 3 — Продакшен и масштаб — по мере спроса
 
-- [ ] REST API (FastAPI) для интеграций с LMS.
-- [ ] Веб-версия — деплой Streamlit-UI как сервис.
-- [ ] Командная работа: руководитель ↔ студент (комментарии,
-      обсуждения, итерации).
-- [ ] Интеграция с LMS (Moodle, eLearning, и др.).
-- [ ] Маркетплейс профилей кафедр — публичный реестр.
-- [ ] Мобильные клиенты для просмотра отчётов.
+- [x] **REST API (FastAPI)** для интеграций с LMS. 7 endpoints
+      (`/health`, `/profiles[/{id}]`, `/checks`, `/check`, `/fix`,
+      `/annotate`, `/stats`), CLI-обёртка `gostforge serve`,
+      опциональная зависимость `[api]`. Спецификация:
+      [phase-3-api-spec.md](phase-3-api-spec.md).
+- [x] **Аутентификация API-key** через middleware (env
+      `GOSTFORGE_API_KEYS`, поддержка нескольких ключей, bypass для
+      `/health` и `/docs`). Rate-limiting — на стороне reverse-proxy
+      (готовый nginx-конфиг в [api.md](api.md)).
+- [x] **Docker и docker-compose** для production-деплоя.
+      Multi-stage Dockerfile (API) и Dockerfile.ui (Streamlit UI),
+      docker-compose с двумя сервисами, non-root юзер, HEALTHCHECK,
+      лимит ресурсов. Руководство по деплою с nginx — [api.md](api.md).
+- [x] **Streamlit-UI как Docker-сервис** — Dockerfile.ui +
+      сервис в docker-compose. UI работает автономно (не требует
+      REST API). Аутентификация — через reverse-proxy (basic auth
+      или oauth2-proxy).
+- [x] **CI на GitHub Actions** — тесты на Python 3.11/3.12 (matrix),
+      ruff/mypy в warn-only режиме, сборка обоих Docker-образов,
+      валидация docker-compose.yml. concurrency.group отменяет
+      устаревшие прогоны.
+- [x] **Локальная SQLite-БД с auto-init**. Stdlib sqlite3, ноль
+      внешних зависимостей. Путь `~/.gostforge/gostforge.db` или env
+      `GOSTFORGE_DB_PATH`; каталог и схема создаются автоматически
+      через `schema_version`-таблицу + append-only список миграций.
+      Подробное руководство — [database.md](database.md).
+- [x] **История проверок (submissions)**. Каждый `gostforge check`
+      и `POST /check` опционально (по умолчанию вкл.) записывает
+      submission + все violations в БД. Просмотр через
+      `gostforge history [--limit N] [--filename F] [--id N]` и
+      `GET /submissions[/{id}]`. DELETE для очистки. Persistence
+      между перезапусками Docker — через named volume
+      `gostforge-data`.
+- [x] **Маркетплейс кафедральных профилей** (миграция v2). Любой
+      кафедральный YAML устанавливается в локальный реестр одной
+      командой — `gostforge profiles install kafedra.yaml` или
+      `POST /profiles`. После установки профиль доступен всем
+      командам по своему id без правки исходников gostforge.
+      Расширения: `profiles uninstall`, `profiles list` с маркерами
+      `[builtin]/[custom]`, `DELETE /profiles/{id}`,
+      флаг `is_custom` в `GET /profiles`. Custom-профиль с тем же
+      id что builtin переопределяет последний — кафедра может
+      «уточнить» базовый ГОСТ.
+- [x] **Командная работа: руководитель ↔ студент** (миграция v3).
+      Таблица `comments` с ролями student/supervisor/anonymous,
+      CRUD-операции, CASCADE при удалении submission. REST:
+      `GET/POST /submissions/{id}/comments`,
+      `PATCH /comments/{id}/resolve`, `DELETE /comments/{id}`;
+      `unresolved_comments` в `GET /submissions/{id}`. CLI:
+      `gostforge comment add/list/resolve/delete` + интеграция в
+      `gostforge history --id N` (комментарии под violations).
+      **Streamlit-режим «История»**: список submission-ов с фильтрами,
+      раскрывающиеся карточки с tab-ами «Нарушения» и «Обсуждение»,
+      форма добавления комментария с выбором роли, кнопки
+      Закрыть/Переоткрыть/Удалить на каждом сообщении, цветовая
+      кодировка ролей. Authorship: env `GOSTFORGE_DEFAULT_AUTHOR`
+      или `getpass.getuser()` по умолчанию; полноценный multi-user —
+      отдельная миграция.
+- [ ] Интеграция с LMS (Moodle, eLearning, и др.) — теперь
+      технически возможна через REST API.
+- [ ] Маркетплейс профилей кафедр — публичный реестр (а не только
+      локальный реестр в БД, который уже сделан).
+
+> **Доступ к интерфейсу.** Основной интерфейс gostforge — это
+> **WebApp на Streamlit** (`gostforge ui` или Docker-сервис `ui`).
+> Он открывается в любом современном браузере, включая мобильный, —
+> отдельные native-клиенты не разрабатываются. Для интеграции с
+> сторонними системами есть REST API.
+
+- [x] **Встроенный просмотр документации в WebApp**. Режим
+      «Документация» в Streamlit-UI отдаёт все руководства
+      `docs/*.md` с навигацией в sidebar и кнопкой скачивания
+      исходника. Относительные ссылки между md-файлами
+      переписываются в подсказки «выберите раздел в меню».
+      Пользователю-студенту/кафедре не нужно открывать GitHub,
+      чтобы прочитать гайд.
 
 ## Принципы планирования
 

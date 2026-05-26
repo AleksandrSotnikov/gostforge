@@ -1,0 +1,76 @@
+# gostforge Streamlit UI — отдельный image от REST API.
+#
+# Сборка:
+#   docker build -f Dockerfile.ui -t gostforge-ui:latest .
+#
+# Запуск:
+#   docker run -p 8501:8501 gostforge-ui:latest
+#
+# Образ симметричен Dockerfile (API): multi-stage, non-root, slim.
+
+# --- Stage 1: builder -------------------------------------------------------
+
+FROM python:3.11-slim AS builder
+
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+WORKDIR /build
+
+COPY pyproject.toml ./
+COPY README.md ./
+COPY src/ ./src/
+COPY profiles/ ./profiles/
+
+# UI требует extras [ui]; не тянем [api], чтобы образ был легче.
+RUN pip install --no-cache-dir ".[ui]"
+
+# --- Stage 2: runtime -------------------------------------------------------
+
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    STREAMLIT_SERVER_HEADLESS=true \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+RUN groupadd --system gostforge && \
+    useradd --system --gid gostforge --no-create-home --shell /usr/sbin/nologin gostforge
+
+COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /build/profiles /app/profiles
+COPY --from=builder /build/src /app/src
+COPY --from=builder /build/pyproject.toml /app/pyproject.toml
+COPY --from=builder /build/README.md /app/README.md
+
+# Каталог автосохранений visual-builder под non-root юзером.
+RUN mkdir -p /home/gostforge/.gostforge/autosave && \
+    chown -R gostforge:gostforge /home/gostforge
+
+ENV HOME=/home/gostforge
+
+WORKDIR /app
+USER gostforge
+
+EXPOSE 8501
+
+# Streamlit отдаёт 200 на корневом URL когда приложение готово.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD python -c "import urllib.request,sys; \
+    sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=3).status == 200 else 1)"
+
+# Запускаем напрямую streamlit, минуя CLI-обёртку — даёт более
+# предсказуемый exit code и не запускает лишний subprocess.
+CMD ["streamlit", "run", "src/gostforge/web/app.py", \
+     "--server.address=0.0.0.0", \
+     "--server.port=8501"]

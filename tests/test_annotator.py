@@ -60,7 +60,7 @@ def bad_margins_docx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def test_annotate_creates_output_file(bad_margins_docx: Path, tmp_path: Path) -> None:
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
-    annotate_docx(bad_margins_docx, out, profile)
+    annotate_docx(bad_margins_docx, out, profile, style="inline")
     assert out.exists()
 
 
@@ -69,7 +69,7 @@ def test_annotate_returns_count_positive(
 ) -> None:
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
-    n = annotate_docx(bad_margins_docx, out, profile)
+    n = annotate_docx(bad_margins_docx, out, profile, style="inline")
     assert n > 0
 
 
@@ -78,7 +78,7 @@ def test_annotate_inserts_marker_text(
 ) -> None:
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
-    annotate_docx(bad_margins_docx, out, profile)
+    annotate_docx(bad_margins_docx, out, profile, style="inline")
 
     annotated = DocxDocument(str(out))
     # В каком-то параграфе должен оказаться run с маркером, начинающимся с [F.01:.
@@ -106,7 +106,7 @@ def test_annotate_returns_count_matches_violations(
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
     expected = len(validate(parse_docx(clean_docx), profile))
-    n = annotate_docx(clean_docx, out, profile)
+    n = annotate_docx(clean_docx, out, profile, style="inline")
     assert n == expected
     assert out.exists()
 
@@ -114,4 +114,6 @@ def test_annotate_returns_count_matches_violations(
 def test_annotate_raises_on_missing_input(tmp_path: Path) -> None:
     profile = load_profile("gost-7.32-2017")
     with pytest.raises(FileNotFoundError):
-        annotate_docx(tmp_path / "nope.docx", tmp_path / "out.docx", profile)
+        annotate_docx(
+            tmp_path / "nope.docx", tmp_path / "out.docx", profile, style="inline"
+        )

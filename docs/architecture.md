@@ -33,14 +33,28 @@ Document
 │     ├─ LogicalSection               # раздел: heading, level, children
 │     ├─ Paragraph                    # style_name, alignment, line_spacing,
 │     │                                # first_line_indent_cm, page_break_before,
-│     │                                # content: (TextRun | CrossRef)[]
+│     │                                # content: InlineElement[]
 │     ├─ Table                        # caption, headers, rows
-│     ├─ Figure                       # image_path, caption
-│     ├─ Formula                      # latex (Фаза 3)
-│     └─ ListBlock / CodeBlock        # роадмап
+│     ├─ Figure                       # image_path, caption, dpi, alignment
+│     ├─ Formula                      # latex (блочная, через m:oMathPara)
+│     └─ ListBlock / CodeBlock        # ordered, items
 ├─ bibliography: BibliographyEntry[] # id, type, fields
 └─ abbreviations: dict[str, str]
 ```
+
+**InlineElement** (`Paragraph.content` и `Caption`) — union из 4 типов
+(Фаза 2.5, `SCHEMA_VERSION = 0.3.0`):
+
+| Тип | Поля | OOXML соответствие |
+| --- | --- | --- |
+| `TextRun` | text + bold/italic/underline/sup/sub/font/size/color_hex | `<w:r><w:rPr>…</w:rPr><w:t>…</w:t></w:r>` |
+| `CrossRef` | target_id, display_template, prefix | `<w:fldSimple w:instr=" REF target_id \h "/>` (опц. предшествующий run для prefix) |
+| `InlineFormula` | latex, id | `<w:r><m:oMath>…</m:oMath></w:r>` (inline OMML внутри run) |
+| `Citation` | source_id, pages, template | текстовый run «[N]» / «[N, с. P]» (N = индекс в bibliography) |
+
+Inline-формулы (`InlineFormula`) отличаются от блочных (`Formula`):
+последние идут отдельным абзацем через `<m:oMathPara>`, первые — в
+потоке inline-контента параграфа.
 
 **Ключевое разделение:** `PageSection` ≠ `LogicalSection`.
 PageSection — вёрстка (поля, колонтитулы); LogicalSection — содержание
@@ -161,6 +175,15 @@ Builder автоматически расставляет `page_break_before` у
 `research_report_template`. CLI-команда: `gostforge new my-coursework.docx
 --template coursework --title "..."`.
 
+### PDF-Exporter (`src/gostforge/pdf_exporter.py`)
+
+Тонкая обёртка над LibreOffice headless: `convert_to_pdf(input, output)`
+вызывает `soffice --headless --convert-to pdf` во временной директории
+и переносит результат в указанный путь. Если LibreOffice не установлен —
+поднимается `LibreOfficeNotFoundError` с подсказкой по установке.
+Изолирован от парсера и экспортёра — это отдельный артефакт «финальной»
+сборки документа после автофиксов.
+
 ### CLI (`src/gostforge/cli.py`)
 
 ```bash
@@ -168,13 +191,15 @@ gostforge check work.docx --profile gost-7.32-2017 [--report file.xlsx|.md] [--q
 gostforge fix work.docx -o fixed.docx [--only T.08] [--dry-run]
 gostforge stats work.docx
 gostforge new out.docx --template coursework --title "..." --year 2026
+gostforge pdf work.docx -o work.pdf [--timeout 60]
 gostforge profiles list|show <id>
 gostforge checks
 gostforge ui
 ```
 
 Exit codes: `0` — нарушений нет; `1` — найдены error; `2` — ошибка
-загрузки профиля.
+загрузки профиля; для `pdf` дополнительно: `3` — LibreOffice не найден,
+`4` — таймаут, `5` — LibreOffice вернул ошибку.
 
 ### Web (`src/gostforge/web/`)
 

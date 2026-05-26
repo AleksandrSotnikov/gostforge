@@ -90,6 +90,23 @@ def _caption_text(elements: Sequence[InlineElement]) -> str:
     return "".join(el.text for el in elements if isinstance(el, TextRun)).strip()
 
 
+@register("I.02")
+def check_figure_caption_below(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Подпись рисунка должна располагаться под ним (заглушка).
+
+    TODO (Фаза 2): текущий парсер склеивает подпись только снизу — у
+    `Figure.caption` нет признака `caption_position` (`above`/`below`),
+    поэтому мы не можем отличить случай «подпись над рисунком» от
+    «подпись под рисунком». На уровне модели данная проверка фактически
+    дублирует I.01 (наличие подписи). Полноценная реализация требует
+    `Figure.caption_position` и расширения парсера.
+    """
+    return []
+
+
 @register("I.03")
 def check_figure_caption_format(
     document: Document, profile: Profile
@@ -133,6 +150,77 @@ def check_figure_caption_format(
                 details={"figure_id": figure.id, "caption": text},
             )
         )
+    return violations
+
+
+_SIZE_TOLERANCE_PT = 0.1
+
+
+@register("I.04")
+def check_figure_caption_style(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Подпись рисунка должна быть нужного кегля (и центрирована).
+
+    Параметры (`profile.checks["I.04"].params`):
+    - `caption_size_pt: float = 12` — ожидаемый кегль подписи.
+    - `caption_alignment: str = "center"` — ожидаемое выравнивание
+      (на Фазе 2 не проверяется: caption — это `list[InlineElement]`,
+      у которого нет alignment; TODO — связать caption с Paragraph).
+
+    Логика для каждой Figure:
+    - Пустая подпись пропускается (это случай I.01).
+    - Для каждого непустого TextRun: если у него задан `size_pt` и он
+      отличается от `caption_size_pt` — Violation (warning).
+    """
+    config = profile.checks.get("I.04")
+    expected_size: float = 12.0
+    if config and config.params.get("caption_size_pt") is not None:
+        expected_size = float(config.params["caption_size_pt"])
+
+    violations: list[Violation] = []
+    for page_section, figure in _all_figures(document):
+        if not _has_text(figure.caption):
+            # Пустая подпись — I.01, не дублируем.
+            continue
+
+        seen_sizes: set[float] = set()
+        for element in figure.caption:
+            if not isinstance(element, TextRun):
+                continue
+            if not element.text or not element.text.strip():
+                continue
+            if element.size_pt is None:
+                continue
+            if (
+                abs(element.size_pt - expected_size) > _SIZE_TOLERANCE_PT
+                and element.size_pt not in seen_sizes
+            ):
+                seen_sizes.add(element.size_pt)
+                violations.append(
+                    Violation(
+                        check_code="I.04",
+                        severity="warning",
+                        message=(
+                            f"Подпись рисунка «{figure.id}» имеет кегль "
+                            f"{element.size_pt} pt вместо ожидаемых "
+                            f"{expected_size} pt"
+                        ),
+                        location=(
+                            f"page_sections.{page_section.id}.figure[{figure.id}]"
+                        ),
+                        suggestion=(
+                            f"Использовать кегль {expected_size} pt для подписи "
+                            f"рисунка"
+                        ),
+                        details={
+                            "figure_id": figure.id,
+                            "expected": str(expected_size),
+                            "found": str(element.size_pt),
+                        },
+                    )
+                )
+
     return violations
 
 
@@ -259,6 +347,102 @@ def _figure_reference_patterns(num: int) -> list[re.Pattern[str]]:
     ]
 
 
+def _iter_linear_blocks(
+    items: Sequence[LogicalSection | Block],
+) -> list[Block]:
+    """Линейный (в порядке появления) список всех Block-ов.
+
+    Заголовки LogicalSection не возвращаются — только содержательные блоки.
+    Рекурсивно обходит вложенные LogicalSection.
+    """
+    result: list[Block] = []
+    for item in items:
+        if isinstance(item, LogicalSection):
+            result.extend(_iter_linear_blocks(item.children))
+        elif isinstance(item, Block):
+            result.append(item)
+    return result
+
+
+def _document_blocks_linear(document: Document) -> list[Block]:
+    """Все Block-и документа в порядке появления."""
+    blocks: list[Block] = []
+    for ps in document.page_sections:
+        blocks.extend(_iter_linear_blocks(ps.content))
+    return blocks
+
+
+@register("I.07")
+def check_figure_reference_precedes(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """Ссылка на рисунок должна появляться в тексте ДО самого рисунка.
+
+    Алгоритм:
+    1. Собрать все блоки документа в линейном порядке.
+    2. Для каждой Figure с номером N:
+       - искать ссылку «рисунок N»/«рис. N» в Paragraph-ах, идущих ДО
+         этой Figure;
+       - если ссылка найдена до — ok;
+       - если ссылка отсутствует до, но найдена ПОСЛЕ — Violation
+         (порядок нарушен, severity=warning);
+       - если ссылок нет совсем — это случай I.06, не дублируем.
+    """
+    violations: list[Violation] = []
+    blocks = _document_blocks_linear(document)
+
+    # Найдём индексы рисунков и склеим тексты параграфов до/после каждого.
+    for idx, block in enumerate(blocks):
+        if not isinstance(block, Figure):
+            continue
+        text = _caption_text(block.caption)
+        if not text:
+            continue
+        match = _FIGURE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            num = int(match.group(1))
+        except ValueError:
+            continue
+
+        before_text = "\n".join(
+            _paragraph_text(b) for b in blocks[:idx] if isinstance(b, Paragraph)
+        )
+        after_text = "\n".join(
+            _paragraph_text(b) for b in blocks[idx + 1 :] if isinstance(b, Paragraph)
+        )
+
+        patterns = _figure_reference_patterns(num)
+        ref_before = any(p.search(before_text) for p in patterns)
+        if ref_before:
+            continue
+
+        ref_after = any(p.search(after_text) for p in patterns)
+        if not ref_after:
+            # Нет ссылок ни до, ни после — случай I.06, не дублируем.
+            continue
+
+        violations.append(
+            Violation(
+                check_code="I.07",
+                severity="warning",
+                message=(
+                    f"Ссылка на рисунок {num} в тексте идёт после самого "
+                    f"рисунка — она должна предшествовать рисунку"
+                ),
+                location=f"figure[{block.id}]",
+                suggestion=(
+                    f"Перенесите упоминание «рисунок {num}» в текст ДО самого "
+                    f"рисунка (например, «На рисунке {num} показано ...»)"
+                ),
+                details={"figure_id": block.id, "number": str(num)},
+            )
+        )
+
+    return violations
+
+
 @register("I.06")
 def check_figure_referenced_in_text(
     document: Document, profile: Profile  # noqa: ARG001
@@ -309,9 +493,104 @@ def check_figure_referenced_in_text(
     return violations
 
 
+@register("I.10")
+def check_figure_blank_line_after_caption(
+    document: Document,
+    profile: Profile,
+) -> list[Violation]:
+    """Между подписью рисунка и последующим текстом должна быть пустая строка
+    (заглушка).
+
+    TODO (Фаза 2): парсер не сохраняет «phantom»-параграфы (пустые абзацы)
+    как отдельные блоки модели — он схлопывает их в пробельные интервалы.
+    Поэтому проверить наличие пустой строки между Figure и следующим
+    непустым блоком на уровне модели нетривиально и требует расширения
+    парсера (опционально хранить пустые Paragraph-ы).
+    """
+    return []
+
+
+@register("I.08")
+def check_figure_dpi(document: Document, profile: Profile) -> list[Violation]:
+    """Качество изображения: DPI ≥ min_dpi.
+
+    Параметр `checks.I.08.params.min_dpi: int = 150`.
+    Парсер заполняет `Figure.dpi` через Pillow для embedded-изображений.
+    Если dpi=None — Pillow недоступен или формат не содержит метаданных,
+    проверка пропускается.
+    """
+    config = profile.checks.get("I.08")
+    min_dpi = 150
+    if config and config.params.get("min_dpi"):
+        min_dpi = int(config.params["min_dpi"])
+
+    violations: list[Violation] = []
+    for page_section, fig in _all_figures(document):
+        if fig.dpi is None:
+            continue
+        if fig.dpi < min_dpi:
+            violations.append(
+                Violation(
+                    check_code="I.08",
+                    severity="warning",
+                    message=(
+                        f"Рисунок «{fig.id}» имеет DPI={fig.dpi}, "
+                        f"ожидается ≥ {min_dpi}"
+                    ),
+                    location=f"page_sections.{page_section.id}.figure[{fig.id}].dpi",
+                    suggestion=(
+                        f"Пересохранить изображение с разрешением ≥ {min_dpi} DPI "
+                        f"для качественной печати"
+                    ),
+                    details={"actual": str(fig.dpi), "expected_min": str(min_dpi)},
+                )
+            )
+    return violations
+
+
+@register("I.09")
+def check_figure_centered(document: Document, profile: Profile) -> list[Violation]:
+    """Рисунок выровнен по центру (warning).
+
+    Парсер заполняет `Figure.alignment` из paragraph_format параграфа,
+    содержащего рисунок. None означает «наследуется от стиля» — проверка
+    пропускается.
+    """
+    config = profile.checks.get("I.09")
+    expected = "center"
+    if config and config.params.get("alignment"):
+        expected = str(config.params["alignment"])
+
+    violations: list[Violation] = []
+    for page_section, fig in _all_figures(document):
+        if fig.alignment is None:
+            continue
+        if fig.alignment != expected:
+            violations.append(
+                Violation(
+                    check_code="I.09",
+                    severity="warning",
+                    message=(
+                        f"Рисунок «{fig.id}» выровнен «{fig.alignment}», "
+                        f"ожидается «{expected}»"
+                    ),
+                    location=f"page_sections.{page_section.id}.figure[{fig.id}].alignment",
+                    suggestion=f"Выровнять рисунок «{expected}»",
+                    details={"expected": expected, "actual": fig.alignment},
+                )
+            )
+    return violations
+
+
 __all__ = [
+    "check_figure_blank_line_after_caption",
+    "check_figure_caption_below",
     "check_figure_caption_format",
+    "check_figure_caption_style",
+    "check_figure_centered",
+    "check_figure_dpi",
     "check_figure_has_caption",
     "check_figure_numbering_continuous",
+    "check_figure_reference_precedes",
     "check_figure_referenced_in_text",
 ]
