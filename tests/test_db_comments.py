@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты таблицы comments (миграция v3 — совместная работа)."""
 
 from __future__ import annotations
@@ -85,16 +83,14 @@ def test_add_comment_rejects_empty_body(db_path: Path, submission_id: int) -> No
 
 
 def test_add_comment_rejects_invalid_role(db_path: Path, submission_id: int) -> None:
-    with get_connection() as conn:
-        with pytest.raises(ValueError, match="role"):
-            add_comment(conn, submission_id=submission_id, body="x", role="admin")
+    with get_connection() as conn, pytest.raises(ValueError, match="role"):
+        add_comment(conn, submission_id=submission_id, body="x", role="admin")
 
 
 def test_add_comment_rejects_unknown_submission(db_path: Path) -> None:
     """submission_id должен существовать — иначе понятная ValueError."""
-    with get_connection() as conn:
-        with pytest.raises(ValueError, match="не существует"):
-            add_comment(conn, submission_id=999, body="x")
+    with get_connection() as conn, pytest.raises(ValueError, match="не существует"):
+        add_comment(conn, submission_id=999, body="x")
 
 
 def test_add_comment_default_role_anonymous(db_path: Path, submission_id: int) -> None:

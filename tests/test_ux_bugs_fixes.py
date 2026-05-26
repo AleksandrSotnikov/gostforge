@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты исправлений трёх UX-багов из релиза:
 
 1. Normal-стиль теперь имеет явный alignment=justify (раньше Word
@@ -16,12 +14,9 @@
 
 from __future__ import annotations
 
-import io
 import re
 import zipfile
 from pathlib import Path
-
-import pytest
 
 from gostforge.builder import work
 from gostforge.exporter import export_docx

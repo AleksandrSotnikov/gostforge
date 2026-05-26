@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002
-
 """Fluent-builder для одного логического раздела."""
 
 from __future__ import annotations
@@ -112,7 +110,7 @@ class SectionBuilder:
         image_path: str,
         caption: str,
         *,
-        width_cm: float | None = None,  # noqa: ARG002
+        width_cm: float | None = None,
     ) -> SectionBuilder:
         """Добавить рисунок (синоним `figure` с дополнительным параметром width_cm)."""
         return self.figure(image_path, caption)

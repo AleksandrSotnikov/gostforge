@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты подсветки поиска и авто-нумерации заголовков."""
 
 from __future__ import annotations
@@ -14,7 +12,6 @@ from gostforge.web.builder_editor import (
     _is_structural_heading,
     _strip_existing_number,
 )
-
 
 # --- _highlight_query_in_text ---
 

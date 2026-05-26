@@ -1,7 +1,5 @@
 """Тесты L.* — проверки списков (маркеры, нумерация, пунктуация)."""
 
-# ruff: noqa: RUF001, RUF002
-
 from gostforge.model import (
     Document,
     ListBlock,

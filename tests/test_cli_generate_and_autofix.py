@@ -1,16 +1,12 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI команды generate и кнопки «Применить автофиксы» в UI."""
 
 from __future__ import annotations
 
 import json
 import subprocess
-import sys
 from pathlib import Path
 
 import pytest
-
 
 # --- CLI: gostforge generate ---
 

@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
 """Тесты режима настоящих OOXML-комментариев Word для аннотатора.
 
 Стиль ``comments`` создаёт в .docx-архиве отдельную part ``word/comments.xml``

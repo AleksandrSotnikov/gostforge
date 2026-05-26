@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты REST endpoints для установки/удаления custom-профилей."""
 
 from __future__ import annotations
@@ -13,7 +11,6 @@ pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
 
 from gostforge.api import create_app
-
 
 _VALID_YAML = 'id: kafedra-api-2026\nname: Кафедра API\nversion: "1.0"\nextends: gost-7.32-2017\n'
 

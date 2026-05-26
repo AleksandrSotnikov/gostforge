@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты UI-функций «Нормоконтроль раздела».
 
 UI-секция работает с поля state["sections"][idx]["disabled_checks"] —
@@ -90,7 +88,6 @@ def test_state_with_specific_disabled_codes() -> None:
     """state['sections'][i]['disabled_checks'] = ['T.01', 'H.01']
     приводит к skip_checks вызову (не skip_all_checks)."""
     from gostforge.builder import work
-    from gostforge.web.builder_editor import _build_document_from_state
 
     # Промежуточный smoke — собираем напрямую через builder API,
     # сверяем что disabled_checks попадает в LogicalSection.

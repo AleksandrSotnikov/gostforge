@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты автоматической очистки «вручную добавленного маркера» в
 элементах списка перед записью numPr.
 
@@ -11,7 +9,6 @@
 
 from __future__ import annotations
 
-import io
 import re
 import zipfile
 from pathlib import Path
@@ -23,7 +20,6 @@ from gostforge.exporter import export_docx
 from gostforge.exporter.docx_exporter import _strip_leading_marker_from_inline
 from gostforge.model import InlineFormula, TextRun
 from gostforge.profile import load_profile
-
 
 # --- _strip_leading_marker_from_inline (чистая функция) ---
 
@@ -178,7 +174,6 @@ def test_clean_text_appears_after_strip(tmp_path: Path) -> None:
     doc_xml = _docx_xml(out, "word/document.xml")
     assert "NET Framework 4.8" in doc_xml
     # Текст после <w:t>...</w:t> должен начинаться с «NET», не с «-».
-    m = re.search(r"<w:t[^>]*>([^<]+)</w:t>", doc_xml)
     # Найдём run-текст параграфа списка с «NET Framework».
     runs = re.findall(r"<w:t[^>]*>([^<]+NET Framework[^<]*)</w:t>", doc_xml)
     for run_text in runs:

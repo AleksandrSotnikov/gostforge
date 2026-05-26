@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты сессии 3 плана развития: парсер чужих работ.
 
 * Hyperlink — новый inline-элемент;
@@ -9,12 +7,8 @@
 
 from __future__ import annotations
 
-import io
-import re
 import zipfile
 from pathlib import Path
-
-import pytest
 
 from gostforge.exporter import export_docx
 from gostforge.model import (
@@ -23,7 +17,6 @@ from gostforge.model import (
     DocumentMetadata,
     FootnoteRef,
     Hyperlink,
-    InlineElement,
     LogicalSection,
     PageGeometry,
     PageNumberingConfig,
@@ -34,7 +27,6 @@ from gostforge.model import (
 )
 from gostforge.parser import parse_docx
 from gostforge.profile import load_profile
-
 
 # --- Hyperlink ---
 

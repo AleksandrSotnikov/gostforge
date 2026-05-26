@@ -1,7 +1,5 @@
 """Тесты P.01 — маркировка приложений без запрещённых букв."""
 
-# ruff: noqa: RUF001, RUF002
-
 from gostforge.model import (
     Document,
     LogicalSection,

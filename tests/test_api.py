@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты REST API gostforge.api.app (Фаза 3, первая итерация).
 
 Используем fastapi.testclient — без поднятия uvicorn. Каждый endpoint

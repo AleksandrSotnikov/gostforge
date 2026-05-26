@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import itertools
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
@@ -288,10 +289,10 @@ def _resolve_page_params_from_profile(
     конфига профиля.
     """
     try:
-        from gostforge.profile import load_profile  # noqa: PLC0415
+        from gostforge.profile import load_profile
 
         profile = load_profile(profile_id)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return dict(_DEFAULT_MARGINS_MM), _DEFAULT_START_VALUE
 
     margins = dict(_DEFAULT_MARGINS_MM)
@@ -300,10 +301,8 @@ def _resolve_page_params_from_profile(
     start_value = _DEFAULT_START_VALUE
     f06 = profile.checks.get("F.06")
     if f06 and f06.params.get("start_value") is not None:
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             start_value = int(f06.params["start_value"])
-        except (TypeError, ValueError):
-            pass
 
     return margins, start_value
 

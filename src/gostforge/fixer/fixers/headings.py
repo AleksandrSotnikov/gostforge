@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002, RUF003
-
 """H.* — фиксеры заголовков логических разделов."""
 
 from __future__ import annotations
@@ -257,9 +255,7 @@ def _is_structural_heading(heading: str) -> bool:
     cleaned = _strip_existing_number(heading).strip().lower()
     if cleaned in _STRUCTURAL:
         return True
-    if cleaned.startswith("приложение"):
-        return True
-    return False
+    return bool(cleaned.startswith("приложение"))
 
 
 def _strip_existing_number(heading: str) -> str:

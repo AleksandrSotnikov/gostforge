@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Фиксеры для категории F (страница, поля, нумерация)."""
 
 from __future__ import annotations
@@ -125,10 +123,7 @@ def _has_page_placeholder(content) -> bool:  # type: ignore[no-untyped-def]
     """True, если в content есть TextRun с text == '{page}'."""
     if not content:
         return False
-    for el in content:
-        if isinstance(el, TextRun) and el.text == "{page}":
-            return True
-    return False
+    return any(isinstance(el, TextRun) and el.text == "{page}" for el in content)
 
 
 def _strip_page_placeholder(content):  # type: ignore[no-untyped-def]

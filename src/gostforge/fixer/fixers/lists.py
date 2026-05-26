@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Фиксеры для категории L (списки)."""
 
 from __future__ import annotations

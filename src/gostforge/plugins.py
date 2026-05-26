@@ -76,7 +76,7 @@ def load_plugins(directory: Path | None = None) -> list[str]:
             spec.loader.exec_module(module)
             loaded.append(module_name)
             logger.info("Загружен плагин %s из %s", module_name, plugin_file)
-        except Exception as exc:  # noqa: BLE001 — изолируем ошибки плагинов
+        except Exception as exc:
             logger.warning("Ошибка загрузки плагина %s: %s", plugin_file, exc)
             # Удалим возможный битый модуль из sys.modules, чтобы
             # повторная загрузка не схватила полу-импортированный объект.

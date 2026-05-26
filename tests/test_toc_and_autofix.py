@@ -1,11 +1,7 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты автоматического оглавления (TOC) и авто-применения фиксов."""
 
 from __future__ import annotations
 
-import io
-import re
 import zipfile
 from pathlib import Path
 
@@ -136,7 +132,6 @@ def test_l04_fixer_normalizes_endings(tmp_path: Path) -> None:
     """L.04-fixer: убирает хвостовые знаки, ставит ';' и '.'."""
     pytest.importorskip("streamlit")
     from gostforge.fixer.engine import fix as run_fix
-    from gostforge.model import ListBlock as LB
     from gostforge.model import (
         Document,
         DocumentMetadata,
@@ -145,6 +140,7 @@ def test_l04_fixer_normalizes_endings(tmp_path: Path) -> None:
         PageNumberingConfig,
         PageSection,
     )
+    from gostforge.model import ListBlock as LB
     from gostforge.model import TextRun as TR
 
     doc = Document(metadata=DocumentMetadata(title="X"))
@@ -184,7 +180,6 @@ def test_l04_fixer_normalizes_endings(tmp_path: Path) -> None:
 def test_l04_fixer_idempotent(tmp_path: Path) -> None:
     pytest.importorskip("streamlit")
     from gostforge.fixer.engine import fix as run_fix
-    from gostforge.model import ListBlock as LB
     from gostforge.model import (
         Document,
         DocumentMetadata,
@@ -193,6 +188,7 @@ def test_l04_fixer_idempotent(tmp_path: Path) -> None:
         PageNumberingConfig,
         PageSection,
     )
+    from gostforge.model import ListBlock as LB
     from gostforge.model import TextRun as TR
 
     doc = Document(metadata=DocumentMetadata(title="X"))
@@ -229,8 +225,8 @@ def test_l04_fixer_idempotent(tmp_path: Path) -> None:
 
 def test_parser_builds_section_hierarchy(tmp_path: Path) -> None:
     """Парсер должен класть подразделы в children главы, а не плоско."""
-    from gostforge.parser import parse_docx
     from gostforge.model import LogicalSection
+    from gostforge.parser import parse_docx
 
     b = (
         work("X", year=2026)

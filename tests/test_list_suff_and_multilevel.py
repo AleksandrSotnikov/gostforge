@@ -1,10 +1,7 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты suff=space (короткий отступ маркер↔текст) и multilevel-списков."""
 
 from __future__ import annotations
 
-import io
 import re
 import zipfile
 from pathlib import Path
@@ -58,7 +55,8 @@ def test_singlelevel_when_item_levels_empty(tmp_path: Path) -> None:
 def test_multilevel_when_item_levels_present(tmp_path: Path) -> None:
     """ListBlock.item_levels=[0, 1, 1, 0] → multilevel abstractNum."""
     from gostforge.builder import work as _work
-    from gostforge.model import ListBlock as _LB, TextRun as _TR
+    from gostforge.model import ListBlock as _LB
+    from gostforge.model import TextRun as _TR
 
     b = _work("X", year=2026)
     sec = b.section("Введение")
@@ -95,7 +93,8 @@ def test_multilevel_when_item_levels_present(tmp_path: Path) -> None:
 
 def test_multilevel_round_trip(tmp_path: Path) -> None:
     """Уровни вложенности сохраняются при export → parse."""
-    from gostforge.model import ListBlock as _LB, TextRun as _TR
+    from gostforge.model import ListBlock as _LB
+    from gostforge.model import TextRun as _TR
 
     b = work("X", year=2026)
     sec = b.section("Введение")

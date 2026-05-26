@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Streamlit-приложение gostforge.
 
 Минимальный веб-интерфейс Фазы 1: drag-and-drop загрузка одного или

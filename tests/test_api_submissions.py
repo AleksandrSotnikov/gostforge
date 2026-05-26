@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты REST endpoints для submissions (Фаза 3).
 
 Изолируем БД через GOSTFORGE_DB_PATH в tmp_path. Каждый тест получает

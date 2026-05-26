@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002, RUF003
-
 """Внутренняя модель документа.
 
 Это сердце системы: и парсер, и валидатор, и экспортёр работают через эту
@@ -12,7 +10,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
-
 
 SCHEMA_VERSION = "0.3.0"
 
@@ -116,7 +113,7 @@ InlineElement = TextRun | CrossRef | InlineFormula | Citation | Hyperlink | Foot
 # --- Блоки --------------------------------------------------------------------
 
 
-class BlockType(str, Enum):
+class BlockType(str, Enum):  # noqa: UP042  # str+Enum для JSON-сериализации (не StrEnum)
     PARAGRAPH = "paragraph"
     TABLE = "table"
     FIGURE = "figure"

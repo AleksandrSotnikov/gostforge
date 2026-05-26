@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI 'gostforge comment add/list/resolve/delete' + интеграция с history."""
 
 from __future__ import annotations

@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI export-md и helper-функции _state_to_markdown."""
 
 from __future__ import annotations
@@ -9,7 +7,6 @@ import subprocess
 from pathlib import Path
 
 from gostforge.cli import _block_to_md, _section_to_md, _state_to_markdown
-
 
 # --- CLI ---
 

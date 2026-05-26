@@ -17,12 +17,14 @@ PAGE/STYLEREF, реальные изображения, OMML-формулы) —
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
 import re
 from collections.abc import Sequence
+from datetime import UTC
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import docx  # type: ignore[import-not-found]
 from docx.document import Document as DocxDocument  # type: ignore[import-not-found]
@@ -31,6 +33,7 @@ from docx.oxml import OxmlElement  # type: ignore[import-not-found]
 from docx.oxml.ns import qn  # type: ignore[import-not-found]
 from docx.shared import Cm, Mm, Pt, RGBColor  # type: ignore[import-not-found]
 from docx.text.paragraph import Paragraph as DocxParagraph  # type: ignore[import-not-found]
+from lxml import etree  # type: ignore[import-untyped]
 
 from gostforge.model import (
     Block,
@@ -52,16 +55,10 @@ from gostforge.model import (
     TableOfContents,
     TextRun,
 )
+from gostforge.profile import Profile
 
 # Relationship namespace для w:hyperlink r:id="...".
 _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
-from gostforge.profile import Profile
-
-# Локальные импорты lxml — нужны только для записи поля PAGE в footer.
-# Парсер уже использует ту же lxml-цепочку для чтения.
-from lxml import etree  # type: ignore[import-untyped]
-
-
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
@@ -386,7 +383,7 @@ def _write_hyperlink(docx_paragraph: DocxParagraph, element: Hyperlink) -> None:
     python-docx ``part.relate_to(url, RT.HYPERLINK, is_external=True)``.
     Если есть anchor (внутренняя ссылка) — пишем w:anchor вместо r:id.
     """
-    from docx.opc.constants import RELATIONSHIP_TYPE as RT  # noqa: PLC0415
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
 
     p_xml = docx_paragraph._p
     hl = etree.SubElement(p_xml, f"{{{W_NS}}}hyperlink")
@@ -397,7 +394,7 @@ def _write_hyperlink(docx_paragraph: DocxParagraph, element: Hyperlink) -> None:
             part = docx_paragraph.part
             r_id = part.relate_to(element.url, RT.HYPERLINK, is_external=True)
             hl.set(f"{{{_R_NS}}}id", r_id)
-        except Exception:  # noqa: BLE001
+        except Exception:
             # Если relate_to не работает (тесты на mock docs) —
             # пишем URL прямо в anchor для отладки.
             hl.set(f"{{{W_NS}}}anchor", element.url)
@@ -824,7 +821,7 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
         run = paragraph.add_run()
         try:
             _add_picture_with_max_width(run, path)
-        except Exception:  # noqa: BLE001 — fallback на placeholder при любой ошибке
+        except Exception:
             paragraph.add_run(f"[Рисунок: {figure.id}]").italic = True
         _write_caption_paragraph(doc, figure.caption, caption_kind="figure")
         return
@@ -914,14 +911,14 @@ def _try_write_embedded_picture(
     """Попытка достать media-blob из source_docx и вставить как картинку."""
     try:
         image_part = source_docx_obj.part.related_parts.get(rid)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Не удалось получить related_parts для rId=%s", rid)
         return False
     if image_part is None:
         return False
     try:
         blob = image_part.blob
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
     paragraph = doc.add_paragraph()
@@ -931,7 +928,7 @@ def _try_write_embedded_picture(
     run = paragraph.add_run()
     try:
         _add_picture_with_max_width(run, io.BytesIO(blob))
-    except Exception:  # noqa: BLE001
+    except Exception:
         p_xml = paragraph._p
         parent = p_xml.getparent()
         if parent is not None:
@@ -1026,10 +1023,7 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
 
     # lvlText для numbering.xml: %1 = подстановка номера, остальное —
     # литеральный текст. ordered_fmt из профиля имеет «{n}» — конвертируем.
-    if list_block.ordered:
-        lvl_text = ordered_fmt.replace("{n}", "%1")
-    else:
-        lvl_text = bullet
+    lvl_text = ordered_fmt.replace("{n}", "%1") if list_block.ordered else bullet
     # Сколько уровней нужно (0 = плоский). Берём max(item_levels)+1
     # или 1 (если levels пустые).
     levels = list(list_block.item_levels) if list_block.item_levels else []
@@ -1133,16 +1127,12 @@ def _ensure_list_num_in_numbering(
     # Находим максимальный существующий abstractNumId и numId.
     max_anid = -1
     for an in num_elem.findall(f"{{{W_NS}}}abstractNum"):
-        try:
+        with contextlib.suppress(ValueError):
             max_anid = max(max_anid, int(an.get(f"{{{W_NS}}}abstractNumId") or "-1"))
-        except ValueError:
-            pass
     max_nid = 0
     for n in num_elem.findall(f"{{{W_NS}}}num"):
-        try:
+        with contextlib.suppress(ValueError):
             max_nid = max(max_nid, int(n.get(f"{{{W_NS}}}numId") or "0"))
-        except ValueError:
-            pass
 
     new_anid = max_anid + 1
     new_nid = max_nid + 1
@@ -1357,10 +1347,8 @@ def _sync_page_section_with_profile(page_section: PageSection, profile: Profile)
         and f06.params.get("start_value") is not None
         and page_section.page_numbering.start_mode == "start_at"
     ):
-        try:
+        with contextlib.suppress(TypeError, ValueError):
             page_section.page_numbering.start_value = int(f06.params["start_value"])
-        except (TypeError, ValueError):
-            pass
 
 
 def _apply_pgnumtype(doc: DocxDocument, page_section: PageSection) -> None:
@@ -1499,9 +1487,9 @@ def export_docx(
         # чтобы парсер мог его прочитать обратно при impоrt-docx.
         # python-docx иначе ставит datetime.now(), и год потеряется.
         if document.metadata.year:
-            from datetime import datetime, timezone  # noqa: PLC0415
+            from datetime import datetime
 
-            core.created = datetime(document.metadata.year, 1, 1, tzinfo=timezone.utc)
+            core.created = datetime(document.metadata.year, 1, 1, tzinfo=UTC)
 
         if document.page_sections:
             first = document.page_sections[0]
@@ -1568,7 +1556,7 @@ def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
                 elem = etree.SubElement(root, f"{{{W_NS}}}autoHyphenation")
                 root.insert(0, elem)
             new_xml = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
-        except Exception:  # noqa: BLE001
+        except Exception:
             new_xml = settings_xml
 
         wrote_settings = False

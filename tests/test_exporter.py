@@ -271,6 +271,7 @@ def test_export_roundtrip_preserves_f04_and_f06(tmp_path: Path) -> None:
 
     sys.path.insert(0, str(Path(__file__).parent))
     from conftest import make_docx
+
     from gostforge.parser import parse_docx
     from gostforge.profile import load_profile
     from gostforge.validator import validate

@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Сквозной тест вёрстки: builder → export → parse → validate.
 
 Проверяет, что сгенерированный конструктором документ при обратной
@@ -158,7 +156,7 @@ def test_layout_check_codes_are_real() -> None:
     Если в реестре переименуется проверка (например, T.01 → T.21),
     тест должен это поймать — иначе guard молча перестанет работать.
     """
-    from gostforge.validator.engine import _registry  # noqa: PLC0415
+    from gostforge.validator.engine import _registry
 
     registered = set(_registry.keys())
     missing = LAYOUT_CHECK_CODES - registered

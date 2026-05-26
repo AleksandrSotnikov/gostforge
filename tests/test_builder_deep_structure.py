@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты глубокой структуры разделов и переупорядочивания."""
 
 from __future__ import annotations
@@ -13,10 +11,8 @@ pytest.importorskip("streamlit")
 import streamlit as st
 
 from gostforge.builder import work
-from gostforge.exporter import export_docx
 from gostforge.model import LogicalSection
 from gostforge.parser import parse_docx
-from gostforge.profile import load_profile
 from gostforge.web.builder_editor import (
     _build_document_from_state,
     _move_section_to,

@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты rich-Markdown round-trip: bold/italic в runs."""
 
 from __future__ import annotations
@@ -9,7 +7,6 @@ import subprocess
 from pathlib import Path
 
 from gostforge.cli import _paragraph_to_md, _parse_md_inline
-
 
 # --- _paragraph_to_md ---
 

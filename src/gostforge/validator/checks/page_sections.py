@@ -24,7 +24,6 @@ from gostforge.profile import Profile
 
 from ..engine import Violation, register
 
-
 # --- Утилиты ------------------------------------------------------------------
 
 

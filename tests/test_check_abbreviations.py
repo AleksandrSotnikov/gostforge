@@ -1,7 +1,5 @@
 """Тесты A.01 — расшифровка аббревиатур при первом употреблении."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from gostforge.model import (
     Document,
     LogicalSection,

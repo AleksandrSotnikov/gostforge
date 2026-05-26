@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """T.* — фиксеры основного текста."""
 
 from __future__ import annotations
@@ -292,7 +290,7 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
 @register("T.06")
 def fix_disable_auto_hyphenation(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[FixApplied]:
     """Отключить автоматический перенос слов (`Document.auto_hyphenation = False`).
 

@@ -204,7 +204,7 @@ def check_term_consistency(document: Document, profile: Profile) -> list[Violati
     if not terms_raw:
         return []
 
-    from gostforge.validator.checks.text import _all_paragraphs as _all_p  # noqa: PLC0415
+    from gostforge.validator.checks.text import _all_paragraphs as _all_p
 
     full_text = " ".join(
         "".join(el.text for el in p.content if hasattr(el, "text") and isinstance(el.text, str))
@@ -301,7 +301,7 @@ def check_bureaucratic_style(document: Document, profile: Profile) -> list[Viola
     patterns = _BUREAUCRATIC_PATTERNS + extra_patterns
     compiled = [(re.compile(p, re.IGNORECASE), s) for p, s in patterns]
 
-    from gostforge.validator.checks.text import _all_paragraphs as _all_p  # noqa: PLC0415
+    from gostforge.validator.checks.text import _all_paragraphs as _all_p
 
     violations: list[Violation] = []
     for paragraph in _all_p(document):
@@ -360,7 +360,7 @@ def check_sentence_length(document: Document, profile: Profile) -> list[Violatio
     if config and config.params.get("max_words") is not None:
         max_words = int(config.params["max_words"])
 
-    from gostforge.validator.checks.text import _all_paragraphs as _all_p  # noqa: PLC0415
+    from gostforge.validator.checks.text import _all_paragraphs as _all_p
 
     violations: list[Violation] = []
     for paragraph in _all_p(document):
@@ -428,7 +428,7 @@ def check_word_repetition(document: Document, profile: Profile) -> list[Violatio
     if config and config.params.get("min_distance") is not None:
         min_distance = int(config.params["min_distance"])
 
-    from gostforge.validator.checks.text import _all_paragraphs as _all_p  # noqa: PLC0415
+    from gostforge.validator.checks.text import _all_paragraphs as _all_p
 
     violations: list[Violation] = []
     for paragraph in _all_p(document):

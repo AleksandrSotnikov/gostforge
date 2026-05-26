@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002
-
 """Тесты H.01 и H.03 — формат заголовков."""
 
 from gostforge.model import (

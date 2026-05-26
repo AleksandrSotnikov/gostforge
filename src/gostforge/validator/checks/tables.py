@@ -1,7 +1,5 @@
 """B.* — проверки таблиц."""
 
-# ruff: noqa: RUF001, RUF002
-
 from __future__ import annotations
 
 import re
@@ -55,8 +53,8 @@ def _has_text(elements: Sequence[InlineElement]) -> bool:
 
 @register("B.02")
 def check_table_caption_above(
-    document: Document,  # noqa: ARG001
-    profile: Profile,  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Подпись таблицы должна располагаться над таблицей (заглушка Фазы 2).
 
@@ -73,8 +71,8 @@ def check_table_caption_above(
 
 @register("B.04")
 def check_table_continuation_header(
-    document: Document,  # noqa: ARG001
-    profile: Profile,  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """При переносе таблицы на новую страницу должен быть заголовок «Продолжение таблицы N» (заглушка Фазы 2).
 
@@ -88,8 +86,8 @@ def check_table_continuation_header(
 
 @register("B.05")
 def check_table_header_repeats(
-    document: Document,  # noqa: ARG001
-    profile: Profile,  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Шапка таблицы должна повторяться при переносе на новую страницу (заглушка Фазы 2).
 
@@ -105,7 +103,7 @@ def check_table_header_repeats(
 @register("B.01")
 def check_table_has_caption(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """Каждая таблица должна иметь подпись «Таблица N — Название»."""
     violations: list[Violation] = []
@@ -208,7 +206,7 @@ def _paragraph_text(paragraph: Paragraph) -> str:
 @register("B.09")
 def check_table_numbering_continuous(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """Сквозная нумерация таблиц: номера должны идти 1, 2, 3, ...
 
@@ -300,7 +298,7 @@ def _table_reference_patterns(num: int) -> list[re.Pattern[str]]:
 @register("B.08")
 def check_table_referenced_in_text(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """На каждую таблицу должна быть ссылка в тексте.
 

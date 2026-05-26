@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты сессии 1 плана развития:
 * F.06, F.04, H.04 автофиксеры;
 * live-preview TOC в UI;
@@ -7,8 +5,6 @@
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import pytest
 
@@ -25,7 +21,6 @@ from gostforge.model import (
     TextRun,
 )
 from gostforge.profile import load_profile
-
 
 # --- F.06 fixer ---
 
@@ -230,7 +225,7 @@ def test_block_templates_factories_produce_valid_dicts() -> None:
     pytest.importorskip("streamlit")
     from gostforge.web.builder_editor import _BLOCK_TEMPLATES
 
-    for key, (label, factory) in _BLOCK_TEMPLATES.items():
+    for _key, (_label, factory) in _BLOCK_TEMPLATES.items():
         result = factory()
         # Либо dict (один блок), либо list[dict] (несколько связанных).
         assert isinstance(result, (dict, list))
@@ -271,7 +266,7 @@ def test_block_template_toc_uses_correct_kind() -> None:
 
     # Проверим, что среди всех шаблонов нет ошибочного TOC-блока через
     # шаблоны разделов (только через builder-API .table_of_contents()).
-    for key, (_, factory) in _BLOCK_TEMPLATES.items():
+    for _key, (_, factory) in _BLOCK_TEMPLATES.items():
         result = factory()
         items = result if isinstance(result, list) else [result]
         for blk in items:

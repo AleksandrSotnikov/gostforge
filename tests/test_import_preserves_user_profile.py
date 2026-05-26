@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты что _handle_docx_import сохраняет profile_id, выбранный
 пользователем в sidebar — не перезаписывает дефолтом из импортируемого
 документа.
@@ -17,6 +15,8 @@ from pathlib import Path
 import pytest
 
 pytest.importorskip("streamlit")
+
+import contextlib
 
 import streamlit as st
 
@@ -58,15 +58,10 @@ def test_import_preserves_user_selected_profile_eskd(tmp_path: Path) -> None:
     }
     docx_bytes = _make_docx(tmp_path)  # генерируется с gost-7.32-2017
 
-    # _handle_docx_import зовёт st.rerun() в конце — пытаемся
-    # просто запустить и проверить state после, либо catch
-    # NoSessionContext.
-    try:
+    # _handle_docx_import зовёт st.rerun() в конце — вне Streamlit-сессии
+    # это бросает, но state уже обновлён, поэтому исключение подавляем.
+    with contextlib.suppress(Exception):
         _handle_docx_import(docx_bytes, "loaded.docx")
-    except Exception:
-        # st.rerun() вне Streamlit-сессии бросает — это OK,
-        # state уже обновлён.
-        pass
 
     assert st.session_state["builder_state"]["profile_id"] == "gost-r-2.105-2019", (
         "profile_id переключился с ЕСКД на дефолт после импорта — "
@@ -81,10 +76,8 @@ def test_import_uses_doc_profile_when_no_user_selection(
     импортированного документа."""
     # Не ставим builder_state вообще.
     docx_bytes = _make_docx(tmp_path, profile_id="gost-7.32-2017")
-    try:
+    with contextlib.suppress(Exception):
         _handle_docx_import(docx_bytes, "loaded.docx")
-    except Exception:
-        pass
 
     # Должен взять из документа (gost-7.32-2017).
     state = st.session_state.get("builder_state", {})
@@ -105,15 +98,11 @@ def test_import_preserves_eskd_through_multiple_docx_loads(
     }
     # Первая загрузка.
     docx1 = _make_docx(tmp_path)
-    try:
+    with contextlib.suppress(Exception):
         _handle_docx_import(docx1, "a.docx")
-    except Exception:
-        pass
     # Вторая загрузка.
     docx2 = _make_docx(tmp_path)
-    try:
+    with contextlib.suppress(Exception):
         _handle_docx_import(docx2, "b.docx")
-    except Exception:
-        pass
 
     assert st.session_state["builder_state"]["profile_id"] == "gost-r-2.105-2019"

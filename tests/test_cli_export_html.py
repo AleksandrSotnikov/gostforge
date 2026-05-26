@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI export-html и helper-функций."""
 
 from __future__ import annotations
@@ -14,7 +12,6 @@ from gostforge.cli import (
     _section_to_html,
     _state_to_html,
 )
-
 
 # --- CLI ---
 

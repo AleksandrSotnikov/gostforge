@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты S.01, S.02, S.03, S.04, S.05, S.06, S.07, S.08 — структура работы."""
 
 from gostforge.model import (

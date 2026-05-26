@@ -1,7 +1,5 @@
 """Тесты I.01 — у каждого рисунка должна быть подпись."""
 
-# ruff: noqa: RUF001, RUF002
-
 from gostforge.model import (
     Document,
     Figure,

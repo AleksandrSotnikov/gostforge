@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты undo/redo для visual-builder state (шаг 7 Фазы 2.5).
 
 streamlit.session_state — это объектно-словарный синглтон, который не
@@ -25,7 +23,6 @@ from gostforge.web.builder_editor import (
     _redo_state,
     _undo_state,
 )
-
 
 _RESET_KEYS = ("builder_state", "builder_history", "builder_history_cursor")
 

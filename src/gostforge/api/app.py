@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """FastAPI-приложение для gostforge.
 
 Структура endpoints — см. docs/phase-3-api-spec.md. Главная фабрика
@@ -25,11 +23,12 @@ try:
 except ImportError as exc:  # pragma: no cover — extras [api] обязателен
     raise ImportError('Установите gostforge[api] для REST API: pip install -e ".[api]"') from exc
 
+import contextlib
+
 from gostforge import __version__
 from gostforge.profile import Profile, list_profiles, load_profile
 from gostforge.validator import validate
 from gostforge.validator.engine import registered_checks
-
 
 # --- Конфигурация из env ----------------------------------------------------
 
@@ -187,10 +186,8 @@ def _parse_uploaded_docx(data: bytes) -> Any:
     try:
         return parse_docx(tmp_path)
     finally:
-        try:
+        with contextlib.suppress(OSError):
             tmp_path.unlink()
-        except OSError:
-            pass
 
 
 # --- Фабрика приложения -----------------------------------------------------
@@ -429,10 +426,8 @@ def create_app() -> FastAPI:
             output_bytes = dst_path.read_bytes()
         finally:
             for p in (src_path, dst_path):
-                try:
+                with contextlib.suppress(OSError):
                     p.unlink()
-                except OSError:
-                    pass
         return Response(
             content=output_bytes,
             media_type=_DOCX_MIME,
@@ -479,10 +474,8 @@ def create_app() -> FastAPI:
             output_bytes = dst_path.read_bytes()
         finally:
             for p in (src_path, dst_path):
-                try:
+                with contextlib.suppress(OSError):
                     p.unlink()
-                except OSError:
-                    pass
         return Response(
             content=output_bytes,
             media_type=_DOCX_MIME,

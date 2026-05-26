@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI apply-fixes."""
 
 from __future__ import annotations

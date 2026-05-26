@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002
-
 """Веб-интерфейс gostforge на Streamlit.
 
 Импортируется только при явном запуске CLI-команды ``gostforge ui``

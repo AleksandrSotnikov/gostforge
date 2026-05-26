@@ -1,7 +1,5 @@
 """Тесты M.01 / M.03 / M.04 — нумерация и ссылки на формулы."""
 
-# ruff: noqa: RUF001, RUF002
-
 from gostforge.model import (
     Document,
     Formula,

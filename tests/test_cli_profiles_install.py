@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI 'gostforge profiles install/uninstall/list' (Фаза 3)."""
 
 from __future__ import annotations

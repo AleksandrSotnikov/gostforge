@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты локального реестра пользовательских профилей (миграция v2)."""
 
 from __future__ import annotations
@@ -76,26 +74,23 @@ def test_install_returns_record(db_path: Path) -> None:
 
 
 def test_install_rejects_invalid_yaml(db_path: Path) -> None:
-    with get_connection() as conn:
-        with pytest.raises(ValueError, match="Невалидный YAML"):
-            install_profile(conn, yaml_content="!!! битый ::: yaml :::")
+    with get_connection() as conn, pytest.raises(ValueError, match="Невалидный YAML"):
+        install_profile(conn, yaml_content="!!! битый ::: yaml :::")
 
 
 def test_install_rejects_yaml_without_required_fields(db_path: Path) -> None:
     """YAML без id/name → ValueError, не молчаливая запись."""
-    with get_connection() as conn:
-        with pytest.raises(ValueError, match="валидацию"):
-            install_profile(
-                conn,
-                yaml_content="description: только описание\n",
-            )
+    with get_connection() as conn, pytest.raises(ValueError, match="валидацию"):
+        install_profile(
+            conn,
+            yaml_content="description: только описание\n",
+        )
 
 
 def test_install_rejects_non_mapping_yaml(db_path: Path) -> None:
     """YAML-список или строка вместо словаря отклоняется."""
-    with get_connection() as conn:
-        with pytest.raises(ValueError, match="должен быть YAML-объектом"):
-            install_profile(conn, yaml_content="- a\n- b\n")
+    with get_connection() as conn, pytest.raises(ValueError, match="должен быть YAML-объектом"):
+        install_profile(conn, yaml_content="- a\n- b\n")
 
 
 def test_install_duplicate_without_overwrite_raises(db_path: Path) -> None:

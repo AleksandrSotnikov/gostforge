@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI new-state и bulk-операций / шаблонов разделов в UI."""
 
 from __future__ import annotations
@@ -111,10 +109,10 @@ pytest.importorskip("streamlit")
 import streamlit as st  # noqa: E402
 
 from gostforge.web.builder_editor import (  # noqa: E402
+    _SECTION_TEMPLATES,
     _bulk_apply_title_case,
     _bulk_remove_empty_paragraphs,
     _bulk_reset_disabled_checks,
-    _SECTION_TEMPLATES,
     _to_title_case,
 )
 
@@ -225,7 +223,7 @@ def test_bulk_reset_disabled_checks() -> None:
 
 def test_section_templates_factories_produce_valid_dicts() -> None:
     """Каждый шаблон возвращает dict с heading и blocks."""
-    for key, (label, factory) in _SECTION_TEMPLATES.items():
+    for _key, (_label, factory) in _SECTION_TEMPLATES.items():
         section = factory()
         assert isinstance(section, dict)
         assert "heading" in section

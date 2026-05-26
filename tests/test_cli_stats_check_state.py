@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI stats-state и check-state — операции над JSON-state
 без промежуточного .docx."""
 

@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты функции _apply_style_overrides в Streamlit-конструкторе.
 
 UI-секцию (sidebar) проверяем только smoke-импортом — здесь

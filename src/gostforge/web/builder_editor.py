@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Интерактивный визуальный конструктор работ для Streamlit.
 
 Реализует второй режим веб-интерфейса — полноценный редактор, где
@@ -38,6 +36,8 @@ except ImportError as exc:  # pragma: no cover - streamlit обязателен 
     raise ImportError(
         'Установите gostforge[ui] для веб-интерфейса: pip install -e ".[ui]"'
     ) from exc
+
+import contextlib
 
 from gostforge import __version__
 from gostforge.builder import work
@@ -337,10 +337,8 @@ def _save_state_version(state: dict[str, Any]) -> Path:
         reverse=True,
     )
     for old in versions[_VERSION_KEEP_COUNT:]:
-        try:
+        with contextlib.suppress(OSError):
             old.unlink()
-        except OSError:
-            pass
     return out_path
 
 
@@ -640,7 +638,7 @@ def _reconstruct_section_hierarchy(flat: list[Any]) -> list[Any]:
     приемлемо, потому что вход — свежесозданный объект из parse_docx,
     другими частями системы не разделяемый.
     """
-    from gostforge.model import LogicalSection  # noqa: PLC0415
+    from gostforge.model import LogicalSection
 
     top: list[LogicalSection] = []
     stack: list[LogicalSection] = []
@@ -677,8 +675,8 @@ def extract_embedded_images(docx_path: Path, target_dir: Path) -> dict[str, Path
        в target_dir/<rId><.ext>.
     4. Возвращаем mapping rId → path.
     """
-    import zipfile  # noqa: PLC0415
-    from xml.etree import ElementTree as ET  # noqa: PLC0415
+    import zipfile
+    from xml.etree import ElementTree as ET
 
     target_dir.mkdir(parents=True, exist_ok=True)
     mapping: dict[str, Path] = {}
@@ -774,7 +772,7 @@ def document_to_state(document: Any) -> dict[str, Any]:
       (поле ``runs`` в block-dict) — иначе при reconvert через
       ``_build_document_from_state`` они потерялись бы.
     """
-    from gostforge.model import (  # noqa: PLC0415
+    from gostforge.model import (
         BibliographyEntry,
         Citation,
         CrossRef,
@@ -1212,8 +1210,7 @@ def _normalize_paragraph_state(block: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(text, str):
             text = ""
         block["runs"] = [{"kind": "text", "text": text}] if text else []
-    if "text" in block:
-        del block["text"]
+    block.pop("text", None)
     return block
 
 
@@ -1642,7 +1639,7 @@ def _apply_style_overrides(profile: Any, overrides: dict[str, Any]) -> Any:
             if side in margins:
                 p.styles.page.margins_mm[side] = float(margins[side])
     # Тело.
-    if "body_font" in overrides and overrides["body_font"]:
+    if overrides.get("body_font"):
         p.styles.body.font = overrides["body_font"]
     if "body_size_pt" in overrides:
         p.styles.body.size_pt = float(overrides["body_size_pt"])
@@ -1657,16 +1654,16 @@ def _apply_style_overrides(profile: Any, overrides: dict[str, Any]) -> Any:
     # Заголовок 1.
     if "heading1_uppercase" in overrides:
         p.styles.heading_1.uppercase = bool(overrides["heading1_uppercase"])
-    if "heading1_color" in overrides and overrides["heading1_color"]:
+    if overrides.get("heading1_color"):
         p.styles.heading_1.color = overrides["heading1_color"]
     if "heading1_spacing_before_pt" in overrides:
         p.styles.heading_1.spacing_before_pt = float(overrides["heading1_spacing_before_pt"])
     if "heading1_spacing_after_pt" in overrides:
         p.styles.heading_1.spacing_after_pt = float(overrides["heading1_spacing_after_pt"])
     # Списки.
-    if "bullet_char" in overrides and overrides["bullet_char"]:
+    if overrides.get("bullet_char"):
         p.styles.lists.bullet_char = overrides["bullet_char"]
-    if "ordered_format" in overrides and overrides["ordered_format"]:
+    if overrides.get("ordered_format"):
         p.styles.lists.ordered_format = overrides["ordered_format"]
     # Таблицы.
     if "table_border_style" in overrides:
@@ -1769,8 +1766,8 @@ def _highlight_query_in_text(text: str, query: str) -> str:
     """
     if not query:
         return text
-    import html  # noqa: PLC0415
-    import re  # noqa: PLC0415
+    import html
+    import re
 
     escaped_text = html.escape(text)
     # Регекс по escape-нутому text, но ищем escape-нутый query —
@@ -1819,10 +1816,7 @@ def _section_matches_query(section: dict[str, Any], query: str) -> bool:
         for ref in sec.get("references") or []:
             if query in str(ref).lower():
                 return True
-        for sub in sec.get("subsections") or []:
-            if search_in_section(sub):
-                return True
-        return False
+        return any(search_in_section(sub) for sub in sec.get("subsections") or [])
 
     return search_in_section(section)
 
@@ -2252,7 +2246,7 @@ _STRUCTURAL_HEADINGS = frozenset(
 def _is_structural_heading(heading: str) -> bool:
     """True, если заголовок — структурный (Введение, Заключение, ...)
     или приложение (начинается с «Приложение»)."""
-    import re  # noqa: PLC0415
+    import re
 
     # Снимаем существующую нумерацию вида '1 Х', '1. Х', '1.1 Х' для
     # сравнения с базовым названием.
@@ -2260,9 +2254,7 @@ def _is_structural_heading(heading: str) -> bool:
     if cleaned in _STRUCTURAL_HEADINGS:
         return True
     # Приложения: «Приложение А», «Приложение Б», ...
-    if cleaned.startswith("приложение"):
-        return True
-    return False
+    return bool(cleaned.startswith("приложение"))
 
 
 def _strip_existing_number(heading: str) -> str:
@@ -2271,7 +2263,7 @@ def _strip_existing_number(heading: str) -> str:
     Примеры: «1 Глава» → «Глава», «1.1. Подраздел» → «Подраздел»,
     «1.1.1 Пункт» → «Пункт». Если номера нет — возвращает как есть.
     """
-    import re  # noqa: PLC0415
+    import re
 
     return re.sub(r"^\d+(\.\d+)*\.?\s+", "", heading).strip()
 
@@ -2420,12 +2412,10 @@ def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
     undo_col, redo_col = st.sidebar.columns(2)
     undo_disabled = not _can_undo()
     redo_disabled = not _can_redo()
-    if undo_col.button("⟲ Отменить", disabled=undo_disabled, key="builder_undo"):
-        if _undo_state():
-            st.rerun()
-    if redo_col.button("⟳ Повторить", disabled=redo_disabled, key="builder_redo"):
-        if _redo_state():
-            st.rerun()
+    if undo_col.button("⟲ Отменить", disabled=undo_disabled, key="builder_undo") and _undo_state():
+        st.rerun()
+    if redo_col.button("⟳ Повторить", disabled=redo_disabled, key="builder_redo") and _redo_state():
+        st.rerun()
     history = st.session_state.get("builder_history") or []
     cursor = int(st.session_state.get("builder_history_cursor", -1))
     st.sidebar.caption(f"Snapshot {cursor + 1} из {len(history)}")
@@ -2509,7 +2499,7 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
     а в чужом docx стоит дефолтный gost-7.32-2017 — переключение на
     дефолт было бы потерей пользовательского выбора.
     """
-    from gostforge.parser import parse_docx  # noqa: PLC0415
+    from gostforge.parser import parse_docx
 
     # Запоминаем профиль, который пользователь уже выбрал в sidebar
     # ДО перезаписи state. Применим к новому state после загрузки.
@@ -2526,7 +2516,7 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
         # подменяем 'embedded:rIdN' в state на абсолютные пути.
         # Без этого при повторной генерации картинки терялись
         # (source_docx уже не доступен).
-        import time  # noqa: PLC0415
+        import time
 
         images_dir = Path.home() / ".gostforge" / "imports" / f"{filename}-{int(time.time())}"
         rid_to_path = extract_embedded_images(tmp_path, images_dir)
@@ -2592,12 +2582,12 @@ def _compute_import_violations_summary(document: Any, profile_id: str) -> dict[s
     summary для UI. На случай ошибок (профиль не найден, exception
     внутри validate) возвращает пустую сводку.
     """
-    from collections import Counter  # noqa: PLC0415
+    from collections import Counter
 
     try:
         profile = load_profile(profile_id)
         violations = validate(document, profile)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {"total": 0, "by_severity": {}, "top_codes": []}
     by_severity: dict[str, int] = {"error": 0, "warning": 0, "info": 0}
     for v in violations:
@@ -2621,13 +2611,13 @@ def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
     На ошибку (например, builder упал на пустом state) — пустая
     сводка без падения.
     """
-    from collections import Counter  # noqa: PLC0415
+    from collections import Counter
 
     try:
         # Внутрипрограммный путь без docx-touche: state → builder →
         # Document → validate.
         # Используем существующий WorkBuilder через _apply_blocks-логику.
-        from gostforge.builder import work  # noqa: PLC0415
+        from gostforge.builder import work
 
         builder = work(
             title=state.get("title", "") or "X",
@@ -2660,7 +2650,7 @@ def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
         document = builder.build()
         profile = load_profile(state.get("profile_id", "gost-7.32-2017"))
         violations = validate(document, profile)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return {"total": 0, "by_severity": {}, "top_codes": []}
     by_severity: dict[str, int] = {"error": 0, "warning": 0, "info": 0}
     for v in violations:
@@ -2843,10 +2833,7 @@ def _render_progress_panel() -> None:
     metrics = _compute_progress_metrics(state)
     total = metrics["sections_total"]
     filled = metrics["sections_filled"]
-    if total > 0:
-        progress = filled / total
-    else:
-        progress = 0.0
+    progress = filled / total if total > 0 else 0.0
 
     with st.expander(
         f"Прогресс работы — {filled}/{total} разделов заполнено ({metrics['total_words']} слов)",
@@ -2934,7 +2921,7 @@ def _render_import_violations_panel() -> None:
         # Кнопка автофиксов: применить fixer к текущему state и
         # обновить summary. Доступно только если есть фиксеры
         # под найденные нарушения.
-        from gostforge.fixer.engine import registered_fixers  # noqa: PLC0415
+        from gostforge.fixer.engine import registered_fixers
 
         fixable_codes = set(registered_fixers()) & {e["code"] for e in top}
         if fixable_codes:
@@ -2971,8 +2958,8 @@ def _apply_autofixes_to_state() -> None:
     Альтернативой был бы прямой fixer-over-state, но это удвоит код
     fixer-а — не нужно.
     """
-    from gostforge.fixer.engine import fix as run_fix  # noqa: PLC0415
-    from gostforge.parser import parse_docx  # noqa: PLC0415
+    from gostforge.fixer.engine import fix as run_fix
+    from gostforge.parser import parse_docx
 
     state = st.session_state.get("builder_state")
     if not state:
@@ -2989,7 +2976,7 @@ def _apply_autofixes_to_state() -> None:
         profile = load_profile(profile_id)
         applied = run_fix(document, profile)
         new_state = document_to_state(document)
-    except Exception as exc:  # noqa: BLE001 - UI feedback
+    except Exception as exc:
         st.error(f"Не удалось применить автофиксы: {exc}")
         return
 
@@ -3123,7 +3110,7 @@ _CHECK_CATEGORIES: dict[str, str] = {
 
 def _list_available_check_codes() -> list[str]:
     """Все зарегистрированные коды проверок (для multi-select)."""
-    from gostforge.validator.engine import registered_checks  # noqa: PLC0415
+    from gostforge.validator.engine import registered_checks
 
     return registered_checks()
 
@@ -3282,7 +3269,7 @@ def _render_single_section_pdf_preview(section: dict[str, Any], idx: int) -> Non
             # Если в разделе библиография, у профиля могут быть жёсткие
             # требования к источникам — продолжаем с try/except.
             data = _build_document_from_state(mini_state)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             st.error(f"Не удалось собрать раздел: {exc}")
             return
         _render_pdf_preview(data)
@@ -3990,7 +3977,7 @@ def _render_generate_button() -> None:
     if apply_fixes_before_export:
         try:
             _apply_autofixes_to_state()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             st.warning(f"Автофиксы не применены (продолжаем без них): {exc}")
         # _apply_autofixes_to_state мутирует session_state["builder_state"],
         # перечитаем актуальную версию.
@@ -4031,7 +4018,7 @@ def _render_pdf_preview(docx_data: bytes) -> None:
     Требует LibreOffice (см. gostforge.pdf_exporter). При его
     отсутствии — st.error без падения UI.
     """
-    from gostforge.pdf_exporter import (  # noqa: PLC0415
+    from gostforge.pdf_exporter import (
         LibreOfficeNotFoundError,
         convert_to_pdf,
     )
@@ -4049,7 +4036,7 @@ def _render_pdf_preview(docx_data: bytes) -> None:
             "(на Windows — https://www.libreoffice.org/download/)."
         )
         return
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         st.error(f"Не удалось сгенерировать PDF: {exc}")
         return
 
@@ -4063,7 +4050,7 @@ def _render_pdf_preview(docx_data: bytes) -> None:
         key="builder_download_pdf",
     )
     # Inline-просмотр через iframe + base64 data URL.
-    import base64  # noqa: PLC0415
+    import base64
 
     b64 = base64.b64encode(pdf_bytes).decode("ascii")
     st.components.v1.html(

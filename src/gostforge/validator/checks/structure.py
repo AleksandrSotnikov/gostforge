@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """S.* — проверки структуры работы (наличие обязательных разделов, их порядок)."""
 
 from __future__ import annotations
@@ -104,7 +102,7 @@ def check_required_sections(document: Document, profile: Profile) -> list[Violat
     normalized_found = {_normalize(h) for h in found_headings if h}
 
     for expected in required:
-        candidates = [expected] + _HEADING_ALIASES.get(expected, [])
+        candidates = [expected, *_HEADING_ALIASES.get(expected, [])]
         if not any(_normalize(c) in normalized_found for c in candidates):
             aliases = _HEADING_ALIASES.get(expected, [])
             aliases_hint = f" (или: {', '.join(aliases)})" if aliases else ""

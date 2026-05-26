@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """U.* — проверки единиц измерения (ГОСТ Р 8.000-2015 СИ).
 
 Покрывает требования к написанию физических единиц:
@@ -18,7 +16,6 @@ from collections.abc import Sequence
 from gostforge.model import (
     Block,
     Document,
-    InlineElement,
     LogicalSection,
     Paragraph,
     TextRun,
@@ -26,7 +23,6 @@ from gostforge.model import (
 from gostforge.profile import Profile
 
 from ..engine import Violation, register
-
 
 # Список стандартных единиц измерения СИ (русские и латинские
 # написания). Используется для определения паттерна «число + единица».

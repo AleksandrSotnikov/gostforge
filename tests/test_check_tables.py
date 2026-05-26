@@ -1,7 +1,5 @@
 """Тесты B.01 — у каждой таблицы должна быть подпись."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from gostforge.model import (
     Document,
     LogicalSection,

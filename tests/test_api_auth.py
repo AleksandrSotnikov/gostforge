@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты API-key middleware (Фаза 3, итерация 2).
 
 env GOSTFORGE_API_KEYS включает обязательную проверку заголовка

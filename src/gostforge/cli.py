@@ -338,7 +338,7 @@ def _print_fixes(applied: list[FixApplied]) -> None:
 @click.option(
     "--dry-run",
     is_flag=True,
-    help="Не записывать файл, только показать какие правки были бы применены.",  # noqa: RUF001
+    help="Не записывать файл, только показать какие правки были бы применены.",
 )
 def fix_cmd(path: Path, output: Path, profile: str, only: tuple[str, ...], dry_run: bool) -> None:
     """Применить безопасные автоисправления к .docx и записать результат в OUTPUT."""
@@ -362,7 +362,7 @@ def fix_cmd(path: Path, output: Path, profile: str, only: tuple[str, ...], dry_r
     # Передаём source_docx=path, чтобы рисунки из исходного .docx
     # переносились в выходной как реальные изображения (а не placeholder).
     export_docx(document, prof, output, source_docx=path)
-    click.echo(click.style(f"\nИсправленный документ сохранён: {output}", fg="green"))  # noqa: RUF001
+    click.echo(click.style(f"\nИсправленный документ сохранён: {output}", fg="green"))
 
 
 @main.group()
@@ -476,6 +476,7 @@ def profiles_validate(path: Path) -> None:
     реализовано в текущем gostforge, нет ли ссылок на отсутствующие коды.
     """
     import yaml
+
     from gostforge.profile.schema import Profile
 
     try:
@@ -486,8 +487,8 @@ def profiles_validate(path: Path) -> None:
 
     try:
         prof = Profile(**data)
-    except Exception as e:  # noqa: BLE001 — отображаем pydantic-ошибку как есть
-        click.echo(f"Профиль не прошёл валидацию схемы:", err=True)
+    except Exception as e:
+        click.echo("Профиль не прошёл валидацию схемы:", err=True)
         click.echo(str(e), err=True)
         sys.exit(2)
 
@@ -680,7 +681,7 @@ def serve(host: str, port: int, reload: bool) -> None:
     127.0.0.1 (запуск из публичной сети — за reverse-proxy с auth).
     """
     try:
-        import uvicorn  # noqa: F401
+        import uvicorn
     except ImportError:
         click.echo(
             'FastAPI/uvicorn не установлены. Установите gostforge[api]:\n  pip install -e ".[api]"',
@@ -1242,7 +1243,7 @@ def convert_cmd(path: Path, output: Path, target_format: str | None, timeout: fl
 
     Требует установленного LibreOffice.
     """
-    from gostforge.pdf_exporter import (  # noqa: PLC0415
+    from gostforge.pdf_exporter import (
         LibreOfficeNotFoundError,
         convert_document,
     )
@@ -1398,14 +1399,14 @@ def new_state_cmd(
         gostforge ui    # правим в Streamlit
         gostforge generate state.json -o work.docx
     """
-    from datetime import date  # noqa: PLC0415
+    from datetime import date
 
-    from gostforge.builder.templates import (  # noqa: PLC0415
+    from gostforge.builder.templates import (
         bachelor_thesis_template,
         coursework_template,
         research_report_template,
     )
-    from gostforge.web.builder_editor import document_to_state  # noqa: PLC0415
+    from gostforge.web.builder_editor import document_to_state
 
     if year is None:
         year = date.today().year
@@ -1486,7 +1487,7 @@ def generate_cmd(state_path: Path, output: Path, profile_override: str | None) -
     (sidebar → «Загрузить сохранение»). Профиль берётся из
     ``state.profile_id``; ``--profile`` его переопределяет.
     """
-    from gostforge.web.builder_editor import (  # noqa: PLC0415
+    from gostforge.web.builder_editor import (
         _build_document_from_state,
     )
 
@@ -1567,7 +1568,7 @@ def export_html_cmd(state_path: Path, output: Path, standalone: bool) -> None:
 
 def _state_to_html(state: dict[str, Any], *, standalone: bool = True) -> str:
     """Сериализовать state в HTML5."""
-    import html as html_mod  # noqa: PLC0415
+    import html as html_mod
 
     parts: list[str] = []
     title = (state.get("title") or "").strip()
@@ -1627,7 +1628,7 @@ def _state_to_html(state: dict[str, Any], *, standalone: bool = True) -> str:
 
 
 def _section_to_html(section: dict[str, Any], *, depth: int, parts: list[str]) -> None:
-    import html as html_mod  # noqa: PLC0415
+    import html as html_mod
 
     heading = (section.get("heading") or "").strip() or "(без названия)"
     tag = f"h{min(depth, 6)}"
@@ -1650,7 +1651,7 @@ def _section_to_html(section: dict[str, Any], *, depth: int, parts: list[str]) -
 
 
 def _block_to_html(block: dict[str, Any], *, parts: list[str]) -> None:
-    import html as html_mod  # noqa: PLC0415
+    import html as html_mod
 
     kind = block.get("kind", "")
     if kind == "paragraph":
@@ -1703,7 +1704,7 @@ def _block_to_html(block: dict[str, Any], *, parts: list[str]) -> None:
 
 def _paragraph_to_html_inline(block: dict[str, Any]) -> str:
     """Сериализовать параграф (text или runs) в HTML с inline-разметкой."""
-    import html as html_mod  # noqa: PLC0415
+    import html as html_mod
 
     text = block.get("text", "")
     runs = block.get("runs") or []
@@ -1957,7 +1958,7 @@ def stats_state_cmd(state_path: Path, as_json: bool) -> None:
         click.echo("В state.json должен быть ключ 'sections'.", err=True)
         sys.exit(2)
 
-    from gostforge.web.builder_editor import (  # noqa: PLC0415
+    from gostforge.web.builder_editor import (
         _compute_progress_metrics,
     )
 
@@ -2028,7 +2029,7 @@ def check_state_cmd(state_path: Path, as_json: bool, profile_override: str | Non
         state = dict(state)
         state["profile_id"] = profile_override
 
-    from gostforge.web.builder_editor import (  # noqa: PLC0415
+    from gostforge.web.builder_editor import (
         _compute_live_validation_summary,
     )
 
@@ -2094,7 +2095,7 @@ def state_versions_cmd(subcommand: str, version: str | None, output: Path | None
         gostforge state-versions restore Курсовая-20260526-143000.json \
                                          -o restored.json
     """
-    from gostforge.web.builder_editor import (  # noqa: PLC0415
+    from gostforge.web.builder_editor import (
         _state_versions_dir,
         list_state_versions,
     )
@@ -2108,7 +2109,7 @@ def state_versions_cmd(subcommand: str, version: str | None, output: Path | None
         click.echo(f"Версии state ({len(versions)}):")
         for p in versions:
             mtime = p.stat().st_mtime
-            from datetime import datetime as _dt  # noqa: PLC0415
+            from datetime import datetime as _dt
 
             ts = _dt.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
             size_kb = p.stat().st_size // 1024
@@ -2175,10 +2176,10 @@ def apply_fixes_cmd(state_path: Path, output: Path, only: str | None) -> None:
     Используется fixer-engine — тот же, что и в кнопке UI
     «Применить автофиксы», но без перезаписи session-state.
     """
-    import tempfile  # noqa: PLC0415
+    import tempfile
 
-    from gostforge.fixer.engine import fix as run_fix  # noqa: PLC0415
-    from gostforge.web.builder_editor import (  # noqa: PLC0415
+    from gostforge.fixer.engine import fix as run_fix
+    from gostforge.web.builder_editor import (
         _build_document_from_state,
         document_to_state,
     )
@@ -2220,7 +2221,7 @@ def apply_fixes_cmd(state_path: Path, output: Path, only: str | None) -> None:
     click.echo(f"Применено фиксов: {len(applied)}. Сохранён {output}.")
     if applied:
         # Группируем по коду для компактности.
-        from collections import Counter as _Counter  # noqa: PLC0415
+        from collections import Counter as _Counter
 
         by_code = _Counter(a.fixer_code for a in applied)
         for code, n in sorted(by_code.items()):
@@ -2258,7 +2259,7 @@ def diff_state_cmd(state_a: Path, state_b: Path, mode: str) -> None:
         sys.exit(2)
 
     if mode == "unified":
-        import difflib  # noqa: PLC0415
+        import difflib
 
         a_text = json.dumps(a, ensure_ascii=False, indent=2, sort_keys=True)
         b_text = json.dumps(b, ensure_ascii=False, indent=2, sort_keys=True)
@@ -2419,7 +2420,7 @@ def _parse_md_inline(text: str) -> list[dict[str, Any]]:
     Не поддерживает: code spans (`x`), strikethrough (~~x~~),
     ссылки [text](url) — текст сохраняется как есть.
     """
-    import re  # noqa: PLC0415
+    import re
 
     # Регекс для трёх вариантов в порядке убывания специфичности:
     # *** ... *** | ** ... ** | * ... * | _ ... _
@@ -2461,7 +2462,7 @@ def _markdown_to_state(
     Достаточно для round-trip с export-md и большинства руковописных
     .md-файлов.
     """
-    import re  # noqa: PLC0415
+    import re
 
     lines = text.splitlines()
     state: dict[str, Any] = {
@@ -2648,7 +2649,7 @@ def import_docx_cmd(path: Path, output: Path) -> None:
     останутся параграфами. Это не теряет содержимое, но требует
     собрать список заново в UI, если он нужен как list-блок.
     """
-    from gostforge.web.builder_editor import (  # noqa: PLC0415
+    from gostforge.web.builder_editor import (
         document_to_state,
         extract_embedded_images,
         remap_embedded_image_paths_in_state,
@@ -2714,7 +2715,7 @@ def import_pdf_cmd(path: Path, output: Path, profile_id: str, title: str | None)
 
         pip install "gostforge[import-formats]"
     """
-    from gostforge.pdf_importer import (  # noqa: PLC0415
+    from gostforge.pdf_importer import (
         PdfImportError,
         import_pdf_to_state,
     )

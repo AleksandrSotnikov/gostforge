@@ -1,10 +1,6 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты X.06 (канцеляризмы), X.07 (длинные предложения), X.08 (повторы)."""
 
 from __future__ import annotations
-
-import pytest
 
 from gostforge.model import (
     Document,
@@ -46,7 +42,7 @@ def _doc_with_text(text: str) -> Document:
     return doc
 
 
-def _profile_with_x_enabled() -> "object":
+def _profile_with_x_enabled() -> object:
     profile = load_profile("gost-7.32-2017").model_copy(deep=True)
     for c in ("X.06", "X.07", "X.08"):
         profile.checks[c].enabled = True

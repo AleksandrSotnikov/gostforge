@@ -1,7 +1,5 @@
 """I.* — проверки рисунков."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 import re
@@ -60,7 +58,7 @@ def _has_text(elements: Sequence[InlineElement]) -> bool:
 @register("I.01")
 def check_figure_has_caption(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """Каждый рисунок должен иметь подпись «Рисунок N — Название»."""
     violations: list[Violation] = []
@@ -239,7 +237,7 @@ def _paragraph_text(paragraph: Paragraph) -> str:
 @register("I.05")
 def check_figure_numbering_continuous(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """Сквозная нумерация рисунков: номера должны идти 1, 2, 3, ...
 
@@ -425,7 +423,7 @@ def check_figure_reference_precedes(document: Document, profile: Profile) -> lis
 @register("I.06")
 def check_figure_referenced_in_text(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """На каждый рисунок должна быть ссылка в тексте.
 

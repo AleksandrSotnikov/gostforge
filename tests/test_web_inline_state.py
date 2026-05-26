@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты конвертеров inline-элементов между моделью и state Фазы 2.5.
 
 Покрытие:
@@ -36,7 +34,6 @@ from gostforge.web.builder_editor import (
     _runs_from_inline,
     _runs_to_inline,
 )
-
 
 # --- Базовая сериализация одного inline-элемента ----------------------------
 

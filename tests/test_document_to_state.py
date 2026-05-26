@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты обратного преобразования Document → state-dict конструктора.
 
 Это позволяет студенту загрузить чужой .docx в конструктор и
@@ -39,7 +37,6 @@ from gostforge.web.builder_editor import (
     _build_document_from_state,
     document_to_state,
 )
-
 
 # --- Smoke ---
 

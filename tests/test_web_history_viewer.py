@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты UI-режима «История и обсуждение» (Streamlit).
 
 Тестируем чистые функции — _try_list_submissions, _try_get_submission,

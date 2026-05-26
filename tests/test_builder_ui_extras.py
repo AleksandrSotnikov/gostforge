@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты UI-расширений конструктора (продолжение фич).
 
 * Дублирование раздела (deep-copy, heading + ' (копия)', сброс bib-флага).
@@ -15,12 +13,12 @@ import pytest
 
 pytest.importorskip("streamlit")
 
-import streamlit as st  # noqa: E402
+import streamlit as st
 
-from gostforge.builder import work  # noqa: E402
-from gostforge.exporter import export_docx  # noqa: E402
-from gostforge.parser import parse_docx  # noqa: E402
-from gostforge.profile import load_profile  # noqa: E402
+from gostforge.builder import work
+from gostforge.exporter import export_docx
+from gostforge.parser import parse_docx
+from gostforge.profile import load_profile
 
 
 @pytest.fixture(autouse=True)

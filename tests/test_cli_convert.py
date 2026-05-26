@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты команды convert и функции convert_document.
 
 Реальный LibreOffice в CI обычно недоступен, поэтому конвертацию
@@ -19,7 +17,6 @@ from gostforge.pdf_exporter import (
     LibreOfficeNotFoundError,
     convert_document,
 )
-
 
 # --- convert_document ---
 
@@ -84,21 +81,23 @@ def test_convert_document_raises_if_no_output(tmp_path: Path) -> None:
     with (
         patch("gostforge.pdf_exporter._find_soffice", return_value="soffice"),
         patch("subprocess.run", side_effect=fake_run),
+        pytest.raises(RuntimeError),
     ):
-        with pytest.raises(RuntimeError):
-            convert_document(src, out, target_format="docx")
+        convert_document(src, out, target_format="docx")
 
 
 def test_convert_document_libreoffice_not_found(tmp_path: Path) -> None:
     src = tmp_path / "input.doc"
     src.write_bytes(b"fake")
     out = tmp_path / "out.docx"
-    with patch(
-        "gostforge.pdf_exporter._find_soffice",
-        side_effect=LibreOfficeNotFoundError("no soffice"),
+    with (
+        patch(
+            "gostforge.pdf_exporter._find_soffice",
+            side_effect=LibreOfficeNotFoundError("no soffice"),
+        ),
+        pytest.raises(LibreOfficeNotFoundError),
     ):
-        with pytest.raises(LibreOfficeNotFoundError):
-            convert_document(src, out, target_format="docx")
+        convert_document(src, out, target_format="docx")
 
 
 # --- CLI convert ---

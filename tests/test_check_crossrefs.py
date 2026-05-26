@@ -5,8 +5,6 @@ C.02 — ссылки на таблицы указывают на существ
 C.04 — ссылки [N] разрешаются в bibliography.
 """
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from gostforge.model import (
     BibliographyEntry,
     Document,

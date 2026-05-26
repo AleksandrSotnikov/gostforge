@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты T.14 — проверка интервалов между абзацами основного текста."""
 
 from __future__ import annotations

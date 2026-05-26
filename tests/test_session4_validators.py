@@ -1,13 +1,9 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты сессии 4 плана развития:
 * X.05 — терминологическая консистентность (реализация);
 * B.10 — пустые таблицы.
 """
 
 from __future__ import annotations
-
-import pytest
 
 from gostforge.model import (
     Document,

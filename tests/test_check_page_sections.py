@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002, RUF003
-
 """Тесты K.* — проверок колонтитулов и нумерации на уровне PageSection-ов."""
 
 from __future__ import annotations

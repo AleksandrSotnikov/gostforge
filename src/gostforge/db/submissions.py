@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Операции с таблицей submissions: запись, выборка, удаление.
 
 Submission — это снимок «файл X проверен профилем Y в момент Z,
@@ -14,7 +12,7 @@ from __future__ import annotations
 
 import sqlite3
 from collections.abc import Iterable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .schema import Submission, ViolationRecord
 
@@ -35,7 +33,7 @@ def record_submission(
 
     ``created_at`` — ISO 8601 UTC; если не задан, берётся текущее время.
     """
-    ts = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ts = created_at or datetime.now(UTC).isoformat(timespec="seconds")
     violation_list = list(violations)
 
     err = sum(1 for v in violation_list if getattr(v, "severity", "") == "error")

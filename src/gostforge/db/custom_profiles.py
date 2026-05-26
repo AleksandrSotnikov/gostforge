@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Локальный реестр пользовательских профилей (маркетплейс кафедр).
 
 Профили хранятся как YAML-текст прямо в БД — это упрощает бэкап
@@ -19,7 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -78,7 +76,7 @@ def install_profile(
             " или сначала уберите его через uninstall."
         )
 
-    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ts = datetime.now(UTC).isoformat(timespec="seconds")
     if existing is None:
         cursor = conn.execute(
             """

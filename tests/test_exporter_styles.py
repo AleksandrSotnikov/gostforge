@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты на правильное применение profile.styles в экспортёре.
 
 Эти тесты проверяют визуальные настройки, которые до Phase 3.x
@@ -162,7 +160,6 @@ def test_table_has_borders(tmp_path: Path) -> None:
 
 def test_table_borders_disabled_via_profile(tmp_path: Path) -> None:
     """Если в профиле border_style=none — рамок нет."""
-    from gostforge.profile.schema import Profile
 
     profile = load_profile("gost-7.32-2017")
     # Создадим копию профиля с отключёнными рамками через model_copy.

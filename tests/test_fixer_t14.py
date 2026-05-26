@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты автофиксера T.14 — приведение интервалов между абзацами к норме."""
 
 from __future__ import annotations

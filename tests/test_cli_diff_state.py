@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI diff-state и helper _state_diff_summary."""
 
 from __future__ import annotations
@@ -9,7 +7,6 @@ import subprocess
 from pathlib import Path
 
 from gostforge.cli import _compare_sections, _state_diff_summary
-
 
 # --- _state_diff_summary ---
 

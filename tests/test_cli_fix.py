@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002, RUF003
-
 """Тесты CLI-команды `gostforge fix`."""
 
 from __future__ import annotations
@@ -112,7 +110,7 @@ def test_fix_preserves_images(tmp_path: Path) -> None:
 
     assert "w:drawing" in document_xml
     assert "[Рисунок:" not in document_xml, (
-        "В document.xml оказался placeholder — fix не передал source_docx"  # noqa: RUF001
+        "В document.xml оказался placeholder — fix не передал source_docx"
     )
 
 

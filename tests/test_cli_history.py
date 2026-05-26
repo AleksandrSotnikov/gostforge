@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI-команды `gostforge history` и автозаписи submission в check.
 
 Изолируем БД через env GOSTFORGE_DB_PATH в tmp_path.

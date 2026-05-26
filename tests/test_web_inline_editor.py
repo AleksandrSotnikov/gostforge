@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты helpers и сборки документов с inline-элементами (шаг 6 Фазы 2.5).
 
 Покрытие:
@@ -18,12 +16,10 @@ import pytest
 
 pytest.importorskip("streamlit")
 
-from gostforge.builder import work
 from gostforge.model import (
     BibliographyEntry,
     Citation,
     Document,
-    InlineFormula,
     LogicalSection,
     PageSection,
     Paragraph,
@@ -35,7 +31,6 @@ from gostforge.web.builder_editor import (
     _collect_xref_targets,
     _resolve_citation_proxies,
 )
-
 
 # --- _collect_xref_targets --------------------------------------------------
 

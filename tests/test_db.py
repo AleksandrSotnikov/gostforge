@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты локальной SQLite-БД gostforge (Фаза 3).
 
 Изолируем диск через monkeypatch GOSTFORGE_DB_PATH в tmp_path —
@@ -8,7 +6,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 
 import pytest

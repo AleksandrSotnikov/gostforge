@@ -1,7 +1,5 @@
 """R.* — проверки списка литературы (ГОСТ Р 7.0.100-2018)."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 import re
@@ -255,7 +253,7 @@ _AUTHOR_YEAR_BRACKETS_RE = re.compile(r"\[[А-ЯЁ][а-яё]+\s+\d{4}\]")
 @register("R.01")
 def check_reference_style_numeric(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """Все библиографические ссылки в тексте должны быть в формате [N] / [N, M] / [N-M].
 
@@ -332,7 +330,7 @@ def _entry_referenced(text: str, num: int) -> bool:
 @register("R.05")
 def check_each_entry_referenced(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """Каждая запись bibliography должна быть упомянута в тексте.
 
@@ -374,8 +372,8 @@ def check_each_entry_referenced(
 
 @register("R.06")
 def check_references_resolve_alias(
-    document: Document,  # noqa: ARG001
-    profile: Profile,  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Каждая ссылка [N] в тексте должна разрешаться в запись bibliography.
 
@@ -393,8 +391,8 @@ def check_references_resolve_alias(
 
 @register("R.07")
 def check_citations_have_pages(
-    document: Document,  # noqa: ARG001
-    profile: Profile,  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Прямые цитаты должны сопровождаться указанием страниц (заглушка Фазы 2).
 

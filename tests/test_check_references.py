@@ -1,7 +1,5 @@
 """Тесты R.04 — формат библиографических записей по ГОСТ Р 7.0.100-2018."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 from gostforge.model import (

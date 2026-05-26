@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002
-
 """Тесты расширенной модели inline-элементов (Фаза 2.5).
 
 Покрытие: InlineFormula, Citation, CrossRef.prefix, TextRun.underline,

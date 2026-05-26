@@ -1,7 +1,5 @@
 """P.* — проверки приложений."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 import re

@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002
-
 """Тесты для ``gostforge.pdf_exporter``.
 
 Все тесты НЕ вызывают реальный LibreOffice — внешние процессы замоканы.

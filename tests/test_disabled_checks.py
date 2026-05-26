@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты на отключение проверок для отдельных логических разделов.
 
 Фича конструктора: студент может пометить раздел (титульный лист,
@@ -16,14 +14,12 @@ from __future__ import annotations
 
 from gostforge.builder import work
 from gostforge.model import (
-    BibliographyEntry,
     Document,
     DocumentMetadata,
     LogicalSection,
     PageGeometry,
     PageNumberingConfig,
     PageSection,
-    Paragraph,
     TextRun,
 )
 from gostforge.profile import load_profile
@@ -32,7 +28,6 @@ from gostforge.validator.engine import (
     Violation,
     _filter_disabled_section_violations,
 )
-
 
 # --- _filter_disabled_section_violations — чистая функция ---
 

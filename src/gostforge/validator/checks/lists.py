@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """L.* — проверки списков (маркеры, нумерация, пунктуация)."""
 
 from __future__ import annotations

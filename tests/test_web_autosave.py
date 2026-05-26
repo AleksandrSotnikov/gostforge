@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты автосохранения visual-builder state (шаг 8 Фазы 2.5).
 
 Изолируем диск через monkeypatch — autosave-каталог редиректим в
@@ -20,7 +18,6 @@ pytest.importorskip("streamlit")
 import streamlit as st
 
 from gostforge.web import builder_editor as be
-
 
 _RESET_KEYS = (
     "builder_state",

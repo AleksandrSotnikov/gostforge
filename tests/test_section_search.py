@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты функции поиска по разделам в UI."""
 
 from __future__ import annotations

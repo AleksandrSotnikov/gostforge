@@ -11,8 +11,6 @@
 - Фаза 3: полный разбор колонтитулов, приложений
 """
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 import re
@@ -307,7 +305,7 @@ def _extract_comments(docx_doc: DocxDocument) -> list[Any]:
     python-docx не предоставляет высокоуровневого API для
     комментариев — обходимся прямым lxml-доступом к part-у.
     """
-    from gostforge.model import Comment  # noqa: PLC0415
+    from gostforge.model import Comment
 
     out: list[Comment] = []
     # python-docx предоставляет part через related_parts; ищем
@@ -391,7 +389,7 @@ def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> No
                 dpi_value = im.info.get("dpi")
                 if dpi_value:
                     fig.dpi = int(min(dpi_value))
-        except Exception:  # noqa: BLE001 — повреждённый media-file не должен валить парсер
+        except Exception:
             continue
 
 
@@ -412,16 +410,14 @@ def _extract_auto_hyphenation(docx_doc: DocxDocument) -> bool | None:
     settings_xml = settings_part.blob
     try:
         root = etree.fromstring(settings_xml)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     auto_hyph = root.find(f"{{{W_NS}}}autoHyphenation")
     if auto_hyph is None:
         return False
     val = auto_hyph.get(f"{{{W_NS}}}val")
     # По OOXML toggle: отсутствие val или val="1"/"true" → on; "0"/"false" → off.
-    if val in {"0", "false"}:
-        return False
-    return True
+    return val not in {"0", "false"}
 
 
 # --- метаданные --------------------------------------------------------------
@@ -830,7 +826,7 @@ def _group_text_marker_lists(page_section: PageSection, *, exclude_section_ids: 
     библиографический раздел, где каждый параграф — отдельная
     запись, а не элемент списка.
     """
-    from gostforge.model import LogicalSection, ListBlock, Paragraph  # noqa: PLC0415
+    from gostforge.model import LogicalSection, Paragraph
 
     def process(items: list[Any], in_excluded_section: bool) -> list[Any]:
         result: list[Any] = []
@@ -874,7 +870,7 @@ def _try_consume_marker_run(items: list[Any], start: int) -> tuple[Any, int] | N
 
     Возвращает (ListBlock, consumed) при успехе или None.
     """
-    from gostforge.model import Block, ListBlock, Paragraph, TextRun  # noqa: PLC0415
+    from gostforge.model import ListBlock, Paragraph, TextRun
 
     first = items[start]
     if not isinstance(first, Paragraph):
@@ -893,7 +889,6 @@ def _try_consume_marker_run(items: list[Any], start: int) -> tuple[Any, int] | N
 
     items_texts: list[str] = []
     consumed = 0
-    expected_num = 1 if ordered else None
     for idx in range(start, len(items)):
         item = items[idx]
         if not isinstance(item, Paragraph):
@@ -904,7 +899,7 @@ def _try_consume_marker_run(items: list[Any], start: int) -> tuple[Any, int] | N
             if m is None:
                 break
             try:
-                num = int(m.group(1))
+                int(m.group(1))  # валидируем номер; значение не нужно
             except ValueError:
                 break
             # Допускаем сбой нумерации — лишь бы шла серия. Строгая
@@ -934,7 +929,7 @@ def _try_consume_marker_run(items: list[Any], start: int) -> tuple[Any, int] | N
 
 def _paragraph_plain_text(p: Any) -> str:
     """Склейка text всех TextRun параграфа (helper для list-grouping)."""
-    from gostforge.model import TextRun  # noqa: PLC0415
+    from gostforge.model import TextRun
 
     return "".join(el.text for el in p.content if isinstance(el, TextRun)).strip()
 
@@ -946,7 +941,7 @@ def _bibliography_section_ids(page_sections: list[PageSection]) -> set[str]:
     параграфов в ListBlock (в bib каждая запись = отдельный параграф,
     а не элемент списка).
     """
-    from gostforge.model import LogicalSection, TextRun  # noqa: PLC0415
+    from gostforge.model import LogicalSection, TextRun
 
     aliases = {
         "список использованных источников",
@@ -1167,7 +1162,7 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
         instr = (fld.get(f"{{{W_NS}}}instr") or "").strip()
         if instr.startswith("TOC"):
             counters.toc = getattr(counters, "toc", 0) + 1
-            from gostforge.model import TableOfContents  # noqa: PLC0415
+            from gostforge.model import TableOfContents
 
             min_lvl, max_lvl = 1, 3
             m = re.search(r'\\o\s+"(\d+)-(\d+)"', instr)
@@ -1300,7 +1295,7 @@ def _build_table(dtable: DocxTable, *, idx: int) -> Table:
     ячейках: ``<w:vMerge>`` (вертикальное), ``<w:gridSpan>``
     (горизонтальное). Координаты row/col 0-based от верха таблицы.
     """
-    from gostforge.model import CellMerge  # noqa: PLC0415
+    from gostforge.model import CellMerge
 
     rows_raw = list(dtable.rows)
     headers: list[list[InlineElement]] = []
@@ -1334,7 +1329,7 @@ def _extract_cell_merges(rows_raw: list[Any]) -> list[Any]:
 
     Возвращает CellMerge только для ячеек с rowspan>1 или colspan>1.
     """
-    from gostforge.model import CellMerge  # noqa: PLC0415
+    from gostforge.model import CellMerge
 
     merges: list[CellMerge] = []
     # Построим матрицу tc-элементов для удобного поиска.

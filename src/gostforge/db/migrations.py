@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """SQL-миграции схемы локальной БД.
 
 Каждая миграция — кортеж ``(version, sql)``. ``apply_migrations`` идёт

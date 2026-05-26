@@ -1,11 +1,11 @@
 """Тесты модели документа."""
 
 from gostforge.model import (
+    SCHEMA_VERSION,
     Document,
     DocumentMetadata,
-    PageSection,
     PageNumberingConfig,
-    SCHEMA_VERSION,
+    PageSection,
 )
 
 

@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """H.* — проверки заголовков логических разделов."""
 
 from __future__ import annotations

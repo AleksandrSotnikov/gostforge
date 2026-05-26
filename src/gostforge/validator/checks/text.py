@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """T.* — проверки основного текста (шрифт, кегль, интервалы)."""
 
 from __future__ import annotations
@@ -596,7 +594,7 @@ _INITIALS_SURNAME_RE = re.compile(r"[А-ЯЁ]\. [А-ЯЁ]\. [А-ЯЁ][а-яё]+"
 @register("T.13")
 def check_nbsp_between_initials_and_surname(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """Между инициалами и фамилией должен стоять неразрывный пробел.
 
@@ -678,7 +676,7 @@ def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violati
 @register("T.06")
 def check_auto_hyphenation_disabled(
     document: Document,
-    profile: Profile,  # noqa: ARG001
+    profile: Profile,
 ) -> list[Violation]:
     """По ГОСТ автоматические переносы в работе должны быть отключены.
 
@@ -799,9 +797,9 @@ __all__ = [
     "check_line_spacing",
     "check_nbsp_between_initials_and_surname",
     "check_nbsp_between_number_and_unit",
-    "check_paragraph_spacing",
     "check_no_consecutive_empty_paragraphs",
     "check_no_double_spaces",
     "check_no_trailing_spaces",
+    "check_paragraph_spacing",
     "check_typographic_quotes",
 ]

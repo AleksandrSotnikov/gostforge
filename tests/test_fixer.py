@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты движка автоисправлений и фиксеров T.08/T.09/T.10/T.11/T.12/T.13/H.03/H.08."""
 
 from __future__ import annotations

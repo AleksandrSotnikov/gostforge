@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002, RUF003
-
 """Структуры данных для БД (dataclass-обёртки над строками таблиц)."""
 
 from __future__ import annotations

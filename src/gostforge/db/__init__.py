@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002, RUF003
-
 """Локальная SQLite-БД gostforge.
 
 Хранение опционально: основной функционал (check / fix / annotate /

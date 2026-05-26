@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Операции с таблицей comments (совместная работа руководитель ↔ студент).
 
 Один submission → много комментариев в хронологическом порядке.
@@ -13,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 CommentRole = Literal["student", "supervisor", "anonymous"]
@@ -63,7 +61,7 @@ def add_comment(
     if exists is None:
         raise ValueError(f"Submission #{submission_id} не существует")
 
-    ts = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ts = created_at or datetime.now(UTC).isoformat(timespec="seconds")
     cursor = conn.execute(
         """
         INSERT INTO comments (submission_id, author, role, body, resolved, created_at)

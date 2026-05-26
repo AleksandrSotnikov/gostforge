@@ -2,4 +2,4 @@
 
 from .engine import Violation, validate
 
-__all__ = ["validate", "Violation"]
+__all__ = ["Violation", "validate"]

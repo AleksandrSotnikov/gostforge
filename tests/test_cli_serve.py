@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI-команды `gostforge serve` (Фаза 3).
 
 uvicorn.run помокаем — реально слушать порт в тестах не нужно.

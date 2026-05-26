@@ -1,11 +1,8 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты исправлений трёх UX-багов: вёрстка таблиц, ширина рисунков,
 неразрывность подписи."""
 
 from __future__ import annotations
 
-import io
 import re
 import zipfile
 from pathlib import Path
