@@ -175,16 +175,86 @@ def check_number_unit_agreement(document: Document, profile: Profile) -> list[Vi
 
 @register("X.05")
 def check_term_consistency(document: Document, profile: Profile) -> list[Violation]:
-    """X.05 — единообразие терминов (заглушка).
+    """X.05 — единообразие терминов.
 
-    На Фазе 2 — заглушка: для полноценной реализации нужен NLP-словарь
-    синонимов или явный список правил в params. На текущий момент
-    возвращаем пустой список.
+    По ГОСТу один термин должен использоваться в одном виде во всём
+    документе. Студенты часто пишут «база данных» в одном месте и
+    «БД» в другом — это создаёт впечатление, что речь о разных вещах.
 
-    TODO Phase 3: либо явное правило вида
-    `params.terms: [{canonical: "база данных", aliases: ["БД", "DB"]}]`,
-    либо NLP-нормализация лемм.
+    Параметры профиля ``checks.X.05.params.terms``: список записей
+    ``{canonical, aliases}``.
+
+    Пример::
+
+        X.05:
+          enabled: true
+          params:
+            terms:
+              - canonical: "база данных"
+                aliases: ["БД", "DB"]
+              - canonical: "программное обеспечение"
+                aliases: ["ПО"]
+
+    Severity = info.
     """
-    _ = document
-    _ = profile
-    return []
+    config = profile.checks.get("X.05")
+    if not config:
+        return []
+    terms_raw = config.params.get("terms", [])
+    if not terms_raw:
+        return []
+
+    from gostforge.validator.checks.text import _all_paragraphs as _all_p  # noqa: PLC0415
+
+    full_text = " ".join(
+        "".join(
+            el.text for el in p.content
+            if hasattr(el, "text") and isinstance(el.text, str)
+        )
+        for p in _all_p(document)
+    )
+    if not full_text:
+        return []
+    full_text_lower = full_text.lower()
+
+    violations: list[Violation] = []
+    for term_entry in terms_raw:
+        if not isinstance(term_entry, dict):
+            continue
+        canonical = str(term_entry.get("canonical", "")).strip()
+        aliases = term_entry.get("aliases") or []
+        if not canonical or not aliases:
+            continue
+        canonical_lower = canonical.lower()
+        found_aliases = [
+            alias for alias in aliases
+            if isinstance(alias, str) and alias
+            and alias.lower() != canonical_lower
+            and alias.lower() in full_text_lower
+        ]
+        if not found_aliases:
+            continue
+        violations.append(
+            Violation(
+                check_code="X.05",
+                severity="info",
+                message=(
+                    f"Термин «{canonical}» используется в разных формах: "
+                    + ", ".join(f"«{a}»" for a in found_aliases)
+                    + (
+                        f", а также «{canonical}»"
+                        if canonical_lower in full_text_lower
+                        else ""
+                    )
+                ),
+                location="document",
+                suggestion=(
+                    f"Привести все упоминания к единому виду «{canonical}»"
+                ),
+                details={
+                    "canonical": canonical,
+                    "aliases": ", ".join(found_aliases),
+                },
+            )
+        )
+    return violations

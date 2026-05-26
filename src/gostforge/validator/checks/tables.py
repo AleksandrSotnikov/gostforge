@@ -510,6 +510,64 @@ def check_table_empty_cells_dash(
     return violations
 
 
+@register("B.10")
+def check_table_not_empty(
+    document: Document, profile: Profile
+) -> list[Violation]:
+    """B.10 — таблица не должна быть пустой.
+
+    Таблица считается пустой, если:
+    * нет ни одной data-строки (только headers), ИЛИ
+    * есть строки, но во всех ячейках текст пустой/whitespace.
+
+    Пустая таблица обычно — забытый placeholder при копировании структуры
+    или ошибка при редактировании.
+    """
+    _ = profile
+    violations: list[Violation] = []
+    for _ps, table in _all_tables(document):
+        if _is_table_empty(table):
+            violations.append(
+                Violation(
+                    check_code="B.10",
+                    severity="warning",
+                    message=(
+                        f"Таблица «{_table_caption_text(table)}» пуста — "
+                        f"нет данных в строках"
+                    ),
+                    location=f"tables[{table.id}]",
+                    suggestion=(
+                        "Заполнить таблицу данными или удалить её, "
+                        "если она оказалась пустой по ошибке"
+                    ),
+                    details={"table_id": table.id},
+                )
+            )
+    return violations
+
+
+def _is_table_empty(table: Table) -> bool:
+    """True если таблица не имеет содержательных data-строк."""
+    if not table.rows:
+        return True
+    for row in table.rows:
+        for cell in row:
+            for el in cell:
+                if hasattr(el, "text") and (el.text or "").strip():
+                    return False
+    return True
+
+
+def _table_caption_text(table: Table) -> str:
+    """Краткое описание таблицы — её caption или id."""
+    parts: list[str] = []
+    for el in table.caption:
+        if hasattr(el, "text") and isinstance(el.text, str):
+            parts.append(el.text)
+    txt = "".join(parts).strip()
+    return txt if txt else table.id
+
+
 __all__ = [
     "check_table_caption_above",
     "check_table_caption_format",
@@ -518,6 +576,7 @@ __all__ = [
     "check_table_empty_cells_dash",
     "check_table_has_caption",
     "check_table_header_repeats",
+    "check_table_not_empty",
     "check_table_numbering_continuous",
     "check_table_referenced_in_text",
 ]
