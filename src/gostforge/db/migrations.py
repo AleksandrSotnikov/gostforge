@@ -85,6 +85,44 @@ _MIGRATIONS: list[tuple[int, str]] = [
             ON custom_profiles(profile_id);
         """,
     ),
+    (
+        3,
+        """
+        -- Комментарии к submission-ам для совместной работы
+        -- руководитель ↔ студент.
+        --
+        -- author — строка (имя/email/идентификатор). Полноценной
+        -- таблицы users пока нет; mapping строки в пользователя
+        -- делает вызывающая сторона (env GOSTFORGE_DEFAULT_AUTHOR
+        -- в CLI, payload в REST).
+        --
+        -- role — простая enum-строка с CHECK-валидатором SQLite.
+        -- 'anonymous' разрешён для случая, когда автор не задан.
+        --
+        -- resolved — флаг закрытия. Закрытые комментарии не
+        -- скрываются, просто помечаются (студент видит, что
+        -- руководитель счёл вопрос решённым).
+        CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            submission_id INTEGER NOT NULL,
+            author TEXT NOT NULL DEFAULT '',
+            role TEXT NOT NULL DEFAULT 'anonymous'
+                CHECK (role IN ('student', 'supervisor', 'anonymous')),
+            body TEXT NOT NULL,
+            resolved INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (submission_id)
+                REFERENCES submissions(id)
+                ON DELETE CASCADE
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_comments_submission_id
+            ON comments(submission_id, created_at);
+
+        CREATE INDEX IF NOT EXISTS idx_comments_resolved
+            ON comments(resolved);
+        """,
+    ),
 ]
 
 

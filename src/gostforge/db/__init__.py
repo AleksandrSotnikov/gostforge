@@ -21,6 +21,15 @@ INSERT/SELECT без сложных JOIN) stdlib ``sqlite3`` достаточн�
 
 from __future__ import annotations
 
+from .comments import (
+    Comment,
+    add_comment,
+    count_unresolved_comments,
+    delete_comment,
+    get_comment,
+    list_comments,
+    resolve_comment,
+)
 from .connection import default_db_path, get_connection
 from .custom_profiles import (
     CustomProfileRecord,
@@ -37,16 +46,23 @@ from .submissions import (
 )
 
 __all__ = [
+    "Comment",
     "CustomProfileRecord",
     "Submission",
     "ViolationRecord",
+    "add_comment",
+    "count_unresolved_comments",
     "default_db_path",
+    "delete_comment",
+    "get_comment",
     "get_connection",
     "get_custom_profile",
     "get_submission",
     "install_profile",
+    "list_comments",
     "list_custom_profiles",
     "list_submissions",
     "record_submission",
+    "resolve_comment",
     "uninstall_profile",
 ]
