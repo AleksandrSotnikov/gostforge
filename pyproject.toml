@@ -40,6 +40,8 @@ api = [
     "uvicorn[standard]>=0.27",
     "python-multipart>=0.0.9",
 ]
+# Импорт из внешних форматов (PDF). Опционально.
+import-formats = ["pdfplumber>=0.10"]
 dev = [
     "pytest>=7.4",
     "pytest-cov>=4.1",

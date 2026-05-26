@@ -2764,5 +2764,72 @@ def import_docx_cmd(path: Path, output: Path) -> None:
     click.echo(msg)
 
 
+@main.command("import-pdf")
+@click.argument("path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить JSON-state для конструктора.",
+)
+@click.option(
+    "--profile",
+    "profile_id",
+    type=str,
+    default="gost-7.32-2017",
+    help="Профиль для итогового state.",
+)
+@click.option(
+    "--title",
+    type=str,
+    default=None,
+    help="Название работы. По умолчанию — имя файла.",
+)
+def import_pdf_cmd(
+    path: Path, output: Path, profile_id: str, title: str | None
+) -> None:
+    """Извлечь структуру PDF в JSON-state конструктора.
+
+    Полезно, когда исходник работы есть только в PDF: вытаскивает
+    заголовки и параграфы (форматирование не сохраняется) в JSON,
+    который дальше довёрстывается в Streamlit-конструкторе по ГОСТу::
+
+        gostforge import-pdf work.pdf -o draft.json
+        gostforge ui
+        # В UI: Загрузить сохранение (.json) → draft.json → довёрстываем
+
+    Заголовки распознаются эвристикой: короткая строка без точки в
+    конце, ВЕРХНИМ регистром или с номером раздела («1 Анализ»).
+    Это приблизительно — структуру нужно проверить в конструкторе.
+
+    Требует опциональной зависимости::
+
+        pip install "gostforge[import-formats]"
+    """
+    from gostforge.pdf_importer import (  # noqa: PLC0415
+        PdfImportError,
+        import_pdf_to_state,
+    )
+
+    try:
+        state = import_pdf_to_state(
+            path, profile_id=profile_id, title=title
+        )
+    except PdfImportError as e:
+        click.echo(f"Ошибка импорта PDF: {e}", err=True)
+        sys.exit(3)
+
+    output.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    n_sec = len(state.get("sections", []))
+    click.echo(
+        f"Извлечено {n_sec} разделов из PDF → {output}. "
+        "Структуру стоит проверить в `gostforge ui` "
+        "(форматирование PDF не переносится)."
+    )
+
+
 if __name__ == "__main__":
     main()
