@@ -1328,6 +1328,68 @@ def new(
     click.echo("Откройте его в Word / LibreOffice и заполните плейсхолдеры.")
 
 
+@main.command("generate")
+@click.argument("state_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить .docx.",
+)
+@click.option(
+    "--profile",
+    "profile_override",
+    type=str,
+    default=None,
+    help="Профиль для экспорта. По умолчанию — из state.json (profile_id).",
+)
+def generate_cmd(
+    state_path: Path, output: Path, profile_override: str | None
+) -> None:
+    """Сгенерировать .docx из JSON-state конструктора.
+
+    Это зеркало команды ``import-docx``: вместе они образуют полный
+    CLI-цикл:
+
+    \b
+        gostforge import-docx work.docx -o state.json
+        # ... редактируете state.json вручную или скриптом ...
+        gostforge generate state.json -o new.docx
+
+    Формат state.json — тот же, что в Streamlit-конструкторе
+    (sidebar → «Загрузить сохранение»). Профиль берётся из
+    ``state.profile_id``; ``--profile`` его переопределяет.
+    """
+    from gostforge.web.builder_editor import (  # noqa: PLC0415
+        _build_document_from_state,
+    )
+
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        click.echo(f"Не удалось прочитать JSON: {exc}", err=True)
+        sys.exit(2)
+    if not isinstance(state, dict) or "sections" not in state:
+        click.echo("В state.json должен быть ключ 'sections'.", err=True)
+        sys.exit(2)
+    if profile_override:
+        state = dict(state)
+        state["profile_id"] = profile_override
+
+    try:
+        data = _build_document_from_state(state)
+    except FileNotFoundError as exc:
+        click.echo(f"Профиль не найден: {exc}", err=True)
+        sys.exit(2)
+    except ValueError as exc:
+        click.echo(f"Ошибка сборки: {exc}", err=True)
+        sys.exit(3)
+
+    output.write_bytes(data)
+    click.echo(f"Сгенерирован файл: {output}")
+
+
 @main.command("import-docx")
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
 @click.option(

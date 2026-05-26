@@ -1791,9 +1791,84 @@ def _render_import_violations_panel() -> None:
             for entry in top:
                 st.write(f"- `{entry['code']}` × {entry['count']}")
 
+        # Кнопка автофиксов: применить fixer к текущему state и
+        # обновить summary. Доступно только если есть фиксеры
+        # под найденные нарушения.
+        from gostforge.fixer.engine import registered_fixers  # noqa: PLC0415
+
+        fixable_codes = set(registered_fixers()) & {
+            e["code"] for e in top
+        }
+        if fixable_codes:
+            st.markdown("---")
+            st.caption(
+                f"Доступны автофиксы для кодов: {', '.join(sorted(fixable_codes))}. "
+                "Кнопка применит их к загруженному документу и пересчитает сводку."
+            )
+            if st.button(
+                "Применить автофиксы",
+                key="apply_autofixes",
+                type="primary",
+            ):
+                _apply_autofixes_to_state()
+                st.rerun()
+
         if st.button("Скрыть сводку импорта", key="dismiss_import_summary"):
             del st.session_state["last_import_summary"]
             st.rerun()
+
+
+def _apply_autofixes_to_state() -> None:
+    """Применить автофиксы к текущему builder_state.
+
+    Алгоритм:
+    1. Собрать docx из текущего state (через _build_document_from_state).
+    2. Распарсить docx обратно в Document.
+    3. Прогнать fixer.fix() — мутирует Document на месте.
+    4. Преобразовать Document обратно в state (document_to_state).
+    5. Записать в session_state и пересчитать summary.
+
+    Через docx-touche цикл, потому что fixer работает на модели
+    Document, а builder-state хранит данные в собственном dict-формате.
+    Альтернативой был бы прямой fixer-over-state, но это удвоит код
+    fixer-а — не нужно.
+    """
+    from gostforge.fixer.engine import fix as run_fix  # noqa: PLC0415
+    from gostforge.parser import parse_docx  # noqa: PLC0415
+
+    state = st.session_state.get("builder_state")
+    if not state:
+        return
+
+    profile_id = state.get("profile_id", "gost-7.32-2017")
+
+    try:
+        data = _build_document_from_state(state)
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = Path(tmp.name)
+        document = parse_docx(tmp_path)
+        profile = load_profile(profile_id)
+        applied = run_fix(document, profile)
+        new_state = document_to_state(document)
+    except Exception as exc:  # noqa: BLE001 - UI feedback
+        st.error(f"Не удалось применить автофиксы: {exc}")
+        return
+
+    if not applied:
+        st.info("Автофиксы не нашли исправимых нарушений.")
+        return
+
+    _normalize_state_paragraphs(new_state)
+    st.session_state["builder_state"] = new_state
+
+    # Пересчитываем summary поверх нового state.
+    summary_new = _compute_import_violations_summary(document, profile_id)
+    last = st.session_state.get("last_import_summary", {})
+    last.update(summary_new)
+    last["applied_fixes"] = len(applied)
+    st.session_state["last_import_summary"] = last
+    st.success(f"Применено автофиксов: {len(applied)}. Сводка обновлена.")
 
 
 def _duplicate_section(idx: int) -> None:
