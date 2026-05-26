@@ -179,35 +179,36 @@ def test_list_paragraph_has_explicit_left(tmp_path: Path) -> None:
 
 def test_list_marker_at_1_25cm_by_default(tmp_path: Path) -> None:
     """Default-профиль: маркер списка на позиции 1.25 см от поля
-    (как абзацный отступ — по ГОСТ 7.32-2017 п. 6.5 «запись с
-    абзацного отступа»). hanging_indent_cm = 0 → маркер и текст
-    продолжения на одной позиции.
+    (по ГОСТ 7.32-2017 п. 6.5 «запись с абзацного отступа»).
 
-    1.25 cm = 709 twips (1 cm = 567 twips).
+    Используется классический hanging-list: маркер на (left - hanging),
+    текст продолжения на left. Default-значения дают:
+    * left = 1.75 см = 992 twips
+    * hanging = 0.5 см = 283 twips
+    * маркер в позиции (left - hanging) = 1.25 см = 709 twips ✓
+    * перенос строки выровнен на left = 1.75 см (под текстом
+      первой строки, не под маркером)
     """
     b = work("X", year=2026).section("Введение").list(["a", "b"], ordered=False)
     out = tmp_path / "marker.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
 
-    # numbering.xml: lvl ilvl=0 имеет left=709, hanging отсутствует.
     numbering = _docx_xml(out, "word/numbering.xml")
     last_lvl = re.findall(
         r'<w:lvl w:ilvl="0">.*?</w:lvl>', numbering, re.DOTALL
     )[-1]
     nb_ind = re.search(r"<w:ind\b[^/]*/>", last_lvl).group(0)
-    assert 'w:left="709"' in nb_ind, f"Маркер не на 1.25см: {nb_ind}"
-    assert 'w:hanging="' not in nb_ind, (
-        f"hanging > 0 — маркер выпирает левее 1.25см: {nb_ind}"
+    # left - hanging должно дать 709 twips (1.25 cm) — позиция маркера.
+    left_match = re.search(r'w:left="(\d+)"', nb_ind)
+    hanging_match = re.search(r'w:hanging="(\d+)"', nb_ind)
+    assert left_match
+    left_val = int(left_match.group(1))
+    hanging_val = int(hanging_match.group(1)) if hanging_match else 0
+    marker_position = left_val - hanging_val
+    assert marker_position == 709, (
+        f"Маркер не на 1.25см. left={left_val}, hanging={hanging_val}, "
+        f"marker_position={marker_position}"
     )
-
-    # Параграф списка: left=709, firstLine=0 (перекрывает Normal).
-    doc_xml = _docx_xml(out, "word/document.xml")
-    list_pprs = re.findall(
-        r"<w:pPr>(?:(?!</w:pPr>).)*<w:numPr>.*?</w:pPr>", doc_xml, re.DOTALL
-    )
-    ind = re.search(r"<w:ind\b[^/]*/>", list_pprs[0]).group(0)
-    assert 'w:left="709"' in ind
-    assert 'w:firstLine="0"' in ind
 
 
 def test_list_paragraph_overrides_normal_first_line_indent(

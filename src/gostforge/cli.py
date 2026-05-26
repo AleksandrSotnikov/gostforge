@@ -1502,6 +1502,229 @@ def generate_cmd(
     click.echo(f"Сгенерирован файл: {output}")
 
 
+@main.command("export-html")
+@click.argument("state_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    required=True,
+    help="Куда сохранить .html.",
+)
+@click.option(
+    "--standalone/--fragment", default=True,
+    help="standalone — полный HTML с CSS; fragment — только <body>-контент.",
+)
+def export_html_cmd(state_path: Path, output: Path, standalone: bool) -> None:
+    """Экспортировать state-конструктора в HTML.
+
+    Полезно для:
+    * веб-публикации работы (личный сайт, портфолио);
+    * быстрого просмотра в браузере без MS Word/LibreOffice;
+    * передачи студенту по почте без .docx-вложения.
+
+    Маппинг:
+    * sections с level=1 → ``<h1>``,
+    * subsections (level=2) → ``<h2>``, sub-subsections (level=3) → ``<h3>``;
+    * paragraph → ``<p>`` (с inline-rich-runs: <strong>/<em>);
+    * list/ordered → ``<ol>``/``<ul>`` с ``<li>``;
+    * table → ``<table>`` с ``<caption>``;
+    * figure → ``<figure>`` с ``<figcaption>``;
+    * formula → ``<div class="formula">$$ latex $$</div>``
+      (MathJax-совместимо);
+    * references → нумерованный ``<ol class="bibliography">``.
+
+    --standalone (default) генерирует HTML5 с базовым CSS под печать
+    (Times New Roman, поля A4); --fragment — только содержимое
+    ``<body>`` для встраивания в шаблон сайта.
+    """
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        click.echo(f"Не удалось прочитать JSON: {exc}", err=True)
+        sys.exit(2)
+    if not isinstance(state, dict) or "sections" not in state:
+        click.echo("В state.json должен быть ключ 'sections'.", err=True)
+        sys.exit(2)
+    html = _state_to_html(state, standalone=standalone)
+    output.write_text(html, encoding="utf-8")
+    click.echo(f"Создан {output}")
+
+
+def _state_to_html(state: dict[str, Any], *, standalone: bool = True) -> str:
+    """Сериализовать state в HTML5."""
+    import html as html_mod  # noqa: PLC0415
+
+    parts: list[str] = []
+    title = (state.get("title") or "").strip()
+    if standalone:
+        parts.append("<!DOCTYPE html>")
+        parts.append('<html lang="ru">')
+        parts.append("<head>")
+        parts.append('<meta charset="UTF-8">')
+        parts.append(f"<title>{html_mod.escape(title or 'Документ')}</title>")
+        # Базовый CSS под печать (A4, TNR 14pt, 1.5-spacing, поля).
+        parts.append(
+            "<style>\n"
+            "@page { size: A4; margin: 20mm 15mm 20mm 30mm; }\n"
+            "body { font-family: 'Times New Roman', serif; font-size: 14pt; "
+            "line-height: 1.5; text-align: justify; max-width: 21cm; "
+            "margin: 0 auto; padding: 2em; }\n"
+            "h1 { text-transform: uppercase; text-align: center; "
+            "font-size: 14pt; font-weight: bold; page-break-before: always; "
+            "margin: 1.5em 0 1em; }\n"
+            "h1:first-of-type { page-break-before: auto; }\n"
+            "h2 { font-size: 14pt; font-weight: bold; text-indent: 1.25cm; "
+            "margin: 1em 0 0.5em; }\n"
+            "h3 { font-size: 14pt; font-style: italic; text-indent: 1.25cm; "
+            "margin: 0.8em 0 0.3em; }\n"
+            "p { text-indent: 1.25cm; margin: 0; }\n"
+            "ul, ol { margin: 0; padding-left: 1.25cm; }\n"
+            "ul { list-style-type: '– '; }\n"
+            "table { border-collapse: collapse; margin: 1em 0; }\n"
+            "table caption { text-align: left; font-size: 12pt; "
+            "margin-bottom: 0.3em; }\n"
+            "table th, table td { border: 0.5pt solid #000; padding: 0.3em; }\n"
+            "figure { text-align: center; margin: 1em 0; }\n"
+            "figcaption { font-size: 12pt; margin-top: 0.3em; }\n"
+            ".formula { text-align: center; margin: 0.5em 0; }\n"
+            ".bibliography { padding-left: 2em; }\n"
+            "</style>"
+        )
+        parts.append("</head>")
+        parts.append("<body>")
+
+    if title and standalone:
+        parts.append(f"<h1>{html_mod.escape(title)}</h1>")
+        meta = []
+        if state.get("author"):
+            meta.append(f"Автор: {html_mod.escape(state['author'])}")
+        if state.get("year"):
+            meta.append(f"Год: {state['year']}")
+        if meta:
+            parts.append(f'<p class="meta">{" · ".join(meta)}</p>')
+
+    for sec in state.get("sections", []) or []:
+        _section_to_html(sec, depth=1 if not (title and standalone) else 2, parts=parts)
+
+    if standalone:
+        parts.append("</body></html>")
+    return "\n".join(parts) + "\n"
+
+
+def _section_to_html(
+    section: dict[str, Any], *, depth: int, parts: list[str]
+) -> None:
+    import html as html_mod  # noqa: PLC0415
+
+    heading = (section.get("heading") or "").strip() or "(без названия)"
+    tag = f"h{min(depth, 6)}"
+    parts.append(f"<{tag}>{html_mod.escape(heading)}</{tag}>")
+
+    if section.get("is_bibliography"):
+        refs = section.get("references", []) or []
+        if refs:
+            parts.append('<ol class="bibliography">')
+            for ref in refs:
+                parts.append(f"  <li>{html_mod.escape(str(ref))}</li>")
+            parts.append("</ol>")
+        return
+
+    for block in section.get("blocks") or []:
+        _block_to_html(block, parts=parts)
+
+    for sub in section.get("subsections") or []:
+        _section_to_html(sub, depth=depth + 1, parts=parts)
+
+
+def _block_to_html(block: dict[str, Any], *, parts: list[str]) -> None:
+    import html as html_mod  # noqa: PLC0415
+
+    kind = block.get("kind", "")
+    if kind == "paragraph":
+        text = _paragraph_to_html_inline(block)
+        if text.strip():
+            parts.append(f"<p>{text}</p>")
+    elif kind == "list":
+        items = block.get("items") or []
+        ordered = block.get("ordered", False)
+        tag = "ol" if ordered else "ul"
+        parts.append(f"<{tag}>")
+        for item in items:
+            parts.append(f"  <li>{html_mod.escape(str(item))}</li>")
+        parts.append(f"</{tag}>")
+    elif kind == "table":
+        headers = block.get("headers") or []
+        rows = block.get("rows") or []
+        caption = block.get("caption", "")
+        parts.append("<table>")
+        if caption:
+            parts.append(f"  <caption>{html_mod.escape(caption)}</caption>")
+        if headers:
+            parts.append("  <thead><tr>")
+            for h in headers:
+                parts.append(f"    <th>{html_mod.escape(str(h))}</th>")
+            parts.append("  </tr></thead>")
+        if rows:
+            parts.append("  <tbody>")
+            for row in rows:
+                parts.append("    <tr>")
+                for cell in row:
+                    parts.append(f"      <td>{html_mod.escape(str(cell))}</td>")
+                parts.append("    </tr>")
+            parts.append("  </tbody>")
+        parts.append("</table>")
+    elif kind == "figure":
+        path = block.get("image_path", "")
+        caption = block.get("caption", "")
+        parts.append("<figure>")
+        if path:
+            parts.append(
+                f'  <img src="{html_mod.escape(path)}" '
+                f'alt="{html_mod.escape(caption)}">'
+            )
+        if caption:
+            parts.append(f"  <figcaption>{html_mod.escape(caption)}</figcaption>")
+        parts.append("</figure>")
+    elif kind == "formula":
+        latex = block.get("latex", "")
+        if latex:
+            parts.append(
+                f'<div class="formula">$$ {html_mod.escape(latex)} $$</div>'
+            )
+
+
+def _paragraph_to_html_inline(block: dict[str, Any]) -> str:
+    """Сериализовать параграф (text или runs) в HTML с inline-разметкой."""
+    import html as html_mod  # noqa: PLC0415
+
+    text = block.get("text", "")
+    runs = block.get("runs") or []
+    if not runs:
+        return html_mod.escape(text)
+    parts: list[str] = []
+    for r in runs:
+        if r.get("kind") == "text":
+            t = html_mod.escape(r.get("text", ""))
+            if r.get("bold") and r.get("italic"):
+                parts.append(f"<strong><em>{t}</em></strong>")
+            elif r.get("bold"):
+                parts.append(f"<strong>{t}</strong>")
+            elif r.get("italic"):
+                parts.append(f"<em>{t}</em>")
+            else:
+                parts.append(t)
+        elif r.get("kind") == "formula":
+            latex = html_mod.escape(r.get("latex", ""))
+            parts.append(f"\\({latex}\\)")
+        elif r.get("kind") == "citation":
+            sid = r.get("source_id", "")
+            page = r.get("page", "")
+            label = f"[{sid}, с. {page}]" if page else f"[{sid}]"
+            parts.append(html_mod.escape(label))
+    return "".join(parts)
+
+
 @main.command("export-md")
 @click.argument("state_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
