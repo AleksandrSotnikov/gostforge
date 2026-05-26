@@ -166,6 +166,19 @@ def _violation_to_dict(violation: Any) -> dict[str, Any]:
     }
 
 
+def _comment_to_dict(comment: Any) -> dict[str, Any]:
+    """Сериализация Comment в JSON-dict для ответа /comments."""
+    return {
+        "id": comment.id,
+        "submission_id": comment.submission_id,
+        "author": comment.author,
+        "role": comment.role,
+        "body": comment.body,
+        "resolved": comment.resolved,
+        "created_at": comment.created_at,
+    }
+
+
 def _parse_uploaded_docx(data: bytes) -> Any:
     """Сохранить байты во временный файл, прогнать парсер, удалить файл."""
     from gostforge.parser import parse_docx
@@ -534,15 +547,25 @@ def create_app() -> FastAPI:
 
     @app.get("/submissions/{submission_id}")
     def get_submission_endpoint(submission_id: int) -> dict[str, Any]:
-        """Детали одного submission со списком всех violations."""
-        from gostforge.db import get_connection, get_submission
+        """Детали одного submission со списком всех violations.
+
+        Также возвращает ``unresolved_comments`` — счётчик открытых
+        комментариев, чтобы UI мог нарисовать бейдж «1 незакрытый
+        вопрос от руководителя» без второго запроса.
+        """
+        from gostforge.db import (
+            count_unresolved_comments,
+            get_connection,
+            get_submission,
+        )
 
         with get_connection() as conn:
             sub = get_submission(conn, submission_id)
-        if sub is None:
-            raise HTTPException(
-                status_code=404, detail=f"Submission #{submission_id} не найден"
-            )
+            if sub is None:
+                raise HTTPException(
+                    status_code=404, detail=f"Submission #{submission_id} не найден"
+                )
+            unresolved = count_unresolved_comments(conn, submission_id)
         return {
             "id": sub.id,
             "filename": sub.filename,
@@ -553,6 +576,7 @@ def create_app() -> FastAPI:
                 "warning": sub.warning_count,
                 "info": sub.info_count,
             },
+            "unresolved_comments": unresolved,
             "violations": [
                 {
                     "id": v.id,
@@ -577,6 +601,99 @@ def create_app() -> FastAPI:
         if not deleted:
             raise HTTPException(
                 status_code=404, detail=f"Submission #{submission_id} не найден"
+            )
+        return {"deleted": True}
+
+    # --- Comments (Фаза 3, миграция v3) ------------------------------------
+
+    @app.get("/submissions/{submission_id}/comments")
+    def list_comments_endpoint(
+        submission_id: int, include_resolved: bool = True
+    ) -> list[dict[str, Any]]:
+        """Список комментариев к submission в хронологическом порядке.
+
+        Параметр ``include_resolved=false`` — скрыть закрытые
+        (для панели «что осталось обсудить»).
+        """
+        from gostforge.db import get_connection, list_comments
+
+        with get_connection() as conn:
+            items = list_comments(
+                conn,
+                submission_id=submission_id,
+                include_resolved=include_resolved,
+            )
+        return [_comment_to_dict(c) for c in items]
+
+    @app.post("/submissions/{submission_id}/comments")
+    def add_comment_endpoint(
+        submission_id: int, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Добавить комментарий к submission.
+
+        Body JSON: ``{"body": "...", "author": "...", "role": "supervisor"}``.
+        Поля ``author`` и ``role`` опциональны (default ``""`` и
+        ``anonymous`` соответственно). Возвращает созданный комментарий.
+        """
+        from gostforge.db import add_comment, get_connection
+
+        body = payload.get("body", "")
+        author = payload.get("author", "") or ""
+        role = payload.get("role", "anonymous") or "anonymous"
+        if not isinstance(body, str) or not body.strip():
+            raise HTTPException(
+                status_code=400, detail="Поле 'body' обязательно и не должно быть пустым"
+            )
+        try:
+            with get_connection() as conn:
+                comment = add_comment(
+                    conn,
+                    submission_id=submission_id,
+                    body=body,
+                    author=str(author),
+                    role=str(role),
+                )
+        except ValueError as exc:
+            msg = str(exc)
+            status = 404 if "не существует" in msg else 400
+            raise HTTPException(status_code=status, detail=msg) from exc
+        return _comment_to_dict(comment)
+
+    @app.patch("/comments/{comment_id}/resolve")
+    def resolve_comment_endpoint(
+        comment_id: int, payload: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Пометить комментарий как resolved (или снять отметку).
+
+        Body JSON опционален: ``{"resolved": true|false}``. По умолчанию
+        ``resolved=true`` (закрыть). Чтобы снять отметку — явно
+        ``{"resolved": false}``.
+        """
+        from gostforge.db import get_comment, get_connection, resolve_comment
+
+        resolved = True
+        if payload is not None and "resolved" in payload:
+            resolved = bool(payload["resolved"])
+        with get_connection() as conn:
+            ok = resolve_comment(conn, comment_id, resolved=resolved)
+            if not ok:
+                raise HTTPException(
+                    status_code=404, detail=f"Комментарий #{comment_id} не найден"
+                )
+            updated = get_comment(conn, comment_id)
+        assert updated is not None  # сразу после resolve_comment — должен быть
+        return _comment_to_dict(updated)
+
+    @app.delete("/comments/{comment_id}")
+    def delete_comment_endpoint(comment_id: int) -> dict[str, bool]:
+        """Удалить комментарий."""
+        from gostforge.db import delete_comment, get_connection
+
+        with get_connection() as conn:
+            deleted = delete_comment(conn, comment_id)
+        if not deleted:
+            raise HTTPException(
+                status_code=404, detail=f"Комментарий #{comment_id} не найден"
             )
         return {"deleted": True}
 
