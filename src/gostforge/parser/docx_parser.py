@@ -634,10 +634,20 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
             if heading_level is not None:
                 flush_list_buffer()
                 counters.heading += 1
+                # Собираем heading через ту же логику inline-разбора, что и
+                # обычный параграф: парсер пройдётся по <w:r>-ам, выполнит
+                # style-cascade (font/size/bold/italic от стиля Heading{N})
+                # и заполнит TextRun реальными атрибутами форматирования.
+                # Без этого H.01/H.02 «слепы» к стиле-уровневым настройкам
+                # синего Cambria из дефолтного шаблона Word.
+                heading_paragraph = _build_paragraph(dp, idx=counters.heading)
+                heading_content = heading_paragraph.content or [
+                    TextRun(text=dp.text)
+                ]
                 section = LogicalSection(
                     id=f"sec-{counters.heading}",
                     level=heading_level,
-                    heading=[TextRun(text=dp.text)],
+                    heading=heading_content,
                 )
                 page_section.content.append(section)
                 current_section = section
@@ -954,6 +964,9 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
     content: list[InlineElement] = []
     style_font_name = _style_font_name(p)
     style_font_size_pt = _style_font_size_pt(p)
+    style_bold = _style_bold(p)
+    style_italic = _style_italic(p)
+    style_color_hex = _style_color_hex(p)
 
     p_xml = p._p
     for child in p_xml.iterchildren():
@@ -969,7 +982,12 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
                 content.append(InlineFormula(latex=latex))
                 continue
             text_run = _text_run_from_w_r(
-                child, style_font_name=style_font_name, style_font_size_pt=style_font_size_pt
+                child,
+                style_font_name=style_font_name,
+                style_font_size_pt=style_font_size_pt,
+                style_bold=style_bold,
+                style_italic=style_italic,
+                style_color_hex=style_color_hex,
             )
             if text_run is not None:
                 content.append(text_run)
@@ -1009,14 +1027,22 @@ def _text_run_from_w_r(
     *,
     style_font_name: str | None,
     style_font_size_pt: float | None,
+    style_bold: bool | None = None,
+    style_italic: bool | None = None,
+    style_color_hex: str | None = None,
 ) -> TextRun | None:
     """Построить TextRun из `<w:r>` элемента, читая `<w:rPr>` и `<w:t>`.
 
     Возвращает None, если у run нет видимого текста — такие пустые run-ы
     Word оставляет после удаления (бывают, например, после bookmark-маркеров).
-    Атрибуты форматирования читаются ТОЛЬКО из `<w:rPr>` самого run-а;
-    унаследованные от стиля абзаца игнорируются, кроме font и size (для
-    обратной совместимости с предыдущим поведением парсера).
+
+    Style-cascade: атрибуты font, size, bold, italic читаются сначала из
+    `<w:rPr>` самого run-а; если на run-уровне атрибут не задан явно —
+    берётся из стиля абзаца (включая linked character-стиль и цепочку
+    наследования стилей). Это необходимо, чтобы такие проверки как
+    H.01 (формат заголовка 1: TNR, 14 pt, жирный) корректно срабатывали
+    на документах, сгенерированных через python-docx `add_heading()` —
+    он не пишет явные run-атрибуты, опирается на стиль Heading{N}.
     """
     # Текст: склейка всех <w:t> внутри run-а.
     texts: list[str] = []
@@ -1033,6 +1059,16 @@ def _text_run_from_w_r(
     italic = _rpr_toggle(rpr, "i")
     underline = _rpr_underline(rpr)
     color_hex = _rpr_color(rpr)
+
+    # Style-cascade: если на run-уровне атрибут не задан (None) — наследуем
+    # от стиля параграфа. Если на run-уровне явно False — оставляем False
+    # (явное «не жирный» поверх жирного стиля = реальное намерение автора).
+    if bold is None and style_bold is not None:
+        bold = style_bold
+    if italic is None and style_italic is not None:
+        italic = style_italic
+    if color_hex is None and style_color_hex is not None:
+        color_hex = style_color_hex
 
     # font и size: сначала из rPr, иначе из стиля абзаца.
     font_name = _rpr_font(rpr) or style_font_name
@@ -1310,6 +1346,93 @@ def _style_font_size_pt(p: DocxParagraph) -> float | None:
         size = style.font.size if style.font is not None else None
         if size is not None:
             return float(size.pt)
+        style = getattr(style, "base_style", None)
+    return None
+
+
+def _style_bold(p: DocxParagraph) -> bool | None:
+    """Жирность, заданная на стиле абзаца, с обходом цепочки наследования.
+
+    Возвращает True/False, если на каком-то уровне цепочки атрибут задан
+    явно. None — если ни на одном уровне явно не задан (наследуется
+    дальше от Word-defaults). Это позволяет различать «стиль не задал»
+    от «стиль явно сказал не жирный».
+    """
+    style = p.style
+    while style is not None:
+        bold = style.font.bold if style.font is not None else None
+        if bold is not None:
+            return bool(bold)
+        style = getattr(style, "base_style", None)
+    return None
+
+
+def _style_italic(p: DocxParagraph) -> bool | None:
+    """Курсив, заданный на стиле абзаца, с обходом цепочки наследования."""
+    style = p.style
+    while style is not None:
+        italic = style.font.italic if style.font is not None else None
+        if italic is not None:
+            return bool(italic)
+        style = getattr(style, "base_style", None)
+    return None
+
+
+def _style_color_hex(p: DocxParagraph) -> str | None:
+    """Цвет шрифта стиля абзаца (с обходом цепочки наследования и
+    linked character-стиля).
+
+    Word при рендере run-ов наследует форматирование сразу из двух мест:
+    параграф-стиля (Heading1) И его linked char-стиля (Heading1Char).
+    Парсер должен проверять оба места — иначе синий Cambria из
+    дефолтного шаблона остаётся незамеченным (синий обычно сидит
+    в Heading1Char, а не в Heading1).
+
+    Цвет читается через прямой XML — python-docx style.font.color может
+    возвращать None при themeColor (атрибут w:val при этом есть и
+    содержит реальный hex).
+    """
+
+    def _color_in_style_element(st_elem: Any) -> str | None:
+        if st_elem is None:
+            return None
+        rPr = st_elem.find(f"{{{W_NS}}}rPr")
+        if rPr is None:
+            return None
+        color = rPr.find(f"{{{W_NS}}}color")
+        if color is None:
+            return None
+        val = color.get(f"{{{W_NS}}}val")
+        if not val:
+            return None
+        return f"#{val.upper()}" if val.lower() != "auto" else None
+
+    style = p.style
+    styles_root = None
+    while style is not None:
+        st_elem = getattr(style, "element", None)
+        if st_elem is not None:
+            # 1. Прямой цвет в этом стиле.
+            direct = _color_in_style_element(st_elem)
+            if direct is not None:
+                return direct
+            # 2. Цвет в linked character-стиле (w:link).
+            link = st_elem.find(f"{{{W_NS}}}link")
+            if link is not None:
+                char_id = link.get(f"{{{W_NS}}}val")
+                if char_id:
+                    if styles_root is None:
+                        styles_root = st_elem.getparent()
+                    if styles_root is not None:
+                        for st in styles_root.findall(f"{{{W_NS}}}style"):
+                            if (
+                                st.get(f"{{{W_NS}}}type") == "character"
+                                and st.get(f"{{{W_NS}}}styleId") == char_id
+                            ):
+                                via_link = _color_in_style_element(st)
+                                if via_link is not None:
+                                    return via_link
+                                break
         style = getattr(style, "base_style", None)
     return None
 

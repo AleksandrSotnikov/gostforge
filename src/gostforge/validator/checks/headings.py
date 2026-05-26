@@ -73,19 +73,29 @@ _all_logical_sections = all_logical_sections
 def check_heading_1_format(document: Document, profile: Profile) -> list[Violation]:
     """Проверка формата заголовков 1 уровня.
 
-    Сверяется с `profile.styles.extra.heading_1` (font, size_pt, bold,
-    uppercase, alignment). Если у заголовка свойство явно задано и не
-    совпадает с эталоном — нарушение. None значит «наследуется» —
-    пропускаем.
+    Сверяется с `profile.styles.heading_1` (HeadingStyleProfile): font,
+    size_pt, bold, uppercase. Если у заголовка свойство явно задано и
+    не совпадает с эталоном — нарушение.
+
+    Парсер выполняет style-cascade при чтении документа: run-ы,
+    которые не имеют явных rPr-атрибутов, наследуют font/size/bold/italic
+    от стиля Heading1 (включая linked character-стиль). Поэтому проверка
+    срабатывает и на документах, где Word нарисовал заголовок «синим
+    Cambria» через дефолтный шаблон, без явного forma на run-уровне.
     """
     violations: list[Violation] = []
-    heading_1: dict[str, Any] = profile.styles.extra.get("heading_1", {}) or {}
+    h1 = profile.styles.heading_1
+    # Backwards-compat: legacy YAML может задавать heading_1 в extra dict.
+    # В таком случае значения из extra перекрывают типизированные
+    # (студент явно переопределил, значит так и хочет).
+    legacy: dict[str, Any] = profile.styles.extra.get("heading_1", {}) or {}
 
-    expected_font: str | None = heading_1.get("font")
-    expected_size: float | None = heading_1.get("size_pt")
-    expected_bold: bool | None = heading_1.get("bold")
-    expected_uppercase: bool | None = heading_1.get("uppercase")
-    expected_alignment: str | None = heading_1.get("alignment")
+    expected_font: str | None = legacy.get("font", h1.font)
+    expected_size: float | None = legacy.get("size_pt", h1.size_pt)
+    expected_bold: bool | None = legacy.get("bold", h1.bold)
+    expected_uppercase: bool | None = legacy.get("uppercase", h1.uppercase)
+    expected_alignment: str | None = legacy.get("alignment", h1.alignment)
+    expected_color: str | None = legacy.get("color", h1.color)
 
     for section in _all_logical_sections(document):
         if section.level != 1:
@@ -147,25 +157,68 @@ def check_heading_1_format(document: Document, profile: Profile) -> list[Violati
                         suggestion="Сделать заголовок полужирным",
                     )
                 )
+            if _color_violates_expected(run.color_hex, expected_color):
+                violations.append(
+                    _violation(
+                        "H.01",
+                        f"В заголовке 1 уровня «{text}» цвет шрифта "
+                        f"«{run.color_hex}» не соответствует профилю "
+                        f"({_describe_expected_color(expected_color)})",
+                        section.id,
+                        suggestion=(
+                            "Использовать чёрный (auto) цвет шрифта в заголовках"
+                            if expected_color in (None, "auto", "")
+                            else f"Использовать цвет #{expected_color.lstrip('#')}"
+                        ),
+                    )
+                )
 
     return violations
+
+
+def _color_violates_expected(actual: str | None, expected: str | None) -> bool:
+    """True, если фактический цвет run-а нарушает ожидание профиля.
+
+    Профильное ``expected=None`` или ``"auto"`` означает «никакого
+    явного цвета» — допустимы только None и чёрный (#000000). Если
+    ожидается hex (например, "FF0000") — проверяем точное совпадение
+    без учёта регистра и лидирующего «#».
+    """
+    if expected in (None, "auto", ""):
+        if actual is None:
+            return False
+        norm = actual.lstrip("#").upper()
+        return norm != "000000"
+    expected_norm = expected.lstrip("#").upper()
+    if actual is None:
+        return True
+    return actual.lstrip("#").upper() != expected_norm
+
+
+def _describe_expected_color(expected: str | None) -> str:
+    """Описание ожидаемого цвета для текста нарушения."""
+    if expected in (None, "auto", ""):
+        return "ожидается чёрный (auto)"
+    return f"ожидается #{expected.lstrip('#')}"
 
 
 @register("H.02")
 def check_heading_2_format(document: Document, profile: Profile) -> list[Violation]:
     """Проверка формата заголовков 2 уровня.
 
-    Сверяется с `profile.styles.extra.heading_2` (font, size_pt, bold,
-    uppercase). Если у заголовка свойство явно задано и не совпадает с
-    эталоном — нарушение. None означает «наследуется» — пропускаем.
+    Сверяется с `profile.styles.heading_2` (HeadingStyleProfile): font,
+    size_pt, bold, uppercase. Парсер выполняет style-cascade — см.
+    docstring H.01.
     """
     violations: list[Violation] = []
-    heading_2: dict[str, Any] = profile.styles.extra.get("heading_2", {}) or {}
+    h2 = profile.styles.heading_2
+    legacy: dict[str, Any] = profile.styles.extra.get("heading_2", {}) or {}
 
-    expected_font: str | None = heading_2.get("font")
-    expected_size: float | None = heading_2.get("size_pt")
-    expected_bold: bool | None = heading_2.get("bold")
-    expected_uppercase: bool | None = heading_2.get("uppercase")
+    expected_font: str | None = legacy.get("font", h2.font)
+    expected_size: float | None = legacy.get("size_pt", h2.size_pt)
+    expected_bold: bool | None = legacy.get("bold", h2.bold)
+    expected_uppercase: bool | None = legacy.get("uppercase", h2.uppercase)
+    expected_color: str | None = legacy.get("color", h2.color)
 
     for section in _all_logical_sections(document):
         if section.level != 2:
@@ -218,6 +271,21 @@ def check_heading_2_format(document: Document, profile: Profile) -> list[Violati
                         f"Заголовок 2 уровня «{text}» не выделен полужирным",
                         section.id,
                         suggestion="Сделать заголовок полужирным",
+                    )
+                )
+            if _color_violates_expected(run.color_hex, expected_color):
+                violations.append(
+                    _violation(
+                        "H.02",
+                        f"В заголовке 2 уровня «{text}» цвет шрифта "
+                        f"«{run.color_hex}» не соответствует профилю "
+                        f"({_describe_expected_color(expected_color)})",
+                        section.id,
+                        suggestion=(
+                            "Использовать чёрный (auto) цвет шрифта в заголовках"
+                            if expected_color in (None, "auto", "")
+                            else f"Использовать цвет #{expected_color.lstrip('#')}"
+                        ),
                     )
                 )
 
