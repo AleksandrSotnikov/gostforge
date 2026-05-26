@@ -1145,12 +1145,26 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
     """Конвертировать <w:p> в Figure / Formula / Paragraph.
 
     Приоритет распознавания:
-    1. <w:drawing> → Figure (рисунок).
-    2. <m:oMathPara> → блочная Formula (формула как отдельный блок).
+    1. <w:txbxContent> (текстбокс внутри drawing) → Paragraph с текстом.
+       Часто титульный лист или вынос помещают в текстбокс — без этой
+       ветки текст потерялся бы (drawing считался бы пустым рисунком).
+    2. <w:drawing> → Figure (рисунок).
+    3. <m:oMathPara> → блочная Formula (формула как отдельный блок).
        Голый <m:oMath> без <m:oMathPara> считается inline-формулой
        и обрабатывается в _build_paragraph.
-    3. Иначе — обычный Paragraph (возможно с InlineFormula в content).
+    4. Иначе — обычный Paragraph (возможно с InlineFormula в content).
     """
+    # Текстбокс: извлекаем текст из <w:txbxContent>, если он непустой.
+    # Это важнее, чем считать параграф рисунком — текст не должен
+    # теряться.
+    txbx_text = _extract_textbox_text(dp._p)
+    if txbx_text:
+        counters.paragraph += 1
+        return Paragraph(
+            id=f"p-{counters.paragraph}",
+            content=[TextRun(text=txbx_text)],
+            style_name=dp.style.name if dp.style is not None else None,
+        )
     drawings = dp._p.findall(f".//{{{W_NS}}}drawing")
     if drawings:
         counters.figure += 1
@@ -1198,6 +1212,27 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
         )
     counters.paragraph += 1
     return _build_paragraph(dp, idx=counters.paragraph)
+
+
+def _extract_textbox_text(p_elem: Any) -> str:
+    """Извлечь текст из <w:txbxContent> внутри параграфа.
+
+    Текстбоксы в OOXML лежат как
+    ``<w:drawing>…<wps:txbx><w:txbxContent><w:p>…</w:p></w:txbxContent>``
+    (DrawingML) или ``<w:pict>…<v:textbox><w:txbxContent>`` (VML).
+    Извлекаем склейку всех <w:t> внутри любого <w:txbxContent>.
+
+    Возвращает пустую строку, если текстбокса нет или он пуст.
+    """
+    parts: list[str] = []
+    # txbxContent в любом namespace (DrawingML wps или VML) — ищем по
+    # localname через iter с проверкой тега.
+    for el in p_elem.iter():
+        if etree.QName(el.tag).localname == "txbxContent":
+            for t in el.iter(f"{{{W_NS}}}t"):
+                if t.text:
+                    parts.append(t.text)
+    return "".join(parts).strip()
 
 
 def _extract_drawing_rid(drawing_elem: Any) -> str:
