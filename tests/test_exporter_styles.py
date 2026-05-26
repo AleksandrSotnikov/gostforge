@@ -292,3 +292,55 @@ def test_eskd_profile_heading_color_also_auto(tmp_path: Path) -> None:
     )
     assert h1_block is not None
     assert "365F91" not in h1_block.group(0)
+
+
+# --- Linked char-styles (HeadingNChar) ---
+
+
+@pytest.mark.parametrize("level", [1, 2, 3, 4])
+def test_heading_linked_char_style_has_no_blue(
+    tmp_path: Path, level: int
+) -> None:
+    """Linked char-стиль (Heading{N}Char) не должен сохранять синий цвет
+    из дефолтного шаблона. При рендере run-ов внутри heading-параграфа
+    Word применяет char-стиль поверх параграф-стиля, и его цвет
+    перекроет наш auto, если не править оба."""
+    data = _build_demo_docx(tmp_path)
+    styles = _docx_styles_xml(data)
+    block = re.search(
+        rf'styleId="Heading{level}Char".*?</w:style>', styles, re.DOTALL
+    )
+    # Heading1Char/Heading2Char точно есть в python-docx-template,
+    # Heading3Char/Heading4Char тоже.
+    assert block is not None, f"Heading{level}Char отсутствует"
+    block_text = block.group(0)
+    assert "365F91" not in block_text, f"Heading{level}Char: синий накопил"
+    assert "accent1" not in block_text, f"Heading{level}Char: themeColor=accent1"
+    # Cambria-theme должен быть очищен.
+    assert "majorHAnsi" not in block_text, (
+        f"Heading{level}Char: theme-font осталась"
+    )
+    # Times New Roman прописан явно.
+    assert "Times New Roman" in block_text
+
+
+@pytest.mark.parametrize("profile_id", ["gost-7.32-2017", "gost-r-2.105-2019", "example-department"])
+def test_all_profiles_generate_clean_headings(
+    tmp_path: Path, profile_id: str
+) -> None:
+    """Регресс на покрытие профилей: каждый профиль из profiles/ должен
+    генерировать документ, где Heading1+Heading1Char не содержат
+    синего цвета и theme-fonts."""
+    data = _build_demo_docx(tmp_path, profile_id=profile_id)
+    styles = _docx_styles_xml(data)
+    # Полный поиск 365F91 во ВСЁМ styles.xml имеет ложные срабатывания
+    # на латентные tableStyle (LightShading и т. п.) — но они не
+    # используются документом. Ограничиваемся Heading1+Heading1Char.
+    h1 = re.search(r'styleId="Heading1".*?</w:style>', styles, re.DOTALL)
+    h1c = re.search(r'styleId="Heading1Char".*?</w:style>', styles, re.DOTALL)
+    assert h1 is not None
+    assert h1c is not None
+    assert "365F91" not in h1.group(0)
+    assert "365F91" not in h1c.group(0)
+    assert "Times New Roman" in h1.group(0)
+    assert "Times New Roman" in h1c.group(0)

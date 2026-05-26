@@ -219,6 +219,68 @@ def _apply_heading_styles(doc: DocxDocument, profile: Profile) -> None:
         pf.first_line_indent = Cm(cfg.first_line_indent_cm)
         pf.page_break_before = cfg.page_break_before
         pf.keep_with_next = cfg.keep_with_next
+        # Связанный character-стиль (HeadingNChar): Word при рендере run-ов
+        # внутри параграфа применяет linked-char поверх параграф-стиля.
+        # Если не переписать — Cambria+синий из дефолтного шаблона
+        # перекроют нашу правку.
+        _sync_linked_char_style(doc, style.element, cfg)
+
+
+def _sync_linked_char_style(doc: DocxDocument, p_style_element: Any, cfg: Any) -> None:
+    """Применить шрифт/цвет/жирность из cfg к linked character-стилю.
+
+    В styles.xml у каждого heading-параграф-стиля есть ссылка
+    ``<w:link w:val="HeadingNChar"/>`` на character-стиль. При рендере
+    run-ов параграфа Word применяет char-стиль поверх параграф-стиля
+    (и его theme-fonts/синий цвет могут перекрыть параграф-настройки).
+
+    Эта функция находит linked-char-стиль по styleId из w:link и
+    переписывает его font, color, bold, italic симметрично с
+    параграф-стилем. theme-fonts чистятся через _clear_theme_fonts.
+    """
+    w_ns = W_NS
+    link = p_style_element.find(f"{{{w_ns}}}link")
+    if link is None:
+        return
+    char_style_id = link.get(f"{{{w_ns}}}val")
+    if not char_style_id:
+        return
+    # python-docx не индексирует character-стили по styleId напрямую,
+    # ищем через styles_part.element.
+    styles_root = p_style_element.getparent()
+    char_elem = None
+    for st in styles_root.findall(f"{{{w_ns}}}style"):
+        if (
+            st.get(f"{{{w_ns}}}type") == "character"
+            and st.get(f"{{{w_ns}}}styleId") == char_style_id
+        ):
+            char_elem = st
+            break
+    if char_elem is None:
+        return
+    # Font + theme cleanup на rPr этого char-стиля.
+    _clear_theme_fonts(char_elem, font_name=cfg.font)
+    rPr = char_elem.find(f"{{{w_ns}}}rPr")
+    if rPr is None:
+        rPr = etree.SubElement(char_elem, f"{{{w_ns}}}rPr")
+    # Size: w:sz/w:szCs в полу-пунктах (Pt*2).
+    half_pt = str(int(cfg.size_pt * 2))
+    for tag in ("sz", "szCs"):
+        el = rPr.find(f"{{{w_ns}}}{tag}")
+        if el is None:
+            el = etree.SubElement(rPr, f"{{{w_ns}}}{tag}")
+        el.set(f"{{{w_ns}}}val", half_pt)
+    # Bold / italic: явные w:b и w:i (или их удаление).
+    for tag, want in (("b", cfg.bold), ("bCs", cfg.bold), ("i", cfg.italic), ("iCs", cfg.italic)):
+        el = rPr.find(f"{{{w_ns}}}{tag}")
+        if want:
+            if el is None:
+                etree.SubElement(rPr, f"{{{w_ns}}}{tag}")
+        else:
+            if el is not None:
+                rPr.remove(el)
+    # Color — через ту же функцию что и для параграф-стиля.
+    _apply_style_color(char_elem, cfg.color)
 
 
 def _apply_style_color(style_element: Any, color: str) -> None:
