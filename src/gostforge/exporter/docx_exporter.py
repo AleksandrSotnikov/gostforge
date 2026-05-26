@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -734,6 +735,67 @@ def _try_write_embedded_picture(
     return True
 
 
+# Регекс «вручную добавленного маркера» в начале элемента списка.
+# Покрывает: '-', '–', '—', '•', '*', '◦' + любые табы/пробелы после,
+# а также нумерованные варианты '1.', '1)', 'a)', 'A.'.
+# Не пытается удалять маркер посреди текста — только в самом начале.
+_LEADING_MARKER_RE = re.compile(
+    r"^("
+    r"[-–—•*◦]"                  # bullet-маркеры
+    r"|\d{1,3}[\.\)]"             # '1.', '12)'
+    r"|[a-zа-яёA-ZА-ЯЁ][\.\)]"   # 'a)', 'б.', 'A.', 'Б)'
+    r")[\s\t]+"
+)
+
+
+def _strip_leading_marker_from_inline(
+    content: Sequence[InlineElement],
+) -> list[InlineElement]:
+    """Удалить ведущий маркер списка из первого TextRun, если он есть.
+
+    Идея: пользователи часто пишут элементы списка с уже добавленным
+    маркером («- NET Framework 4.8», «1. шаг»). Если оставить такой
+    текст как есть, экспортёр-numPr нарисует свой маркер ПЛЮС
+    текстовый маркер в run-е останется — получаются «два маркера».
+
+    Алгоритм:
+    1. Найти первый TextRun в content (пропуская CrossRef/Citation/
+       Formula — они не могут содержать маркер).
+    2. Если его text начинается с известного маркера — удалить
+       совпадение (маркер + последующие пробелы/табы).
+    3. Если в результате text пуст — оставить TextRun с пустым text
+       (легче, чем удалять элемент: остальные форматные атрибуты
+       run-а сохраняются для случая когда они применяются к
+       последующему).
+
+    Возвращает НОВЫЙ list (не мутирует входной), чтобы избежать
+    side-effect-ов при многократном проходе.
+    """
+    if not content:
+        return list(content)
+    result = list(content)
+    for i, el in enumerate(result):
+        if isinstance(el, TextRun):
+            stripped = _LEADING_MARKER_RE.sub("", el.text, count=1)
+            if stripped != el.text:
+                result[i] = TextRun(
+                    text=stripped,
+                    bold=el.bold,
+                    italic=el.italic,
+                    underline=el.underline,
+                    superscript=el.superscript,
+                    subscript=el.subscript,
+                    font=el.font,
+                    size_pt=el.size_pt,
+                    color_hex=el.color_hex,
+                )
+            return result
+        # Не TextRun (CrossRef/InlineFormula/Citation в начале) —
+        # маркер вряд ли там, прерываем поиск.
+        break
+    return result
+
+
 def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
     """Записать список (нумерованный/маркированный) через настоящий numPr.
 
@@ -778,6 +840,11 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
     item_hanging_twips = int(Cm(hanging_indent_cm).twips)
 
     for idx, item_content in enumerate(list_block.items):
+        # Удаляем «вручную написанный» маркер в начале элемента
+        # (типа «- NET Framework», «– требование», «1. шаг», «•  пункт»).
+        # Без этого numPr рисует свой маркер ПЛЮС текстовый маркер
+        # остаётся — пользователь видит «– – текст» или «1) 1. текст».
+        item_content = _strip_leading_marker_from_inline(item_content)
         paragraph = doc.add_paragraph()
         # ilvl: из item_levels или 0 по умолчанию.
         item_level = levels[idx] if idx < len(levels) else 0
