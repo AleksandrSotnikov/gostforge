@@ -609,6 +609,9 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
     _resolve_citation_proxies(document, state)
     profile_id = state.get("profile_id") or document.profile_id
     profile = load_profile(profile_id)
+    # Применяем style_overrides из sidebar (если заданы) поверх профиля.
+    overrides = state.get("style_overrides") or {}
+    profile = _apply_style_overrides(profile, overrides)
     export_docx(document, profile, out_path)
     return out_path.read_bytes()
 
@@ -979,6 +982,209 @@ def _validate_state_bytes(data: bytes, profile_id: str) -> dict[str, int]:
 # --- UI: sidebar -------------------------------------------------------------
 
 
+def _render_style_overrides_section(state: dict[str, Any]) -> None:
+    """Sidebar-секция «Дополнительные настройки стилей».
+
+    Позволяет студенту переопределить ключевые визуальные параметры
+    профиля для текущего документа без правки YAML. Изменения хранятся
+    в ``state['style_overrides']`` как вложенный dict, при сборке
+    docx применяются через :func:`_apply_style_overrides`.
+
+    UI намеренно компактный — основные настройки (поля / шрифт /
+    маркер / цвет заголовков) в одном expander.
+    """
+    state.setdefault("style_overrides", {})
+    overrides: dict[str, Any] = state["style_overrides"]
+
+    # Загрузим profile, чтобы показать актуальные default-значения.
+    try:
+        base = load_profile(state.get("profile_id", "gost-7.32-2017"))
+    except Exception:  # pragma: no cover
+        base = None
+
+    if base is None:
+        return  # без профиля настройки не показываем
+
+    with st.sidebar.expander("Настройки стилей", expanded=False):
+        st.caption(
+            "Эти значения переопределяют параметры выбранного профиля "
+            "только для текущего документа. На YAML профиля не влияют."
+        )
+
+        # --- Поля страницы ---
+        st.markdown("**Поля страницы (мм)**")
+        margins = overrides.setdefault("page_margins_mm", {})
+        defaults = base.styles.page.margins_mm
+        cols = st.columns(2)
+        margins["top"] = cols[0].number_input(
+            "Верх", value=int(margins.get("top", defaults.get("top", 20))),
+            min_value=0, max_value=100, key="ov_margin_top",
+        )
+        margins["right"] = cols[1].number_input(
+            "Право", value=int(margins.get("right", defaults.get("right", 15))),
+            min_value=0, max_value=100, key="ov_margin_right",
+        )
+        margins["bottom"] = cols[0].number_input(
+            "Низ", value=int(margins.get("bottom", defaults.get("bottom", 20))),
+            min_value=0, max_value=100, key="ov_margin_bottom",
+        )
+        margins["left"] = cols[1].number_input(
+            "Лево", value=int(margins.get("left", defaults.get("left", 30))),
+            min_value=0, max_value=100, key="ov_margin_left",
+        )
+
+        # --- Основной текст ---
+        st.markdown("**Основной текст**")
+        overrides["body_font"] = st.text_input(
+            "Шрифт",
+            value=overrides.get("body_font", base.styles.body.font),
+            key="ov_body_font",
+        )
+        cols = st.columns(2)
+        overrides["body_size_pt"] = cols[0].number_input(
+            "Кегль (pt)",
+            value=float(overrides.get("body_size_pt", base.styles.body.size_pt)),
+            min_value=8.0, max_value=24.0, step=0.5, key="ov_body_size",
+        )
+        overrides["body_line_spacing"] = cols[1].number_input(
+            "Межстрочный",
+            value=float(overrides.get("body_line_spacing", base.styles.body.line_spacing)),
+            min_value=1.0, max_value=3.0, step=0.1, key="ov_line_spacing",
+        )
+        overrides["body_first_line_indent_cm"] = st.number_input(
+            "Отступ первой строки (см)",
+            value=float(overrides.get(
+                "body_first_line_indent_cm", base.styles.body.first_line_indent_cm
+            )),
+            min_value=0.0, max_value=3.0, step=0.05, key="ov_indent",
+        )
+
+        # --- Заголовки ---
+        st.markdown("**Заголовки**")
+        overrides["heading1_uppercase"] = st.checkbox(
+            "Глава 1 — ВЕРХНИЙ РЕГИСТР",
+            value=bool(overrides.get(
+                "heading1_uppercase", base.styles.heading_1.uppercase
+            )),
+            key="ov_h1_upper",
+        )
+        overrides["heading1_color"] = st.text_input(
+            "Цвет (auto или RRGGBB)",
+            value=overrides.get("heading1_color", base.styles.heading_1.color),
+            help="auto = чёрный (по ГОСТу). Hex без # — например, 000000.",
+            key="ov_h1_color",
+        )
+        cols = st.columns(2)
+        overrides["heading1_spacing_before_pt"] = cols[0].number_input(
+            "Отступ до (pt)",
+            value=float(overrides.get(
+                "heading1_spacing_before_pt", base.styles.heading_1.spacing_before_pt
+            )),
+            min_value=0.0, max_value=72.0, step=1.0, key="ov_h1_before",
+        )
+        overrides["heading1_spacing_after_pt"] = cols[1].number_input(
+            "Отступ после (pt)",
+            value=float(overrides.get(
+                "heading1_spacing_after_pt", base.styles.heading_1.spacing_after_pt
+            )),
+            min_value=0.0, max_value=72.0, step=1.0, key="ov_h1_after",
+        )
+
+        # --- Списки ---
+        st.markdown("**Списки**")
+        overrides["bullet_char"] = st.text_input(
+            "Маркер",
+            value=overrides.get("bullet_char", base.styles.lists.bullet_char),
+            help="Один символ: – (тире по ГОСТ), •, *, ◦, →",
+            key="ov_bullet",
+        )
+        overrides["ordered_format"] = st.text_input(
+            "Шаблон нумерации",
+            value=overrides.get("ordered_format", base.styles.lists.ordered_format),
+            help="Используйте {n} для подстановки номера. Примеры: «{n})», «{n}.», «{n}.».",
+            key="ov_ordered",
+        )
+
+        # --- Таблицы ---
+        st.markdown("**Таблицы**")
+        border_options = ["single", "double", "dashed", "dotted", "none"]
+        current_border = overrides.get(
+            "table_border_style", base.styles.table.border_style
+        )
+        overrides["table_border_style"] = st.selectbox(
+            "Стиль рамки",
+            options=border_options,
+            index=border_options.index(current_border)
+            if current_border in border_options
+            else 0,
+            key="ov_tbl_border",
+        )
+        overrides["table_header_bold"] = st.checkbox(
+            "Жирная шапка",
+            value=bool(overrides.get(
+                "table_header_bold", base.styles.table.header_bold
+            )),
+            key="ov_tbl_bold",
+        )
+
+        # --- Сброс ---
+        if st.button("Сбросить все настройки стилей", key="ov_reset"):
+            state["style_overrides"] = {}
+            st.rerun()
+
+
+def _apply_style_overrides(profile: Any, overrides: dict[str, Any]) -> Any:
+    """Применить style_overrides из state к копии профиля.
+
+    Возвращает новый Profile (через model_copy) — оригинал не меняется.
+    Если overrides пустой — возвращает исходный профиль без копирования.
+    """
+    if not overrides:
+        return profile
+    p = profile.model_copy(deep=True)
+    # Поля страницы.
+    margins = overrides.get("page_margins_mm") or {}
+    if margins:
+        for side in ("top", "right", "bottom", "left"):
+            if side in margins:
+                p.styles.page.margins_mm[side] = float(margins[side])
+    # Тело.
+    if "body_font" in overrides and overrides["body_font"]:
+        p.styles.body.font = overrides["body_font"]
+    if "body_size_pt" in overrides:
+        p.styles.body.size_pt = float(overrides["body_size_pt"])
+    if "body_line_spacing" in overrides:
+        p.styles.body.line_spacing = float(overrides["body_line_spacing"])
+    if "body_first_line_indent_cm" in overrides:
+        p.styles.body.first_line_indent_cm = float(
+            overrides["body_first_line_indent_cm"]
+        )
+    # Заголовок 1.
+    if "heading1_uppercase" in overrides:
+        p.styles.heading_1.uppercase = bool(overrides["heading1_uppercase"])
+    if "heading1_color" in overrides and overrides["heading1_color"]:
+        p.styles.heading_1.color = overrides["heading1_color"]
+    if "heading1_spacing_before_pt" in overrides:
+        p.styles.heading_1.spacing_before_pt = float(
+            overrides["heading1_spacing_before_pt"]
+        )
+    if "heading1_spacing_after_pt" in overrides:
+        p.styles.heading_1.spacing_after_pt = float(
+            overrides["heading1_spacing_after_pt"]
+        )
+    # Списки.
+    if "bullet_char" in overrides and overrides["bullet_char"]:
+        p.styles.lists.bullet_char = overrides["bullet_char"]
+    if "ordered_format" in overrides and overrides["ordered_format"]:
+        p.styles.lists.ordered_format = overrides["ordered_format"]
+    # Таблицы.
+    if "table_border_style" in overrides:
+        p.styles.table.border_style = overrides["table_border_style"]
+    if "table_header_bold" in overrides:
+        p.styles.table.header_bold = bool(overrides["table_header_bold"])
+    return p
+
+
 def _render_sidebar_metadata() -> None:
     """Sidebar с метаданными работы, выбором профиля и save/load JSON."""
     state = _get_state()
@@ -1030,6 +1236,8 @@ def _render_sidebar_metadata() -> None:
         index=(profiles.index(current_profile) if current_profile in profiles else 0),
         help="Профиль определяет, какие проверки нормоконтроля будут запущены.",
     )
+
+    _render_style_overrides_section(state)
 
     st.sidebar.divider()
     st.sidebar.subheader("Шаблоны")
