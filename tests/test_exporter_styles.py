@@ -64,9 +64,7 @@ def test_heading1_color_is_not_blue(tmp_path: Path) -> None:
     """Heading 1 не должен иметь синий accent1-цвет из дефолтного шаблона."""
     data = _build_demo_docx(tmp_path)
     styles = _docx_styles_xml(data)
-    h1_block = re.search(
-        r'styleId="Heading1".*?</w:style>', styles, re.DOTALL
-    )
+    h1_block = re.search(r'styleId="Heading1".*?</w:style>', styles, re.DOTALL)
     assert h1_block is not None
     # Не должно быть w:color val="365F91" (тот самый синий).
     assert "365F91" not in h1_block.group(0)
@@ -79,18 +77,14 @@ def test_heading_fonts_are_explicit_times_new_roman(tmp_path: Path) -> None:
     data = _build_demo_docx(tmp_path)
     styles = _docx_styles_xml(data)
     for level in (1, 2, 3, 4):
-        block = re.search(
-            rf'styleId="Heading{level}".*?</w:style>', styles, re.DOTALL
-        )
+        block = re.search(rf'styleId="Heading{level}".*?</w:style>', styles, re.DOTALL)
         assert block is not None, f"Heading {level} style missing"
         block_text = block.group(0)
         # theme-атрибутов быть не должно.
         assert "majorHAnsi" not in block_text, f"Heading {level}: theme font осталась"
         assert "asciiTheme" not in block_text, f"Heading {level}: theme font осталась"
         # Times New Roman должен быть явно прописан.
-        assert "Times New Roman" in block_text, (
-            f"Heading {level}: TNR не прописан"
-        )
+        assert "Times New Roman" in block_text, f"Heading {level}: TNR не прописан"
 
 
 def test_heading1_is_uppercase_in_document(tmp_path: Path) -> None:
@@ -109,9 +103,7 @@ def test_normal_style_has_explicit_font(tmp_path: Path) -> None:
     """Стиль Normal должен иметь явный font, без minorHAnsi-theme."""
     data = _build_demo_docx(tmp_path)
     styles = _docx_styles_xml(data)
-    normal_block = re.search(
-        r'styleId="Normal".*?</w:style>', styles, re.DOTALL
-    )
+    normal_block = re.search(r'styleId="Normal".*?</w:style>', styles, re.DOTALL)
     assert normal_block is not None
     block_text = normal_block.group(0)
     assert "Times New Roman" in block_text
@@ -232,11 +224,7 @@ def test_custom_bullet_char_from_profile(tmp_path: Path) -> None:
     profile = load_profile("gost-7.32-2017").model_copy(deep=True)
     profile.styles.lists.bullet_char = "•"
 
-    b = (
-        work("Демо", year=2026)
-        .section("Введение")
-        .list(["a", "b"], ordered=False)
-    )
+    b = work("Демо", year=2026).section("Введение").list(["a", "b"], ordered=False)
     doc = b.build()
     out = tmp_path / "custom-bullet.docx"
     export_docx(doc, profile, out)
@@ -266,13 +254,11 @@ def test_heading_spacing_before_and_after_from_profile(tmp_path: Path) -> None:
     """spacing_before_pt и spacing_after_pt из профиля попадают в стиль."""
     data = _build_demo_docx(tmp_path)
     styles = _docx_styles_xml(data)
-    h1_block = re.search(
-        r'styleId="Heading1".*?</w:style>', styles, re.DOTALL
-    )
+    h1_block = re.search(r'styleId="Heading1".*?</w:style>', styles, re.DOTALL)
     assert h1_block is not None
     # spacing_before_pt=18 → 18*20 = 360 twips.
     # spacing_after_pt=12 → 12*20 = 240 twips.
-    spacing = re.search(r'<w:spacing[^/]*/>', h1_block.group(0))
+    spacing = re.search(r"<w:spacing[^/]*/>", h1_block.group(0))
     assert spacing is not None
     sp_text = spacing.group(0)
     assert 'w:before="360"' in sp_text
@@ -297,9 +283,7 @@ def test_eskd_profile_heading_color_also_auto(tmp_path: Path) -> None:
     """ЕСКД-профиль наследует heading-цвет от gost-7.32 → auto."""
     data = _build_demo_docx(tmp_path, profile_id="gost-r-2.105-2019")
     styles = _docx_styles_xml(data)
-    h1_block = re.search(
-        r'styleId="Heading1".*?</w:style>', styles, re.DOTALL
-    )
+    h1_block = re.search(r'styleId="Heading1".*?</w:style>', styles, re.DOTALL)
     assert h1_block is not None
     assert "365F91" not in h1_block.group(0)
 
@@ -308,18 +292,14 @@ def test_eskd_profile_heading_color_also_auto(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("level", [1, 2, 3, 4])
-def test_heading_linked_char_style_has_no_blue(
-    tmp_path: Path, level: int
-) -> None:
+def test_heading_linked_char_style_has_no_blue(tmp_path: Path, level: int) -> None:
     """Linked char-стиль (Heading{N}Char) не должен сохранять синий цвет
     из дефолтного шаблона. При рендере run-ов внутри heading-параграфа
     Word применяет char-стиль поверх параграф-стиля, и его цвет
     перекроет наш auto, если не править оба."""
     data = _build_demo_docx(tmp_path)
     styles = _docx_styles_xml(data)
-    block = re.search(
-        rf'styleId="Heading{level}Char".*?</w:style>', styles, re.DOTALL
-    )
+    block = re.search(rf'styleId="Heading{level}Char".*?</w:style>', styles, re.DOTALL)
     # Heading1Char/Heading2Char точно есть в python-docx-template,
     # Heading3Char/Heading4Char тоже.
     assert block is not None, f"Heading{level}Char отсутствует"
@@ -327,17 +307,15 @@ def test_heading_linked_char_style_has_no_blue(
     assert "365F91" not in block_text, f"Heading{level}Char: синий накопил"
     assert "accent1" not in block_text, f"Heading{level}Char: themeColor=accent1"
     # Cambria-theme должен быть очищен.
-    assert "majorHAnsi" not in block_text, (
-        f"Heading{level}Char: theme-font осталась"
-    )
+    assert "majorHAnsi" not in block_text, f"Heading{level}Char: theme-font осталась"
     # Times New Roman прописан явно.
     assert "Times New Roman" in block_text
 
 
-@pytest.mark.parametrize("profile_id", ["gost-7.32-2017", "gost-r-2.105-2019", "example-department"])
-def test_all_profiles_generate_clean_headings(
-    tmp_path: Path, profile_id: str
-) -> None:
+@pytest.mark.parametrize(
+    "profile_id", ["gost-7.32-2017", "gost-r-2.105-2019", "example-department"]
+)
+def test_all_profiles_generate_clean_headings(tmp_path: Path, profile_id: str) -> None:
     """Регресс на покрытие профилей: каждый профиль из profiles/ должен
     генерировать документ, где Heading1+Heading1Char не содержат
     синего цвета и theme-fonts."""

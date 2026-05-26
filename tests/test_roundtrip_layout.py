@@ -88,9 +88,7 @@ def _make_full_document_builder():  # type: ignore[no-untyped-def]
         )
         .paragraph("Цель работы — сравнить эффективность алгоритмов.")
         .section("1 Анализ алгоритмов")
-        .paragraph(
-            "В данной главе рассматриваются классические алгоритмы сортировки."
-        )
+        .paragraph("В данной главе рассматриваются классические алгоритмы сортировки.")
         .table(
             headers=["Алгоритм", "Сложность"],
             rows=[["Быстрая сортировка", "O(n log n)"]],
@@ -102,16 +100,12 @@ def _make_full_document_builder():  # type: ignore[no-untyped-def]
             "Получены количественные оценки эффективности алгоритмов."
         )
         .section("Список использованных источников")
-        .reference(
-            "Кнут Д. Э. Искусство программирования. — М. : Вильямс, 2007. — 832 с."
-        )
+        .reference("Кнут Д. Э. Искусство программирования. — М. : Вильямс, 2007. — 832 с.")
     )
 
 
 @pytest.mark.parametrize("profile_id", list_profiles())
-def test_generated_document_has_no_layout_violations(
-    tmp_path: Path, profile_id: str
-) -> None:
+def test_generated_document_has_no_layout_violations(tmp_path: Path, profile_id: str) -> None:
     """Сгенерированный документ не нарушает ни одну вёрсточную проверку.
 
     Стратегия: builder собирает документ → export_docx пишет .docx →
@@ -133,8 +127,7 @@ def test_generated_document_has_no_layout_violations(
         # Подробная диагностика для удобства fail-message.
         by_code = Counter(v.check_code for v in layout_violations)
         messages = "\n".join(
-            f"  {v.check_code} @ {v.location}: {v.message}"
-            for v in layout_violations
+            f"  {v.check_code} @ {v.location}: {v.message}" for v in layout_violations
         )
         pytest.fail(
             f"Профиль {profile_id}: найдено {len(layout_violations)} "
@@ -143,9 +136,7 @@ def test_generated_document_has_no_layout_violations(
 
 
 @pytest.mark.parametrize("profile_id", list_profiles())
-def test_generated_document_is_parseable(
-    tmp_path: Path, profile_id: str
-) -> None:
+def test_generated_document_is_parseable(tmp_path: Path, profile_id: str) -> None:
     """Сгенерированный документ корректно парсится обратно.
 
     Тривиальный smoke — без него test_generated_document_has_no_layout_violations
@@ -172,6 +163,5 @@ def test_layout_check_codes_are_real() -> None:
     registered = set(_registry.keys())
     missing = LAYOUT_CHECK_CODES - registered
     assert not missing, (
-        f"LAYOUT_CHECK_CODES содержит коды, не зарегистрированные "
-        f"в engine: {sorted(missing)}"
+        f"LAYOUT_CHECK_CODES содержит коды, не зарегистрированные в engine: {sorted(missing)}"
     )

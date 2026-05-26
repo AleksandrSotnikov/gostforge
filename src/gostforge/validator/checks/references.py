@@ -254,7 +254,8 @@ _AUTHOR_YEAR_BRACKETS_RE = re.compile(r"\[[А-ЯЁ][а-яё]+\s+\d{4}\]")
 
 @register("R.01")
 def check_reference_style_numeric(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,  # noqa: ARG001
 ) -> list[Violation]:
     """Все библиографические ссылки в тексте должны быть в формате [N] / [N, M] / [N-M].
 
@@ -282,8 +283,7 @@ def check_reference_style_numeric(
                     ),
                     location=f"paragraph[{paragraph.id}]",
                     suggestion=(
-                        "Заменить ссылку на формат [N] с номером записи "
-                        "из списка литературы"
+                        "Заменить ссылку на формат [N] с номером записи из списка литературы"
                     ),
                     details={
                         "paragraph_id": paragraph.id,
@@ -304,8 +304,7 @@ def check_reference_style_numeric(
                     ),
                     location=f"paragraph[{paragraph.id}]",
                     suggestion=(
-                        "Заменить ссылку на формат [N] с номером записи "
-                        "из списка литературы"
+                        "Заменить ссылку на формат [N] с номером записи из списка литературы"
                     ),
                     details={
                         "paragraph_id": paragraph.id,
@@ -332,7 +331,8 @@ def _entry_referenced(text: str, num: int) -> bool:
 
 @register("R.05")
 def check_each_entry_referenced(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,  # noqa: ARG001
 ) -> list[Violation]:
     """Каждая запись bibliography должна быть упомянута в тексте.
 
@@ -431,9 +431,7 @@ def check_bibliography_order(document: Document, profile: Profile) -> list[Viola
     order = _str_param(params, "order", "alphabetical")
 
     if order == "alphabetical":
-        for prev, curr in zip(
-            document.bibliography, document.bibliography[1:], strict=False
-        ):
+        for prev, curr in zip(document.bibliography, document.bibliography[1:], strict=False):
             prev_author = prev.fields.get("author")
             curr_author = curr.fields.get("author")
             if not prev_author or not curr_author:
@@ -448,9 +446,7 @@ def check_bibliography_order(document: Document, profile: Profile) -> list[Viola
                             f"({prev_author}) идёт раньше «{curr.id}» ({curr_author})"
                         ),
                         location=f"bibliography[{curr.id}]",
-                        suggestion=(
-                            "Расположить записи по алфавиту фамилий первых авторов"
-                        ),
+                        suggestion=("Расположить записи по алфавиту фамилий первых авторов"),
                         details={
                             "order": "alphabetical",
                             "prev_id": prev.id,
@@ -551,8 +547,7 @@ def check_required_fields_by_type(document: Document, profile: Profile) -> list[
                     check_code="R.03",
                     severity="error",
                     message=(
-                        f"Запись {entry.id} (тип {entry.type}): отсутствует поле "
-                        f"`{field_name}`"
+                        f"Запись {entry.id} (тип {entry.type}): отсутствует поле `{field_name}`"
                     ),
                     location=f"bibliography[{entry.id}]",
                     suggestion=(
@@ -594,14 +589,10 @@ def check_access_date_for_web(
             Violation(
                 check_code="R.08",
                 severity="error",
-                message=(
-                    f"Запись {entry.id} (электронный ресурс) не содержит "
-                    "даты обращения"
-                ),
+                message=(f"Запись {entry.id} (электронный ресурс) не содержит даты обращения"),
                 location=f"bibliography[{entry.id}]",
                 suggestion=(
-                    "Добавить «(дата обращения: ДД.ММ.ГГГГ)» после URL "
-                    "по ГОСТ Р 7.0.100-2018"
+                    "Добавить «(дата обращения: ДД.ММ.ГГГГ)» после URL по ГОСТ Р 7.0.100-2018"
                 ),
                 details={
                     "entry_id": entry.id,
@@ -648,8 +639,7 @@ def check_doi_or_url_for_modern(document: Document, profile: Profile) -> list[Vi
                 ),
                 location=f"bibliography[{entry.id}]",
                 suggestion=(
-                    "Добавить DOI (формат «10.NNNN/...») или URL "
-                    "к электронной версии источника"
+                    "Добавить DOI (формат «10.NNNN/...») или URL к электронной версии источника"
                 ),
                 details={
                     "entry_id": entry.id,
@@ -716,10 +706,7 @@ def check_fresh_sources_share(document: Document, profile: Profile) -> list[Viol
                 f"года и новее, ожидается ≥ {min_fresh_share * 100:.0f}%"
             ),
             location="bibliography",
-            suggestion=(
-                "Добавить более свежие источники (научные публикации "
-                "за последние годы)"
-            ),
+            suggestion=("Добавить более свежие источники (научные публикации за последние годы)"),
             details={
                 "fresh_count": str(fresh),
                 "dated_count": str(len(dated)),
@@ -749,14 +736,9 @@ def check_min_sources(document: Document, profile: Profile) -> list[Violation]:
         Violation(
             check_code="R.11",
             severity="warning",
-            message=(
-                f"В списке литературы {actual} источников, ожидается "
-                f"не менее {min_sources}"
-            ),
+            message=(f"В списке литературы {actual} источников, ожидается не менее {min_sources}"),
             location="bibliography",
-            suggestion=(
-                f"Дополнить список литературы до {min_sources} источников"
-            ),
+            suggestion=(f"Дополнить список литературы до {min_sources} источников"),
             details={
                 "actual": str(actual),
                 "min_sources": str(min_sources),
@@ -786,9 +768,7 @@ def check_language_ratio(document: Document, profile: Profile) -> list[Violation
     max_foreign_share = _float_param(params, "max_foreign_share", 0.5)
     min_foreign_share = _float_param(params, "min_foreign_share", 0.1)
 
-    languages = [
-        entry.fields.get("language") for entry in document.bibliography
-    ]
+    languages = [entry.fields.get("language") for entry in document.bibliography]
     typed = [lang for lang in languages if lang in {"ru", "en"}]
     if not typed:
         return []
@@ -829,8 +809,7 @@ def check_language_ratio(document: Document, profile: Profile) -> list[Violation
                 ),
                 location="bibliography",
                 suggestion=(
-                    "Добавить иностранные источники по теме исследования "
-                    "(монографии, статьи)"
+                    "Добавить иностранные источники по теме исследования (монографии, статьи)"
                 ),
                 details={
                     "foreign": str(foreign),

@@ -65,20 +65,14 @@ def test_try_list_filters_by_filename(db_path: Path) -> None:
     from gostforge.db import get_connection, record_submission
 
     with get_connection() as conn:
-        record_submission(
-            conn, filename="a.docx", profile_id="gost-7.32-2017", violations=[]
-        )
-        record_submission(
-            conn, filename="b.docx", profile_id="gost-7.32-2017", violations=[]
-        )
+        record_submission(conn, filename="a.docx", profile_id="gost-7.32-2017", violations=[])
+        record_submission(conn, filename="b.docx", profile_id="gost-7.32-2017", violations=[])
     items = _try_list_submissions(filename="a.docx")
     assert len(items) == 1
     assert items[0].filename == "a.docx"
 
 
-def test_try_list_empty_when_no_db(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_try_list_empty_when_no_db(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """Если БД недоступна — пустой список вместо exception."""
     monkeypatch.setenv("GOSTFORGE_DB_PATH", "/nonexistent/path/x.db")
     # Каталог не создаётся (на /nonexistent нет прав) → graceful [].
@@ -86,9 +80,7 @@ def test_try_list_empty_when_no_db(
     assert items == []
 
 
-def test_try_get_submission_returns_full_record(
-    db_path: Path, submission_id: int
-) -> None:
+def test_try_get_submission_returns_full_record(db_path: Path, submission_id: int) -> None:
     sub = _try_get_submission(submission_id)
     assert sub is not None
     assert sub.id == submission_id
@@ -105,9 +97,7 @@ def test_try_list_comments_empty(db_path: Path, submission_id: int) -> None:
     assert _try_list_comments(submission_id) == []
 
 
-def test_try_list_comments_returns_in_order(
-    db_path: Path, submission_id: int
-) -> None:
+def test_try_list_comments_returns_in_order(db_path: Path, submission_id: int) -> None:
     ok1, _ = _add_comment_action(
         submission_id=submission_id, body="first", author="a", role="student"
     )
@@ -123,18 +113,14 @@ def test_try_list_comments_returns_in_order(
 
 
 def test_try_unresolved_count(db_path: Path, submission_id: int) -> None:
-    _add_comment_action(
-        submission_id=submission_id, body="open", author="", role="anonymous"
-    )
+    _add_comment_action(submission_id=submission_id, body="open", author="", role="anonymous")
     assert _try_unresolved_count(submission_id) == 1
 
 
 # --- _add_comment_action ---------------------------------------------------
 
 
-def test_add_comment_empty_body_returns_error(
-    db_path: Path, submission_id: int
-) -> None:
+def test_add_comment_empty_body_returns_error(db_path: Path, submission_id: int) -> None:
     ok, msg = _add_comment_action(
         submission_id=submission_id, body="   ", author="", role="anonymous"
     )
@@ -143,19 +129,13 @@ def test_add_comment_empty_body_returns_error(
 
 
 def test_add_comment_unknown_submission_returns_error(db_path: Path) -> None:
-    ok, msg = _add_comment_action(
-        submission_id=999, body="x", author="", role="anonymous"
-    )
+    ok, msg = _add_comment_action(submission_id=999, body="x", author="", role="anonymous")
     assert ok is False
     assert "не существует" in msg
 
 
-def test_add_comment_invalid_role_returns_error(
-    db_path: Path, submission_id: int
-) -> None:
-    ok, msg = _add_comment_action(
-        submission_id=submission_id, body="x", author="", role="admin"
-    )
+def test_add_comment_invalid_role_returns_error(db_path: Path, submission_id: int) -> None:
+    ok, msg = _add_comment_action(submission_id=submission_id, body="x", author="", role="admin")
     assert ok is False
     assert "role" in msg.lower()
 
@@ -175,9 +155,7 @@ def test_add_comment_happy_path(db_path: Path, submission_id: int) -> None:
 
 
 def test_resolve_existing_comment(db_path: Path, submission_id: int) -> None:
-    _add_comment_action(
-        submission_id=submission_id, body="x", author="", role="anonymous"
-    )
+    _add_comment_action(submission_id=submission_id, body="x", author="", role="anonymous")
     items = _try_list_comments(submission_id)
     assert _resolve_comment_action(items[0].id, resolved=True) is True
     # После закрытия unresolved=0.
@@ -189,9 +167,7 @@ def test_resolve_unknown_returns_false(db_path: Path) -> None:
 
 
 def test_reopen_resolved_comment(db_path: Path, submission_id: int) -> None:
-    _add_comment_action(
-        submission_id=submission_id, body="x", author="", role="anonymous"
-    )
+    _add_comment_action(submission_id=submission_id, body="x", author="", role="anonymous")
     items = _try_list_comments(submission_id)
     _resolve_comment_action(items[0].id, resolved=True)
     assert _resolve_comment_action(items[0].id, resolved=False) is True
@@ -199,9 +175,7 @@ def test_reopen_resolved_comment(db_path: Path, submission_id: int) -> None:
 
 
 def test_delete_comment(db_path: Path, submission_id: int) -> None:
-    _add_comment_action(
-        submission_id=submission_id, body="x", author="", role="anonymous"
-    )
+    _add_comment_action(submission_id=submission_id, body="x", author="", role="anonymous")
     items = _try_list_comments(submission_id)
     assert _delete_comment_action(items[0].id) is True
     assert _try_list_comments(submission_id) == []

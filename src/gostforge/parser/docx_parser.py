@@ -107,9 +107,7 @@ _BIB_STANDARD_RE = re.compile(r"\bГОСТ\b")
 _BIB_ARTICLE_RE = re.compile(r"(?:^|\s)//\s|\bЖурнал\b|журн\.|\bNo\.|№")
 _BIB_THESIS_RE = re.compile(r"\bдис\.|\bдиссертация\b|\bавтореф\.", re.IGNORECASE)
 _BIB_CONFERENCE_RE = re.compile(r"\bконференция\b|\bматериалы\b|\bсб\.\s*ст\.", re.IGNORECASE)
-_BIB_LAW_RE = re.compile(
-    r"\bзакон\b|\bфедер\.\s*закон\b|\bпостановление\b", re.IGNORECASE
-)
+_BIB_LAW_RE = re.compile(r"\bзакон\b|\bфедер\.\s*закон\b|\bпостановление\b", re.IGNORECASE)
 
 # Регэкспы для извлечения структурных полей библиографической записи
 # по ГОСТ Р 7.0.100-2018. Поля заполняются опционально — отсутствие
@@ -119,9 +117,7 @@ _BIB_AUTHOR_EN_RE = re.compile(r"^[A-Z][a-z]+,?\s[A-Z]\.\s?[A-Z]\.")
 _BIB_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 _BIB_URL_FULL_RE = re.compile(r"https?://\S+")
 _BIB_DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+")
-_BIB_ACCESS_DATE_RE = re.compile(
-    r"дата\s+обращения:\s*(\d{1,2}\.\d{1,2}\.\d{4})", re.IGNORECASE
-)
+_BIB_ACCESS_DATE_RE = re.compile(r"дата\s+обращения:\s*(\d{1,2}\.\d{1,2}\.\d{4})", re.IGNORECASE)
 # Эвристика места издания: «— Москва :», «— Санкт-Петербург :»,
 # «— Нижний Новгород :». Принимаем составные через дефис или пробел.
 _BIB_PLACE_RE = re.compile(r"—\s*([А-ЯЁ][а-яё]+(?:[ \-][А-ЯЁ][а-яё]+)?)\s*:")
@@ -210,7 +206,9 @@ def parse_docx(path: str | Path) -> Document:
     # Группировка маркированных параграфов в ListBlock. Делаем ПОСЛЕ
     # извлечения библиографии, чтобы не сгруппировать references как
     # элементы списка (в bib-разделе каждая запись = отдельный параграф).
-    _group_text_marker_lists(page_section, exclude_section_ids=_bibliography_section_ids([page_section]))
+    _group_text_marker_lists(
+        page_section, exclude_section_ids=_bibliography_section_ids([page_section])
+    )
     comments = _extract_comments(docx_doc)
     # Сноски: извлекаем содержимое word/footnotes.xml и подставляем
     # текст в FootnoteRef-элементы внутри параграфов.
@@ -242,9 +240,7 @@ def _extract_footnotes(docx_doc: DocxDocument) -> dict[str, str]:
     if rels is None:
         return out
     footnotes_part = None
-    target_reltype = (
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
-    )
+    target_reltype = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
     try:
         for rel in rels.values():
             if getattr(rel, "reltype", None) == target_reltype:
@@ -281,9 +277,7 @@ def _extract_footnotes(docx_doc: DocxDocument) -> dict[str, str]:
     return out
 
 
-def _attach_footnote_text(
-    page_sections: list[PageSection], footnotes: dict[str, str]
-) -> None:
+def _attach_footnote_text(page_sections: list[PageSection], footnotes: dict[str, str]) -> None:
     """Заполнить FootnoteRef.text из карты footnotes.
 
     Парсер inline-элементов создаёт FootnoteRef только с id; полный
@@ -322,9 +316,7 @@ def _extract_comments(docx_doc: DocxDocument) -> list[Any]:
     if rels is None:
         return out
     comments_part = None
-    target_reltype = (
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
-    )
+    target_reltype = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
     try:
         for rel in rels.values():
             if getattr(rel, "reltype", None) == target_reltype:
@@ -389,7 +381,7 @@ def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> No
     for fig in figures:
         if not fig.image_path.startswith("embedded:"):
             continue
-        rid = fig.image_path[len("embedded:"):]
+        rid = fig.image_path[len("embedded:") :]
         try:
             image_part = docx_doc.part.related_parts.get(rid)
             if image_part is None:
@@ -561,7 +553,6 @@ def _extract_page_number_format(
     if fmt_attr is None:
         return None
     return _PAGE_FMT_MAP.get(fmt_attr)
-
 
 
 def _length_to_mm(length: object | None) -> float:
@@ -817,9 +808,7 @@ _BULLET_MARKERS = re.compile(r"^([–—•*◦])\s+(.+)$")
 _ORDERED_MARKERS = re.compile(r"^(\d{1,3})[\.\)]\s+(.+)$")
 
 
-def _group_text_marker_lists(
-    page_section: PageSection, *, exclude_section_ids: set[str]
-) -> None:
+def _group_text_marker_lists(page_section: PageSection, *, exclude_section_ids: set[str]) -> None:
     """Сгруппировать подряд идущие маркированные параграфы в ListBlock.
 
     Builder/экспортёр сейчас пишет списки как обычные параграфы с
@@ -880,9 +869,7 @@ def _group_text_marker_lists(
         )
 
 
-def _try_consume_marker_run(
-    items: list[Any], start: int
-) -> tuple[Any, int] | None:
+def _try_consume_marker_run(items: list[Any], start: int) -> tuple[Any, int] | None:
     """Попытаться захватить серию маркированных параграфов с позиции ``start``.
 
     Возвращает (ListBlock, consumed) при успехе или None.
@@ -975,9 +962,9 @@ def _bibliography_section_ids(page_sections: list[PageSection]) -> set[str]:
     def walk(items: list[Any]) -> None:
         for it in items:
             if isinstance(it, LogicalSection):
-                heading = "".join(
-                    el.text for el in it.heading if isinstance(el, TextRun)
-                ).strip().lower()
+                heading = (
+                    "".join(el.text for el in it.heading if isinstance(el, TextRun)).strip().lower()
+                )
                 if heading in aliases:
                     result.add(it.id)
                 walk(it.children)
@@ -1057,9 +1044,7 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
                 # Без этого H.01/H.02 «слепы» к стиле-уровневым настройкам
                 # синего Cambria из дефолтного шаблона Word.
                 heading_paragraph = _build_paragraph(dp, idx=counters.heading)
-                heading_content = heading_paragraph.content or [
-                    TextRun(text=dp.text)
-                ]
+                heading_content = heading_paragraph.content or [TextRun(text=dp.text)]
                 section = LogicalSection(
                     id=f"sec-{counters.heading}",
                     level=heading_level,
@@ -1087,9 +1072,7 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
             list_kind = _paragraph_list_kind(dp)
             if list_kind is not None:
                 # Собираем inline-контент параграфа как InlineElement-список
-                runs: list[InlineElement] = [
-                    TextRun(text=run.text) for run in dp.runs if run.text
-                ]
+                runs: list[InlineElement] = [TextRun(text=run.text) for run in dp.runs if run.text]
                 if not runs and dp.text:
                     runs = [TextRun(text=dp.text)]
                 if runs:
@@ -1369,16 +1352,12 @@ def _extract_cell_merges(rows_raw: list[Any]) -> list[Any]:
                 grid_span = tcPr.find(f"{{{W_NS}}}gridSpan")
                 if grid_span is not None:
                     try:
-                        colspan = int(
-                            grid_span.get(f"{{{W_NS}}}val", "1")
-                        )
+                        colspan = int(grid_span.get(f"{{{W_NS}}}val", "1"))
                     except ValueError:
                         colspan = 1
                 v_merge = tcPr.find(f"{{{W_NS}}}vMerge")
                 if v_merge is not None:
-                    v_merge_kind = (
-                        v_merge.get(f"{{{W_NS}}}val") or "continue"
-                    )
+                    v_merge_kind = v_merge.get(f"{{{W_NS}}}val") or "continue"
             # Continue-ячейки пропускаем — они уже учтены в restart выше.
             if v_merge_kind == "continue":
                 continue
@@ -1404,9 +1383,7 @@ def _extract_cell_merges(rows_raw: list[Any]) -> list[Any]:
                     # val=None или 'continue' — продолжение.
                     rowspan += 1
             if rowspan > 1 or colspan > 1:
-                merges.append(
-                    CellMerge(row=r, col=c, rowspan=rowspan, colspan=colspan)
-                )
+                merges.append(CellMerge(row=r, col=c, rowspan=rowspan, colspan=colspan))
     return merges
 
 
@@ -1755,9 +1732,7 @@ def _rpr_size_pt(rpr_elem: Any) -> float | None:
 _FLD_REF_INSTR_RE = re.compile(r"^\s*REF\s+([^\s\\]+)", re.IGNORECASE)
 
 
-def _hyperlink_from_w_hyperlink(
-    hl_elem: Any, paragraph: Any
-) -> Hyperlink | None:
+def _hyperlink_from_w_hyperlink(hl_elem: Any, paragraph: Any) -> Hyperlink | None:
     """Построить Hyperlink из ``<w:hyperlink r:id="..." w:anchor="...">``.
 
     Алгоритм:
@@ -2159,9 +2134,7 @@ def _detect_bibliography_type(
 # «12-15», «12, 17-20» (любые цифры, тире, запятые, пробелы). Запрещены
 # вложенные скобки.
 # Регистр «с»/«С» — нечувствительно.
-_CITATION_PATTERN_RE = re.compile(
-    r"\[(\d{1,3})(?:,\s*[сС]\.\s*([\d,\s\-–—]+?))?\]"
-)
+_CITATION_PATTERN_RE = re.compile(r"\[(\d{1,3})(?:,\s*[сС]\.\s*([\d,\s\-–—]+?))?\]")
 
 
 def _annotate_citations(
@@ -2239,9 +2212,7 @@ def _split_text_run_by_citations(
         if match.start() > cursor:
             pieces.append(_clone_text_run(run, text[cursor : match.start()]))
         template = "[{n}, с. {pages}]" if pages else "[{n}]"
-        pieces.append(
-            Citation(source_id=source_id, pages=pages, template=template)
-        )
+        pieces.append(Citation(source_id=source_id, pages=pages, template=template))
         cursor = match.end()
         changed = True
 

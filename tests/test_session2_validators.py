@@ -74,8 +74,7 @@ def test_u01_detects_regular_space(text: str, expected_count: int) -> None:
     v = validate(doc, load_profile("gost-7.32-2017"))
     u01 = [x for x in v if x.check_code == "U.01"]
     assert len(u01) == expected_count, (
-        f"text={text!r}, expected {expected_count}, got {len(u01)}: "
-        f"{[m.message for m in u01]}"
+        f"text={text!r}, expected {expected_count}, got {len(u01)}: {[m.message for m in u01]}"
     )
 
 

@@ -77,9 +77,7 @@ _NSMAP_W = {"w": _W_NS}
 _COMMENTS_CONTENT_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
 )
-_COMMENTS_REL_TYPE = (
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
-)
+_COMMENTS_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
 
 
 def _extract_block_id(location: str) -> str | None:
@@ -124,9 +122,7 @@ def _insert_marker_run(paragraph: object, text: str) -> None:
     r_elem = run._element
     p_elem.remove(r_elem)
     # Вставить после <w:pPr>, если он есть; иначе в самое начало.
-    ppr = p_elem.find(
-        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr"
-    )
+    ppr = p_elem.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}pPr")
     if ppr is not None:
         ppr.addnext(r_elem)
     else:
@@ -213,15 +209,11 @@ def _build_comments_xml(comments: list[tuple[int, str, str]]) -> bytes:
         t.text = text
     return cast(
         bytes,
-        etree.tostring(
-            root, xml_declaration=True, encoding="UTF-8", standalone=True
-        ),
+        etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True),
     )
 
 
-def _insert_comment_refs(
-    document_xml: bytes, plan: list[tuple[int, int]]
-) -> bytes:
+def _insert_comment_refs(document_xml: bytes, plan: list[tuple[int, int]]) -> bytes:
     """Вставить ``<w:commentRangeStart/End>`` и reference-run в document.xml.
 
     ``plan`` — список ``(paragraph_index_0_based, comment_id)``. Для одного
@@ -277,9 +269,7 @@ def _insert_comment_refs(
 
     return cast(
         bytes,
-        etree.tostring(
-            root, xml_declaration=True, encoding="UTF-8", standalone=True
-        ),
+        etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True),
     )
 
 
@@ -298,9 +288,7 @@ def _update_content_types(content_types_xml: bytes) -> bytes:
     new_override.set("ContentType", _COMMENTS_CONTENT_TYPE)
     return cast(
         bytes,
-        etree.tostring(
-            root, xml_declaration=True, encoding="UTF-8", standalone=True
-        ),
+        etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True),
     )
 
 
@@ -333,17 +321,13 @@ def _update_document_rels(rels_xml: bytes) -> tuple[bytes, bool]:
     return (
         cast(
             bytes,
-            etree.tostring(
-                root, xml_declaration=True, encoding="UTF-8", standalone=True
-            ),
+            etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True),
         ),
         True,
     )
 
 
-def _replace_zip_entries(
-    src_path: Path, dst_path: Path, overrides: dict[str, bytes]
-) -> None:
+def _replace_zip_entries(src_path: Path, dst_path: Path, overrides: dict[str, bytes]) -> None:
     """Создать новый zip-архив на основе ``src_path``, заменив/добавив записи.
 
     ``overrides`` — словарь ``{имя файла внутри zip: новое содержимое}``.
@@ -414,9 +398,7 @@ def _annotate_comments(
     # Подсчитать число <w:p> внутри <w:body>.
     doc_root = etree.fromstring(document_xml)
     body = doc_root.find(f"{{{_W_NS}}}body")
-    total_paragraphs = (
-        len(body.findall(f".//{{{_W_NS}}}p")) if body is not None else 0
-    )
+    total_paragraphs = len(body.findall(f".//{{{_W_NS}}}p")) if body is not None else 0
 
     if total_paragraphs == 0 and len(violations) > 0:
         # Документ без параграфов — комментарии негде ставить.
@@ -427,9 +409,7 @@ def _annotate_comments(
         total_paragraphs = 1
         document_xml = cast(
             bytes,
-            etree.tostring(
-                doc_root, xml_declaration=True, encoding="UTF-8", standalone=True
-            ),
+            etree.tostring(doc_root, xml_declaration=True, encoding="UTF-8", standalone=True),
         )
 
     # Спланировать вставки: (comment_id, para_index, text).

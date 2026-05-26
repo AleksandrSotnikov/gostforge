@@ -51,13 +51,14 @@ def test_hyperlink_round_trip(tmp_path: Path) -> None:
         ],
         style_name="Normal",
     )
-    sec = LogicalSection(
-        id="s", heading=[TextRun(text="Введение")], level=1, children=[p]
-    )
+    sec = LogicalSection(id="s", heading=[TextRun(text="Введение")], level=1, children=[p])
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
-            page=PageGeometry(), page_numbering=PageNumberingConfig(),
+            id="m",
+            name="N",
+            type="main",
+            page=PageGeometry(),
+            page_numbering=PageNumberingConfig(),
             content=[sec],
         )
     )
@@ -90,8 +91,11 @@ def test_hyperlink_writes_w_hyperlink_in_xml(tmp_path: Path) -> None:
     sec = LogicalSection(id="s", heading=[TextRun(text="X")], level=1, children=[p])
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
-            page=PageGeometry(), page_numbering=PageNumberingConfig(),
+            id="m",
+            name="N",
+            type="main",
+            page=PageGeometry(),
+            page_numbering=PageNumberingConfig(),
             content=[sec],
         )
     )
@@ -119,6 +123,7 @@ def test_footnote_ref_round_trip_with_text(tmp_path: Path) -> None:
     """Создаём минимальный docx с footnote, парсим — FootnoteRef.text заполнен."""
     # Создаём docx через python-docx + ручной патч zip с footnotes.xml.
     from docx import Document as DocxDocument
+
     d = DocxDocument()
     d.add_paragraph("Какой-то текст.")
     raw = tmp_path / "raw.docx"
@@ -162,8 +167,7 @@ def test_footnote_ref_round_trip_with_text(tmp_path: Path) -> None:
     # Внутри первого <w:p>:
     doc_xml = doc_xml.replace(
         "<w:r><w:t>Какой-то текст.</w:t></w:r>",
-        "<w:r><w:t>Какой-то текст.</w:t></w:r>"
-        '<w:r><w:footnoteReference w:id="1"/></w:r>',
+        '<w:r><w:t>Какой-то текст.</w:t></w:r><w:r><w:footnoteReference w:id="1"/></w:r>',
     )
     contents["word/document.xml"] = doc_xml.encode("utf-8")
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
@@ -218,8 +222,11 @@ def test_table_with_horizontal_merge_writes_grid_span(tmp_path: Path) -> None:
     sec = LogicalSection(id="s", heading=[TextRun(text="X")], level=1, children=[t])
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
-            page=PageGeometry(), page_numbering=PageNumberingConfig(),
+            id="m",
+            name="N",
+            type="main",
+            page=PageGeometry(),
+            page_numbering=PageNumberingConfig(),
             content=[sec],
         )
     )
@@ -246,8 +253,11 @@ def test_table_with_vertical_merge_writes_v_merge(tmp_path: Path) -> None:
     sec = LogicalSection(id="s", heading=[TextRun(text="X")], level=1, children=[t])
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
-            page=PageGeometry(), page_numbering=PageNumberingConfig(),
+            id="m",
+            name="N",
+            type="main",
+            page=PageGeometry(),
+            page_numbering=PageNumberingConfig(),
             content=[sec],
         )
     )
@@ -272,8 +282,11 @@ def test_parser_extracts_grid_span(tmp_path: Path) -> None:
     sec = LogicalSection(id="s", heading=[TextRun(text="X")], level=1, children=[t])
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
-            page=PageGeometry(), page_numbering=PageNumberingConfig(),
+            id="m",
+            name="N",
+            type="main",
+            page=PageGeometry(),
+            page_numbering=PageNumberingConfig(),
             content=[sec],
         )
     )

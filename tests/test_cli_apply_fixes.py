@@ -18,9 +18,7 @@ def test_apply_fixes_double_spaces(tmp_path: Path) -> None:
         "sections": [
             {
                 "heading": "Введение",
-                "blocks": [
-                    {"kind": "paragraph", "text": "Текст с  двойными  пробелами."}
-                ],
+                "blocks": [{"kind": "paragraph", "text": "Текст с  двойными  пробелами."}],
             },
             {
                 "heading": "Список использованных источников",
@@ -35,10 +33,14 @@ def test_apply_fixes_double_spaces(tmp_path: Path) -> None:
 
     r = subprocess.run(
         [
-            "gostforge", "apply-fixes",
-            str(in_path), "-o", str(out_path),
+            "gostforge",
+            "apply-fixes",
+            str(in_path),
+            "-o",
+            str(out_path),
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stderr
     out_state = json.loads(out_path.read_text(encoding="utf-8"))
@@ -62,9 +64,7 @@ def test_apply_fixes_with_only_filter(tmp_path: Path) -> None:
         "sections": [
             {
                 "heading": "Введение",
-                "blocks": [
-                    {"kind": "paragraph", "text": "С  двойными - дефисами."}
-                ],
+                "blocks": [{"kind": "paragraph", "text": "С  двойными - дефисами."}],
             },
             {
                 "heading": "Список использованных источников",
@@ -79,11 +79,16 @@ def test_apply_fixes_with_only_filter(tmp_path: Path) -> None:
 
     r = subprocess.run(
         [
-            "gostforge", "apply-fixes",
-            str(in_path), "-o", str(out_path),
-            "--only", "T.08",
+            "gostforge",
+            "apply-fixes",
+            str(in_path),
+            "-o",
+            str(out_path),
+            "--only",
+            "T.08",
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0
     # В stdout указан только T.08, нет T.11 (em-dash).
@@ -115,7 +120,8 @@ def test_apply_fixes_no_violations(tmp_path: Path) -> None:
 
     r = subprocess.run(
         ["gostforge", "apply-fixes", str(in_path), "-o", str(out_path)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0
     assert out_path.exists()
@@ -127,7 +133,8 @@ def test_apply_fixes_rejects_invalid_json(tmp_path: Path) -> None:
     out = tmp_path / "out.json"
     r = subprocess.run(
         ["gostforge", "apply-fixes", str(bad), "-o", str(out)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode != 0
 
@@ -144,7 +151,8 @@ def test_apply_fixes_preserves_profile_id(tmp_path: Path) -> None:
     in_path.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
     subprocess.run(
         ["gostforge", "apply-fixes", str(in_path), "-o", str(out_path)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     out_state = json.loads(out_path.read_text(encoding="utf-8"))
     assert out_state["profile_id"] == "gost-r-2.105-2019"

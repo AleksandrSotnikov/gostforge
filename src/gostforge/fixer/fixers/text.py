@@ -251,8 +251,7 @@ def fix_unit_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
                     fixer_code="T.12",
                     location=_paragraph_location(paragraph),
                     description=(
-                        "Обычные пробелы между числом и единицей измерения "
-                        "заменены на неразрывные"
+                        "Обычные пробелы между числом и единицей измерения заменены на неразрывные"
                     ),
                 )
             )
@@ -273,9 +272,7 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
         for run in _text_runs(paragraph):
             if not run.text:
                 continue
-            new_text = _INITIALS_SURNAME_RE.sub(
-                rf"\1{_NBSP}\2{_NBSP}\3", run.text
-            )
+            new_text = _INITIALS_SURNAME_RE.sub(rf"\1{_NBSP}\2{_NBSP}\3", run.text)
             if new_text != run.text:
                 run.text = new_text
                 paragraph_changed = True
@@ -285,8 +282,7 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
                     fixer_code="T.13",
                     location=_paragraph_location(paragraph),
                     description=(
-                        "Обычные пробелы между инициалами и фамилией "
-                        "заменены на неразрывные"
+                        "Обычные пробелы между инициалами и фамилией заменены на неразрывные"
                     ),
                 )
             )
@@ -295,7 +291,8 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
 
 @register("T.06")
 def fix_disable_auto_hyphenation(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,  # noqa: ARG001
 ) -> list[FixApplied]:
     """Отключить автоматический перенос слов (`Document.auto_hyphenation = False`).
 
@@ -315,9 +312,7 @@ def fix_disable_auto_hyphenation(
 
 
 @register("T.07")
-def fix_consecutive_empty_paragraphs(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_consecutive_empty_paragraphs(document: Document, profile: Profile) -> list[FixApplied]:
     """Удалить лишние подряд идущие пустые абзацы.
 
     Параметр `checks.T.07.params.max_consecutive_empty: int = 1` —
@@ -333,10 +328,7 @@ def fix_consecutive_empty_paragraphs(
     def _is_empty(p: object) -> bool:
         if not isinstance(p, Paragraph):
             return False
-        return not any(
-            isinstance(r, TextRun) and r.text and r.text.strip()
-            for r in p.content
-        )
+        return not any(isinstance(r, TextRun) and r.text and r.text.strip() for r in p.content)
 
     def _clean_container(
         items: list[LogicalSection | Block],
@@ -374,9 +366,18 @@ def fix_consecutive_empty_paragraphs(
 
 # Стили параграфов, которые считаются «телом» и подлежат правкам T.03/T.04/T.05.
 # Заголовки, подписи и колонтитулы имеют свои правила и не трогаются.
-_BODY_EXCLUDE_PREFIXES = ("heading", "caption", "image caption", "table caption",
-                          "figure caption", "title", "subtitle", "footnote",
-                          "header", "footer")
+_BODY_EXCLUDE_PREFIXES = (
+    "heading",
+    "caption",
+    "image caption",
+    "table caption",
+    "figure caption",
+    "title",
+    "subtitle",
+    "footnote",
+    "header",
+    "footer",
+)
 
 
 def _is_body_paragraph(paragraph: Paragraph) -> bool:
@@ -410,18 +411,14 @@ def fix_line_spacing(document: Document, profile: Profile) -> list[FixApplied]:
             FixApplied(
                 fixer_code="T.03",
                 location=_paragraph_location(p),
-                description=(
-                    f"Межстрочный интервал {old} → {expected}"
-                ),
+                description=(f"Межстрочный интервал {old} → {expected}"),
             )
         )
     return applied
 
 
 @register("T.04")
-def fix_first_line_indent(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_first_line_indent(document: Document, profile: Profile) -> list[FixApplied]:
     """Привести отступ красной строки основного текста к
     profile.styles.body.first_line_indent_cm.
 
@@ -449,9 +446,7 @@ def fix_first_line_indent(
 
 
 @register("T.05")
-def fix_paragraph_alignment(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_paragraph_alignment(document: Document, profile: Profile) -> list[FixApplied]:
     """Привести выравнивание основного текста к profile.styles.body.alignment.
 
     По умолчанию для ГОСТ 7.32 — justify (по ширине). Меняем только
@@ -479,9 +474,7 @@ def fix_paragraph_alignment(
 
 
 @register("T.14")
-def fix_paragraph_spacing(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_paragraph_spacing(document: Document, profile: Profile) -> list[FixApplied]:
     """Привести интервалы между абзацами к profile.styles.body.
 
     Исправление симметрично проверке T.14: для каждого Normal-параграфа
@@ -510,10 +503,7 @@ def fix_paragraph_spacing(
             for prefix in ("heading", "caption", "list", "footer", "header", "title")
         ):
             continue
-        if (
-            p.space_before_pt is not None
-            and abs(p.space_before_pt - expected_before) > tolerance
-        ):
+        if p.space_before_pt is not None and abs(p.space_before_pt - expected_before) > tolerance:
             old = p.space_before_pt
             p.space_before_pt = expected_before
             applied.append(
@@ -523,10 +513,7 @@ def fix_paragraph_spacing(
                     description=f"space_before {old:g} pt → {expected_before:g} pt",
                 )
             )
-        if (
-            p.space_after_pt is not None
-            and abs(p.space_after_pt - expected_after) > tolerance
-        ):
+        if p.space_after_pt is not None and abs(p.space_after_pt - expected_after) > tolerance:
             old = p.space_after_pt
             p.space_after_pt = expected_after
             applied.append(

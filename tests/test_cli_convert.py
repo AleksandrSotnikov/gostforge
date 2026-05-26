@@ -51,11 +51,13 @@ def test_convert_document_calls_soffice(tmp_path: Path) -> None:
 
         class _R:
             returncode = 0
+
         return _R()
 
-    with patch(
-        "gostforge.pdf_exporter._find_soffice", return_value="soffice"
-    ), patch("subprocess.run", side_effect=fake_run):
+    with (
+        patch("gostforge.pdf_exporter._find_soffice", return_value="soffice"),
+        patch("subprocess.run", side_effect=fake_run),
+    ):
         result = convert_document(src, out, target_format="docx")
 
     assert result == out.resolve()
@@ -76,11 +78,13 @@ def test_convert_document_raises_if_no_output(tmp_path: Path) -> None:
         # НЕ создаём файл.
         class _R:
             returncode = 0
+
         return _R()
 
-    with patch(
-        "gostforge.pdf_exporter._find_soffice", return_value="soffice"
-    ), patch("subprocess.run", side_effect=fake_run):
+    with (
+        patch("gostforge.pdf_exporter._find_soffice", return_value="soffice"),
+        patch("subprocess.run", side_effect=fake_run),
+    ):
         with pytest.raises(RuntimeError):
             convert_document(src, out, target_format="docx")
 
@@ -112,14 +116,16 @@ def test_cli_convert_infers_format_from_extension(tmp_path: Path) -> None:
 
         class _R:
             returncode = 0
+
         return _R()
 
     # Запускаем через subprocess реальный CLI, но с mock сложно —
     # проверим функцию напрямую через convert_document мок выше.
     # Здесь — что CLI определяет формат «docx» из .docx-расширения.
-    with patch(
-        "gostforge.pdf_exporter._find_soffice", return_value="soffice"
-    ), patch("subprocess.run", side_effect=fake_run):
+    with (
+        patch("gostforge.pdf_exporter._find_soffice", return_value="soffice"),
+        patch("subprocess.run", side_effect=fake_run),
+    ):
         result = convert_document(src, out, target_format="docx")
     assert result.suffix == ".docx"
 

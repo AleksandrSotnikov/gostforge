@@ -294,8 +294,7 @@ def test_i05_registered() -> None:
 def test_i05_continuous_numbering_no_violation() -> None:
     """Рисунки 1, 2, 3 — нарушения нет."""
     figs = [
-        Figure(id=f"f-{i}", caption=[TextRun(text=f"Рисунок {i} — Имя {i}")])
-        for i in (1, 2, 3)
+        Figure(id=f"f-{i}", caption=[TextRun(text=f"Рисунок {i} — Имя {i}")]) for i in (1, 2, 3)
     ]
     doc = _doc_with_content(list(figs))
     profile = load_profile("gost-7.32-2017")
@@ -360,9 +359,7 @@ def test_i05_nested_logical_sections() -> None:
     """Рисунки во вложенных секциях тоже участвуют в сквозной нумерации."""
     fig1 = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — A")])
     fig3 = Figure(id="f-3", caption=[TextRun(text="Рисунок 3 — C")])
-    inner = LogicalSection(
-        id="sec-2", level=2, heading=[TextRun(text="Sub")], children=[fig3]
-    )
+    inner = LogicalSection(id="sec-2", level=2, heading=[TextRun(text="Sub")], children=[fig3])
     outer = LogicalSection(
         id="sec-1", level=1, heading=[TextRun(text="Main")], children=[fig1, inner]
     )
@@ -491,9 +488,7 @@ def test_i07_registered() -> None:
 
 def test_i07_reference_before_figure_no_violation() -> None:
     """Ссылка на рисунок ДО самого рисунка — нарушения нет."""
-    para = Paragraph(
-        id="p-1", content=[TextRun(text="Алгоритм представлен на рисунке 1.")]
-    )
+    para = Paragraph(id="p-1", content=[TextRun(text="Алгоритм представлен на рисунке 1.")])
     figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
     doc = _doc_with_content([para, figure])
     profile = load_profile("gost-7.32-2017")
@@ -504,9 +499,7 @@ def test_i07_reference_before_figure_no_violation() -> None:
 def test_i07_reference_after_figure_violation() -> None:
     """Ссылка ПОСЛЕ рисунка — порядок нарушен, warning."""
     figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
-    para = Paragraph(
-        id="p-1", content=[TextRun(text="Как видно на рисунке 1, всё ясно.")]
-    )
+    para = Paragraph(id="p-1", content=[TextRun(text="Как видно на рисунке 1, всё ясно.")])
     doc = _doc_with_content([figure, para])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
@@ -527,13 +520,9 @@ def test_i07_no_reference_at_all_skipped() -> None:
 
 def test_i07_reference_before_and_after_no_violation() -> None:
     """Если есть ссылка и до, и после — порядок не нарушен."""
-    before = Paragraph(
-        id="p-1", content=[TextRun(text="На рисунке 1 показана схема.")]
-    )
+    before = Paragraph(id="p-1", content=[TextRun(text="На рисунке 1 показана схема.")])
     figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
-    after = Paragraph(
-        id="p-2", content=[TextRun(text="Из рисунка 1 видно, что ...")]
-    )
+    after = Paragraph(id="p-2", content=[TextRun(text="Из рисунка 1 видно, что ...")])
     doc = _doc_with_content([before, figure, after])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.07"]
@@ -567,7 +556,9 @@ def test_i08_registered() -> None:
 def test_i08_dpi_above_minimum_no_violation() -> None:
     """Рисунок с DPI=300 проходит проверку при min_dpi=150."""
     doc = Document()
-    fig = Figure(id="fig-1", image_path="embedded:rId1", dpi=300, caption=[TextRun(text="Рисунок 1 — Схема")])
+    fig = Figure(
+        id="fig-1", image_path="embedded:rId1", dpi=300, caption=[TextRun(text="Рисунок 1 — Схема")]
+    )
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.08"]
@@ -576,7 +567,9 @@ def test_i08_dpi_above_minimum_no_violation() -> None:
 
 def test_i08_low_dpi_violation() -> None:
     doc = Document()
-    fig = Figure(id="fig-1", image_path="embedded:rId1", dpi=72, caption=[TextRun(text="Рисунок 1 — Схема")])
+    fig = Figure(
+        id="fig-1", image_path="embedded:rId1", dpi=72, caption=[TextRun(text="Рисунок 1 — Схема")]
+    )
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.08"]
@@ -588,7 +581,12 @@ def test_i08_low_dpi_violation() -> None:
 def test_i08_unknown_dpi_skipped() -> None:
     """Если DPI=None (Pillow недоступен или формат без метаданных) — пропускаем."""
     doc = Document()
-    fig = Figure(id="fig-1", image_path="embedded:rId1", dpi=None, caption=[TextRun(text="Рисунок 1 — Схема")])
+    fig = Figure(
+        id="fig-1",
+        image_path="embedded:rId1",
+        dpi=None,
+        caption=[TextRun(text="Рисунок 1 — Схема")],
+    )
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.08"]
@@ -604,7 +602,12 @@ def test_i09_registered() -> None:
 
 def test_i09_centered_no_violation() -> None:
     doc = Document()
-    fig = Figure(id="fig-1", image_path="embedded:rId1", alignment="center", caption=[TextRun(text="Рисунок 1 — Схема")])
+    fig = Figure(
+        id="fig-1",
+        image_path="embedded:rId1",
+        alignment="center",
+        caption=[TextRun(text="Рисунок 1 — Схема")],
+    )
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.09"]
@@ -613,7 +616,12 @@ def test_i09_centered_no_violation() -> None:
 
 def test_i09_left_aligned_violation() -> None:
     doc = Document()
-    fig = Figure(id="fig-1", image_path="embedded:rId1", alignment="left", caption=[TextRun(text="Рисунок 1 — Схема")])
+    fig = Figure(
+        id="fig-1",
+        image_path="embedded:rId1",
+        alignment="left",
+        caption=[TextRun(text="Рисунок 1 — Схема")],
+    )
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.09"]
@@ -623,7 +631,12 @@ def test_i09_left_aligned_violation() -> None:
 
 def test_i09_unset_alignment_skipped() -> None:
     doc = Document()
-    fig = Figure(id="fig-1", image_path="embedded:rId1", alignment=None, caption=[TextRun(text="Рисунок 1 — Схема")])
+    fig = Figure(
+        id="fig-1",
+        image_path="embedded:rId1",
+        alignment=None,
+        caption=[TextRun(text="Рисунок 1 — Схема")],
+    )
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.09"]

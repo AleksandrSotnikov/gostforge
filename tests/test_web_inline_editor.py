@@ -93,9 +93,7 @@ def test_collect_xref_targets_descends_into_subsections() -> None:
                     {
                         "id": "s1.1",
                         "heading": "1.1",
-                        "blocks": [
-                            {"kind": "figure", "image_path": "", "caption": "вложенный"}
-                        ],
+                        "blocks": [{"kind": "figure", "image_path": "", "caption": "вложенный"}],
                     }
                 ],
             }
@@ -113,9 +111,7 @@ def test_collect_xref_targets_skips_bibliography_section() -> None:
                 "id": "ref",
                 "heading": "Список",
                 "is_bibliography": True,
-                "blocks": [
-                    {"kind": "figure", "image_path": "", "caption": "не считаем"}
-                ],
+                "blocks": [{"kind": "figure", "image_path": "", "caption": "не считаем"}],
                 "subsections": [],
             }
         ]
@@ -253,9 +249,7 @@ def test_resolve_citation_proxies_descends_into_logical_sections() -> None:
                     LogicalSection(
                         id="sec1",
                         heading=[TextRun(text="Глава")],
-                        children=[
-                            Paragraph(id="p", content=[Citation(source_id="bib-1")])
-                        ],
+                        children=[Paragraph(id="p", content=[Citation(source_id="bib-1")])],
                     )
                 ],
             )
@@ -290,8 +284,12 @@ def test_build_from_state_resolves_bib_proxy_at_export() -> None:
                         "kind": "paragraph",
                         "runs": [
                             {"kind": "text", "text": "Это подтверждается в "},
-                            {"kind": "citation", "source_id": "bib-1", "pages": "42",
-                             "template": "[{n}, с. {pages}]"},
+                            {
+                                "kind": "citation",
+                                "source_id": "bib-1",
+                                "pages": "42",
+                                "template": "[{n}, с. {pages}]",
+                            },
                             {"kind": "text", "text": "."},
                         ],
                     }

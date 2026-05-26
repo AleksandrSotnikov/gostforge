@@ -82,9 +82,7 @@ def test_section_levels() -> None:
                     {
                         "heading": "1.1 Подраздел",
                         "blocks": [],
-                        "subsections": [
-                            {"heading": "1.1.1 Пункт", "blocks": []}
-                        ],
+                        "subsections": [{"heading": "1.1.1 Пункт", "blocks": []}],
                     }
                 ],
             }
@@ -208,10 +206,14 @@ def test_full_round_trip_new_state_to_md(tmp_path: Path) -> None:
     md_path = tmp_path / "out.md"
     subprocess.run(
         [
-            "gostforge", "new-state",
-            "--template", "coursework",
-            "--title", "Полный цикл",
-            "-o", str(state_path),
+            "gostforge",
+            "new-state",
+            "--template",
+            "coursework",
+            "--title",
+            "Полный цикл",
+            "-o",
+            str(state_path),
         ],
         check=True,
         capture_output=True,

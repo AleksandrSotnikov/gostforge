@@ -35,6 +35,7 @@ def test_find_soffice_raises_when_not_in_path() -> None:
 
 def test_find_soffice_returns_soffice_path() -> None:
     """Когда soffice найден — возвращается путь, libreoffice не запрашивается."""
+
     def which_stub(name: str) -> str | None:
         return "/usr/bin/soffice" if name == "soffice" else None
 
@@ -44,6 +45,7 @@ def test_find_soffice_returns_soffice_path() -> None:
 
 def test_find_soffice_falls_back_to_libreoffice() -> None:
     """Если soffice не найден, но libreoffice есть — возвращается путь до libreoffice."""
+
     def which_stub(name: str) -> str | None:
         return "/usr/bin/libreoffice" if name == "libreoffice" else None
 

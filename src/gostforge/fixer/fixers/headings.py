@@ -52,9 +52,7 @@ def _heading_location(section: LogicalSection) -> str:
 
 
 @register("H.03")
-def fix_dot_after_heading_number(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_dot_after_heading_number(document: Document, profile: Profile) -> list[FixApplied]:
     """Убрать точку после номера в заголовке.
 
     Заменяет «1. Введение» → «1 Введение», «1.2. Анализ» → «1.2 Анализ».
@@ -90,9 +88,7 @@ def fix_dot_after_heading_number(
 
 
 @register("H.08")
-def fix_heading_trailing_dot(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_heading_trailing_dot(document: Document, profile: Profile) -> list[FixApplied]:
     """Убрать точку (или многоточие) в конце заголовка.
 
     Не трогает `?` и `:` — они по ГОСТ допустимы. Работает с последним
@@ -220,16 +216,12 @@ def _renumber_subsections(
                     description=f"«{old_text}» → «{new_text}»",
                 )
             )
-        _renumber_subsections(
-            child, prefix=f"{prefix}.{sub_idx}", applied=applied
-        )
+        _renumber_subsections(child, prefix=f"{prefix}.{sub_idx}", applied=applied)
 
 
 def _heading_text(section: LogicalSection) -> str:
     """Склейка inline-элементов заголовка в строку."""
-    return "".join(
-        el.text for el in section.heading if isinstance(el, TextRun)
-    )
+    return "".join(el.text for el in section.heading if isinstance(el, TextRun))
 
 
 def _set_heading_text(section: LogicalSection, text: str) -> None:

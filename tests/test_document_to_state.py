@@ -112,7 +112,9 @@ def test_roundtrip_simple_section() -> None:
         (s for s in state_out["sections"] if "введ" in s["heading"].lower()),
         None,
     )
-    assert intro is not None, f"Введение не найдено в {[s['heading'] for s in state_out['sections']]}"
+    assert intro is not None, (
+        f"Введение не найдено в {[s['heading'] for s in state_out['sections']]}"
+    )
     texts = [b.get("text", "") for b in intro["blocks"] if b.get("kind") == "paragraph"]
     assert "Актуальность темы." in texts
     assert "Цель работы — X." in texts
@@ -183,9 +185,7 @@ def test_roundtrip_list_preserves_as_list_block() -> None:
         path = Path(f.name)
     doc = parse_docx(path)
     state_out = document_to_state(doc)
-    sec = next(
-        s for s in state_out["sections"] if "перечисл" in s["heading"].lower()
-    )
+    sec = next(s for s in state_out["sections"] if "перечисл" in s["heading"].lower())
     lists = [b for b in sec["blocks"] if b.get("kind") == "list"]
     assert lists, f"Список не собрался обратно. Блоки: {sec['blocks']}"
     assert lists[0]["items"] == ["один", "два", "три"]
@@ -205,15 +205,11 @@ def test_bibliography_section_detected() -> None:
         children=[
             Paragraph(
                 id="p",
-                content=[
-                    TextRun(text="Кнут Д. — М. : Вильямс, 2007. — 832 с.")
-                ],
+                content=[TextRun(text="Кнут Д. — М. : Вильямс, 2007. — 832 с.")],
             ),
             Paragraph(
                 id="p",
-                content=[
-                    TextRun(text="ГОСТ 7.32-2017. — М. : Стандартинформ.")
-                ],
+                content=[TextRun(text="ГОСТ 7.32-2017. — М. : Стандартинформ.")],
             ),
         ],
     )
@@ -328,9 +324,7 @@ def test_subsections_preserved() -> None:
     sub = sec["subsections"][0]
     assert "1.1" in sub["heading"]
     assert any(
-        b.get("text") == "текст подраздела"
-        for b in sub["blocks"]
-        if b.get("kind") == "paragraph"
+        b.get("text") == "текст подраздела" for b in sub["blocks"] if b.get("kind") == "paragraph"
     )
 
 

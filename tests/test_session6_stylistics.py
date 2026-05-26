@@ -35,7 +35,9 @@ def _doc_with_text(text: str) -> Document:
     )
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
+            id="m",
+            name="N",
+            type="main",
             page=PageGeometry(),
             page_numbering=PageNumberingConfig(),
             content=[sec],
@@ -111,7 +113,9 @@ def test_x06_skip_headings() -> None:
     )
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
+            id="m",
+            name="N",
+            type="main",
             page=PageGeometry(),
             page_numbering=PageNumberingConfig(),
             content=[sec],
@@ -177,9 +181,7 @@ def test_x08_no_repetition_at_distance() -> None:
 
 def test_x08_stop_words_not_reported() -> None:
     """Повтор стоп-слов (предлоги, союзы) не считается."""
-    doc = _doc_with_text(
-        "Программа для системы для пользователя для администратора."
-    )
+    doc = _doc_with_text("Программа для системы для пользователя для администратора.")
     v = validate(doc, _profile_with_x_enabled())
     x08 = [x for x in v if x.check_code == "X.08"]
     # 'для' — короче 4 символов, скипается.
@@ -188,9 +190,7 @@ def test_x08_stop_words_not_reported() -> None:
 
 def test_x08_unique_word_reported_once() -> None:
     """Слово, повторённое несколько раз, репортится один раз."""
-    doc = _doc_with_text(
-        "Программа программа программа программа очень хорошая."
-    )
+    doc = _doc_with_text("Программа программа программа программа очень хорошая.")
     v = validate(doc, _profile_with_x_enabled())
     x08 = [x for x in v if x.check_code == "X.08"]
     # Все «программа» — но репорт только один.
@@ -201,9 +201,7 @@ def test_x08_min_distance_param() -> None:
     """min_distance из параметров."""
     profile = _profile_with_x_enabled()
     profile.checks["X.08"].params = {"min_distance": 10}
-    doc = _doc_with_text(
-        "Программа большая. Затем программа маленькая."
-    )
+    doc = _doc_with_text("Программа большая. Затем программа маленькая.")
     v = validate(doc, profile)
     x08 = [x for x in v if x.check_code == "X.08"]
     # На расстоянии 3 слов — нарушение при min_distance=10.

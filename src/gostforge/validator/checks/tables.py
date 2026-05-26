@@ -22,14 +22,10 @@ from gostforge.profile import Profile
 from ..engine import Violation, register
 
 # Формат подписи таблицы по ГОСТ 7.32-2017: «Таблица N — Название».
-_TABLE_CAPTION_RE = re.compile(
-    r"^Таблица\s+\d+(?:\.\d+)?\s+[—–-]\s+\S"
-)
+_TABLE_CAPTION_RE = re.compile(r"^Таблица\s+\d+(?:\.\d+)?\s+[—–-]\s+\S")
 
 # Альтернативный вариант: «Таблица 1. Название».
-_TABLE_CAPTION_DOT_RE = re.compile(
-    r"^Таблица\s+\d+(?:\.\d+)?\.\s+\S"
-)
+_TABLE_CAPTION_DOT_RE = re.compile(r"^Таблица\s+\d+(?:\.\d+)?\.\s+\S")
 
 
 def _iter_tables(items: Sequence[LogicalSection | Block]) -> list[Table]:
@@ -54,9 +50,7 @@ def _all_tables(document: Document) -> list[tuple[PageSection, Table]]:
 
 def _has_text(elements: Sequence[InlineElement]) -> bool:
     """True, если в списке есть хотя бы один TextRun с непустым текстом."""
-    return any(
-        isinstance(el, TextRun) and el.text and el.text.strip() for el in elements
-    )
+    return any(isinstance(el, TextRun) and el.text and el.text.strip() for el in elements)
 
 
 @register("B.02")
@@ -110,7 +104,8 @@ def check_table_header_repeats(
 
 @register("B.01")
 def check_table_has_caption(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,  # noqa: ARG001
 ) -> list[Violation]:
     """Каждая таблица должна иметь подпись «Таблица N — Название»."""
     violations: list[Violation] = []
@@ -136,9 +131,7 @@ def _caption_text(elements: Sequence[InlineElement]) -> str:
 
 
 @register("B.03")
-def check_table_caption_format(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_table_caption_format(document: Document, profile: Profile) -> list[Violation]:
     """Подпись таблицы должна быть в формате «Таблица N — Название».
 
     Параметры:
@@ -167,13 +160,11 @@ def check_table_caption_format(
                 check_code="B.03",
                 severity="error",
                 message=(
-                    f"Подпись таблицы «{text}» не соответствует формату "
-                    f"«Таблица N — Название»"
+                    f"Подпись таблицы «{text}» не соответствует формату «Таблица N — Название»"
                 ),
                 location=f"page_sections.{page_section.id}.table[{table.id}]",
                 suggestion=(
-                    "Использовать формат «Таблица 1 — Название» "
-                    "(длинное тире —, не дефис)"
+                    "Использовать формат «Таблица 1 — Название» (длинное тире —, не дефис)"
                 ),
                 details={"table_id": table.id, "caption": text},
             )
@@ -216,7 +207,8 @@ def _paragraph_text(paragraph: Paragraph) -> str:
 
 @register("B.09")
 def check_table_numbering_continuous(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,  # noqa: ARG001
 ) -> list[Violation]:
     """Сквозная нумерация таблиц: номера должны идти 1, 2, 3, ...
 
@@ -254,13 +246,11 @@ def check_table_numbering_continuous(
                     check_code="B.09",
                     severity="error",
                     message=(
-                        f"Номер {num} встречается у двух таблиц: "
-                        f"«{previous.id}» и «{table.id}»"
+                        f"Номер {num} встречается у двух таблиц: «{previous.id}» и «{table.id}»"
                     ),
                     location=f"table[{table.id}]",
                     suggestion=(
-                        "Перенумеровать таблицы так, чтобы каждая имела "
-                        "уникальный сквозной номер"
+                        "Перенумеровать таблицы так, чтобы каждая имела уникальный сквозной номер"
                     ),
                     details={
                         "table_id": table.id,
@@ -277,13 +267,11 @@ def check_table_numbering_continuous(
                     check_code="B.09",
                     severity="error",
                     message=(
-                        f"После таблицы {expected - 1} ожидается таблица "
-                        f"{expected}, найдено {num}"
+                        f"После таблицы {expected - 1} ожидается таблица {expected}, найдено {num}"
                     ),
                     location=f"table[{table.id}]",
                     suggestion=(
-                        f"Перенумеровать таблицу: «Таблица {expected}» вместо "
-                        f"«Таблица {num}»"
+                        f"Перенумеровать таблицу: «Таблица {expected}» вместо «Таблица {num}»"
                     ),
                     details={
                         "table_id": table.id,
@@ -311,7 +299,8 @@ def _table_reference_patterns(num: int) -> list[re.Pattern[str]]:
 
 @register("B.08")
 def check_table_referenced_in_text(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,  # noqa: ARG001
 ) -> list[Violation]:
     """На каждую таблицу должна быть ссылка в тексте.
 
@@ -345,13 +334,10 @@ def check_table_referenced_in_text(
             Violation(
                 check_code="B.08",
                 severity="error",
-                message=(
-                    f"В тексте отсутствует ссылка на таблицу {num} «{table.id}»"
-                ),
+                message=(f"В тексте отсутствует ссылка на таблицу {num} «{table.id}»"),
                 location=f"page_sections.{page_section.id}.table[{table.id}]",
                 suggestion=(
-                    f"Добавить в текст ссылку вида «см. таблицу {num}» или "
-                    f"«в таблице {num}»"
+                    f"Добавить в текст ссылку вида «см. таблицу {num}» или «в таблице {num}»"
                 ),
                 details={"table_id": table.id, "number": str(num)},
             )
@@ -361,9 +347,7 @@ def check_table_referenced_in_text(
 
 
 @register("B.06")
-def check_table_cell_font_size(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_table_cell_font_size(document: Document, profile: Profile) -> list[Violation]:
     """В ячейках таблицы шрифт должен быть `cell_font_size_pt` (по умолчанию 12pt).
 
     Параметры:
@@ -411,10 +395,7 @@ def check_table_cell_font_size(
                     f"{wrong_size} pt, ожидается {expected_size} pt"
                 ),
                 location=f"page_sections.{page_section.id}.table[{table.id}]",
-                suggestion=(
-                    f"Выставить шрифту в ячейках таблицы размер "
-                    f"{expected_size} pt"
-                ),
+                suggestion=(f"Выставить шрифту в ячейках таблицы размер {expected_size} pt"),
                 details={
                     "table_id": table.id,
                     "expected_pt": str(expected_size),
@@ -446,9 +427,7 @@ def _cell_is_empty(cell: list[InlineElement]) -> bool:
 
 
 @register("B.07")
-def check_table_empty_cells_dash(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_table_empty_cells_dash(document: Document, profile: Profile) -> list[Violation]:
     """Пустые ячейки таблицы должны быть заполнены прочерком.
 
     Параметры:
@@ -511,9 +490,7 @@ def check_table_empty_cells_dash(
 
 
 @register("B.10")
-def check_table_not_empty(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_table_not_empty(document: Document, profile: Profile) -> list[Violation]:
     """B.10 — таблица не должна быть пустой.
 
     Таблица считается пустой, если:
@@ -532,8 +509,7 @@ def check_table_not_empty(
                     check_code="B.10",
                     severity="warning",
                     message=(
-                        f"Таблица «{_table_caption_text(table)}» пуста — "
-                        f"нет данных в строках"
+                        f"Таблица «{_table_caption_text(table)}» пуста — нет данных в строках"
                     ),
                     location=f"tables[{table.id}]",
                     suggestion=(

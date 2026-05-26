@@ -104,6 +104,7 @@ def _rewrite_relative_links(markdown_text: str) -> str:
     по ``[text](other.md)`` — мы конвертируем такие ссылки в подсказку
     «выберите раздел в меню слева».
     """
+
     # Ссылки вида [text](file.md) или [text](file.md#anchor) — заменяем на
     # markdown-курсив с подсказкой.
     def _replace(match: re.Match[str]) -> str:

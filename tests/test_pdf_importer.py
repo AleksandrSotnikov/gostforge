@@ -65,9 +65,7 @@ class TestLooksLikeHeading:
         assert level == 1
 
     def test_normal_sentence_not_heading(self) -> None:
-        ok, _ = _looks_like_heading(
-            "Это обычное предложение, которое заканчивается точкой."
-        )
+        ok, _ = _looks_like_heading("Это обычное предложение, которое заканчивается точкой.")
         assert not ok
 
     def test_too_long_not_heading(self) -> None:
@@ -83,9 +81,7 @@ class TestLooksLikeHeading:
         assert not ok
 
 
-def _install_fake_pdfplumber(
-    monkeypatch: pytest.MonkeyPatch, pages_text: list[str]
-) -> None:
+def _install_fake_pdfplumber(monkeypatch: pytest.MonkeyPatch, pages_text: list[str]) -> None:
     """Подменить pdfplumber фейком, возвращающим заданные страницы."""
 
     class _FakePage:
@@ -127,9 +123,7 @@ class TestImportPdfToState:
         with pytest.raises(PdfImportError):
             import_pdf_to_state(pdf)
 
-    def test_basic_structure(
-        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_basic_structure(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         _install_fake_pdfplumber(
             monkeypatch,
             [
@@ -162,14 +156,9 @@ class TestImportPdfToState:
         pdf.write_bytes(b"%PDF stub")
         state = import_pdf_to_state(pdf)
         assert state["sections"][0]["heading"] == "Введение"
-        assert (
-            "Просто текст"
-            in state["sections"][0]["blocks"][0]["text"]
-        )
+        assert "Просто текст" in state["sections"][0]["blocks"][0]["text"]
 
-    def test_bibliography_section(
-        self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_bibliography_section(self, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
         _install_fake_pdfplumber(
             monkeypatch,
             [

@@ -30,16 +30,12 @@ def bad_docx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 id="main",
                 name="Основная часть",
                 type="main",
-                page=PageGeometry(
-                    margins_mm={"top": 25, "right": 15, "bottom": 20, "left": 30}
-                ),
+                page=PageGeometry(margins_mm={"top": 25, "right": 15, "bottom": 20, "left": 30}),
             )
         )
         return doc
 
-    monkeypatch.setattr(
-        "gostforge.annotator.docx_annotator.parse_docx", fake_parse
-    )
+    monkeypatch.setattr("gostforge.annotator.docx_annotator.parse_docx", fake_parse)
     return p
 
 
@@ -74,9 +70,7 @@ def test_cli_annotate_prints_count_message(bad_docx: Path, tmp_path: Path) -> No
     assert "Создано пометок" in result.output
 
 
-def test_cli_annotate_default_style_is_comments(
-    bad_docx: Path, tmp_path: Path
-) -> None:
+def test_cli_annotate_default_style_is_comments(bad_docx: Path, tmp_path: Path) -> None:
     """Без --style по умолчанию используется comments-режим: в архиве
     появляется word/comments.xml."""
     import zipfile
@@ -89,33 +83,25 @@ def test_cli_annotate_default_style_is_comments(
         assert "word/comments.xml" in z.namelist()
 
 
-def test_cli_annotate_style_inline_no_comments_part(
-    bad_docx: Path, tmp_path: Path
-) -> None:
+def test_cli_annotate_style_inline_no_comments_part(bad_docx: Path, tmp_path: Path) -> None:
     """--style inline → старое поведение, без word/comments.xml."""
     import zipfile
 
     out = tmp_path / "out.docx"
     runner = CliRunner()
-    result = runner.invoke(
-        main, ["annotate", str(bad_docx), "-o", str(out), "--style", "inline"]
-    )
+    result = runner.invoke(main, ["annotate", str(bad_docx), "-o", str(out), "--style", "inline"])
     assert result.exit_code == 0, result.output
     with zipfile.ZipFile(out, "r") as z:
         assert "word/comments.xml" not in z.namelist()
 
 
-def test_cli_annotate_style_comments_creates_comments_part(
-    bad_docx: Path, tmp_path: Path
-) -> None:
+def test_cli_annotate_style_comments_creates_comments_part(bad_docx: Path, tmp_path: Path) -> None:
     """Явный --style comments тоже создаёт comments-part."""
     import zipfile
 
     out = tmp_path / "out.docx"
     runner = CliRunner()
-    result = runner.invoke(
-        main, ["annotate", str(bad_docx), "-o", str(out), "--style", "comments"]
-    )
+    result = runner.invoke(main, ["annotate", str(bad_docx), "-o", str(out), "--style", "comments"])
     assert result.exit_code == 0, result.output
     with zipfile.ZipFile(out, "r") as z:
         assert "word/comments.xml" in z.namelist()
@@ -125,7 +111,5 @@ def test_cli_annotate_rejects_unknown_style(bad_docx: Path, tmp_path: Path) -> N
     """Неизвестное значение --style → click отвечает кодом != 0."""
     out = tmp_path / "out.docx"
     runner = CliRunner()
-    result = runner.invoke(
-        main, ["annotate", str(bad_docx), "-o", str(out), "--style", "bogus"]
-    )
+    result = runner.invoke(main, ["annotate", str(bad_docx), "-o", str(out), "--style", "bogus"])
     assert result.exit_code != 0

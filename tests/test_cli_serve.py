@@ -37,9 +37,7 @@ def test_serve_passes_host_port_reload(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("uvicorn.run", fake)
 
     runner = CliRunner()
-    result = runner.invoke(
-        main, ["serve", "--host", "0.0.0.0", "--port", "9000", "--reload"]
-    )
+    result = runner.invoke(main, ["serve", "--host", "0.0.0.0", "--port", "9000", "--reload"])
     assert result.exit_code == 0, result.output
     kwargs = fake.call_args.kwargs
     assert kwargs["host"] == "0.0.0.0"

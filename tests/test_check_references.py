@@ -734,12 +734,8 @@ def test_r13_clean_urls_no_violation() -> None:
     profile = load_profile("gost-7.32-2017")
     doc = _doc_with_bibliography(
         [
-            _entry_with_fields(
-                "ref-1", {"url": "https://elibrary.ru/item/1"}, type_="web"
-            ),
-            _entry_with_fields(
-                "ref-2", {"url": "https://dx.doi.org/10.1000/abc"}, type_="article"
-            ),
+            _entry_with_fields("ref-1", {"url": "https://elibrary.ru/item/1"}, type_="web"),
+            _entry_with_fields("ref-2", {"url": "https://dx.doi.org/10.1000/abc"}, type_="article"),
         ]
     )
     assert _violations(doc, profile, "R.13") == []
@@ -783,7 +779,5 @@ def test_r13_studopedia_violation() -> None:
 def test_r13_entry_without_url_no_violation() -> None:
     """Запись без url не проверяется R.13."""
     profile = load_profile("gost-7.32-2017")
-    doc = _doc_with_bibliography(
-        [_entry_with_fields("ref-1", {"year": "2020"}, type_="book")]
-    )
+    doc = _doc_with_bibliography([_entry_with_fields("ref-1", {"year": "2020"}, type_="book")])
     assert _violations(doc, profile, "R.13") == []

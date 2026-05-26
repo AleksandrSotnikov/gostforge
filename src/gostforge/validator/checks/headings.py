@@ -293,9 +293,7 @@ def check_heading_2_format(document: Document, profile: Profile) -> list[Violati
 
 
 @register("H.03")
-def check_heading_number_no_trailing_dot(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_heading_number_no_trailing_dot(document: Document, profile: Profile) -> list[Violation]:
     """После номера раздела в заголовке точки быть не должно.
 
     Допустимо: «1 Введение», «1.2 Анализ».
@@ -322,9 +320,7 @@ def check_heading_number_no_trailing_dot(
 
 
 @register("H.08")
-def check_heading_no_terminal_punctuation(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_heading_no_terminal_punctuation(document: Document, profile: Profile) -> list[Violation]:
     """Заголовок не должен оканчиваться точкой (или многоточием).
 
     По ГОСТ Р 2.105-2019 заголовок не должен оканчиваться знаком
@@ -408,8 +404,7 @@ def check_heading_numbering_continuous(
                 ),
                 location=f"page_sections.*.logical_section[{first_un.id}]",
                 suggestion=(
-                    "Принять единый стиль: либо нумеровать все разделы 1 уровня, "
-                    "либо ни один"
+                    "Принять единый стиль: либо нумеровать все разделы 1 уровня, либо ни один"
                 ),
                 details={"section_id": first_un.id},
             )
@@ -430,9 +425,7 @@ def check_heading_numbering_continuous(
                         f"ожидается {expected}, найдено {num} (заголовок «{heading}»)"
                     ),
                     location=f"page_sections.*.logical_section[{section.id}]",
-                    suggestion=(
-                        f"Перенумеровать раздел: «{expected} ...» вместо «{num} ...»"
-                    ),
+                    suggestion=(f"Перенумеровать раздел: «{expected} ...» вместо «{num} ...»"),
                     details={
                         "section_id": section.id,
                         "expected": str(expected),
@@ -554,8 +547,7 @@ def check_heading_not_hanging(
                         ),
                         location=f"page_sections.*.logical_section[{section.id}]",
                         suggestion=(
-                            "Удалите пустой абзац или добавьте под заголовком "
-                            "осмысленный текст"
+                            "Удалите пустой абзац или добавьте под заголовком осмысленный текст"
                         ),
                         details={"section_id": section.id},
                     )

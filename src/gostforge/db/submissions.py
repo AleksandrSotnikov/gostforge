@@ -104,9 +104,7 @@ def get_submission(conn: sqlite3.Connection, submission_id: int) -> Submission |
 
     Возвращает ``None``, если такой submission не найден.
     """
-    row = conn.execute(
-        "SELECT * FROM submissions WHERE id = ?", (int(submission_id),)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM submissions WHERE id = ?", (int(submission_id),)).fetchone()
     if row is None:
         return None
     violations = [
@@ -132,9 +130,7 @@ def delete_submission(conn: sqlite3.Connection, submission_id: int) -> bool:
 
     Возвращает True, если запись существовала и удалена, иначе False.
     """
-    cursor = conn.execute(
-        "DELETE FROM submissions WHERE id = ?", (int(submission_id),)
-    )
+    cursor = conn.execute("DELETE FROM submissions WHERE id = ?", (int(submission_id),))
     conn.commit()
     return (cursor.rowcount or 0) > 0
 

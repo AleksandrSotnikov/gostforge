@@ -109,12 +109,14 @@ class WorkBuilder:
         """
         sec = LogicalSection(
             id=self._next_id("sec"),
-            heading=[TextRun(
-                text=heading.upper(),
-                bold=True,
-                font="Times New Roman",
-                size_pt=14,
-            )],
+            heading=[
+                TextRun(
+                    text=heading.upper(),
+                    bold=True,
+                    font="Times New Roman",
+                    size_pt=14,
+                )
+            ],
             level=1,
         )
         self._sections.append(sec)
@@ -164,9 +166,7 @@ class WorkBuilder:
         # fallback на дефолты ГОСТ 7.32. Это закрывает F.01 (поля) и F.06
         # (start_value) для всех профилей-наследников (ЕСКД с правым полем
         # 10 мм, кафедра с start_value=4 и т. п.).
-        page_margins, start_value = _resolve_page_params_from_profile(
-            self._profile_id
-        )
+        page_margins, start_value = _resolve_page_params_from_profile(self._profile_id)
         page = PageGeometry(
             paper="A4",
             margins_mm=page_margins,
@@ -237,9 +237,7 @@ class WorkBuilder:
         ]
         if errors:
             codes = sorted({v.check_code for v in errors})
-            raise ValueError(
-                "Документ не проходит валидацию: " + ", ".join(codes)
-            )
+            raise ValueError("Документ не проходит валидацию: " + ", ".join(codes))
 
         export_docx(document, resolved_profile, Path(path))
 
@@ -369,7 +367,9 @@ _ALLOWED_ENTRY_TYPES: frozenset[str] = frozenset(
 )
 
 
-def _entry_type_from_id(para_id: str) -> Literal["book", "article", "web", "standard", "thesis", "conference", "law"]:
+def _entry_type_from_id(
+    para_id: str,
+) -> Literal["book", "article", "web", "standard", "thesis", "conference", "law"]:
     """Восстановить тип записи из id формата `ref:<type>-N`. По умолчанию — book."""
     if para_id.startswith("ref:"):
         rest = para_id[len("ref:") :]
@@ -380,5 +380,3 @@ def _entry_type_from_id(para_id: str) -> Literal["book", "article", "web", "stan
                 type_part,
             )
     return "book"
-
-

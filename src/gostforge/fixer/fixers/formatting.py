@@ -133,10 +133,7 @@ def _has_page_placeholder(content) -> bool:  # type: ignore[no-untyped-def]
 
 def _strip_page_placeholder(content):  # type: ignore[no-untyped-def]
     """Убрать все {page}-плейсхолдеры из content."""
-    return [
-        el for el in (content or [])
-        if not (isinstance(el, TextRun) and el.text == "{page}")
-    ]
+    return [el for el in (content or []) if not (isinstance(el, TextRun) and el.text == "{page}")]
 
 
 __all__ = ["fix_page_number_position", "fix_page_numbering_start"]

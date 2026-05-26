@@ -30,9 +30,14 @@ class PdfImportError(RuntimeError):
 # Эвристики распознавания заголовков.
 _HEADING_NUMBER_RE = re.compile(r"^\d+(\.\d+){0,3}\.?\s+\S")
 _STRUCTURAL_HEADINGS = {
-    "введение", "заключение", "содержание", "реферат",
-    "список использованных источников", "список литературы",
-    "литература", "приложение",
+    "введение",
+    "заключение",
+    "содержание",
+    "реферат",
+    "список использованных источников",
+    "список литературы",
+    "литература",
+    "приложение",
 }
 
 
@@ -133,17 +138,12 @@ def import_pdf_to_state(
         if para_buffer and current_section is not None:
             text = " ".join(para_buffer).strip()
             if text:
-                current_section.setdefault("blocks", []).append(
-                    {"kind": "paragraph", "text": text}
-                )
+                current_section.setdefault("blocks", []).append({"kind": "paragraph", "text": text})
         para_buffer = []
 
     for line in lines:
         is_heading, _level = _looks_like_heading(line)
-        in_bib = (
-            current_section is not None
-            and current_section.get("is_bibliography")
-        )
+        in_bib = current_section is not None and current_section.get("is_bibliography")
         # Внутри библиографии нумерованные строки («1. Иванов…») — это
         # записи источников, а не заголовки. Заголовком, обрывающим
         # список, считаем только структурный раздел или ВЕРХНИЙ регистр
@@ -151,13 +151,8 @@ def import_pdf_to_state(
         if in_bib and is_heading:
             stripped = line.strip()
             low = stripped.lower().rstrip(".")
-            is_structural = (
-                low in _STRUCTURAL_HEADINGS
-                or low.startswith("приложение")
-            )
-            is_upper = (
-                stripped == stripped.upper() and not stripped.endswith(".")
-            )
+            is_structural = low in _STRUCTURAL_HEADINGS or low.startswith("приложение")
+            is_upper = stripped == stripped.upper() and not stripped.endswith(".")
             if not (is_structural or is_upper):
                 is_heading = False
         if is_heading:
@@ -182,9 +177,7 @@ def import_pdf_to_state(
                 sections.append(current_section)
             if current_section.get("is_bibliography"):
                 # В bib-разделе каждая строка — отдельная ссылка.
-                current_section.setdefault("references", []).append(
-                    line.strip()
-                )
+                current_section.setdefault("references", []).append(line.strip())
             else:
                 para_buffer.append(line)
 

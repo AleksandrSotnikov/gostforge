@@ -28,9 +28,7 @@ def test_list_writes_suff_tab(tmp_path: Path) -> None:
     """После маркера ставится Tab (для классического hanging-list:
     Tab расширяется до позиции left, выравнивая текст первой строки
     с переносом)."""
-    b = work("X", year=2026).section("Введение").list(
-        ["один", "два"], ordered=False
-    )
+    b = work("X", year=2026).section("Введение").list(["один", "два"], ordered=False)
     out = tmp_path / "out.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     numbering = _numbering_xml(out)
@@ -38,9 +36,7 @@ def test_list_writes_suff_tab(tmp_path: Path) -> None:
 
 
 def test_ordered_list_writes_suff_tab(tmp_path: Path) -> None:
-    b = work("X", year=2026).section("Введение").list(
-        ["шаг 1", "шаг 2"], ordered=True
-    )
+    b = work("X", year=2026).section("Введение").list(["шаг 1", "шаг 2"], ordered=True)
     out = tmp_path / "out.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     numbering = _numbering_xml(out)
@@ -52,9 +48,7 @@ def test_ordered_list_writes_suff_tab(tmp_path: Path) -> None:
 
 def test_singlelevel_when_item_levels_empty(tmp_path: Path) -> None:
     """ListBlock без item_levels → singleLevel abstractNum (без подуровней)."""
-    b = work("X", year=2026).section("Введение").list(
-        ["a", "b"], ordered=False
-    )
+    b = work("X", year=2026).section("Введение").list(["a", "b"], ordered=False)
     out = tmp_path / "single.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     numbering = _numbering_xml(out)

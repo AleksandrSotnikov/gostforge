@@ -31,11 +31,7 @@ def test_top_level_sections_from_h2() -> None:
 
 
 def test_subsection_h3() -> None:
-    md = (
-        "## Глава 1\n\n"
-        "### 1.1 Подраздел\n\n"
-        "### 1.2 Другой\n"
-    )
+    md = "## Глава 1\n\n### 1.1 Подраздел\n\n### 1.2 Другой\n"
     state = _markdown_to_state(md)
     chapter = state["sections"][0]
     assert len(chapter["subsections"]) == 2
@@ -43,11 +39,7 @@ def test_subsection_h3() -> None:
 
 
 def test_subsubsection_h4() -> None:
-    md = (
-        "## Глава 1\n"
-        "### 1.1\n"
-        "#### 1.1.1 Пункт\n"
-    )
+    md = "## Глава 1\n### 1.1\n#### 1.1.1 Пункт\n"
     state = _markdown_to_state(md)
     chapter = state["sections"][0]
     sub = chapter["subsections"][0]
@@ -63,12 +55,7 @@ def test_paragraph_in_section() -> None:
 
 
 def test_unordered_list() -> None:
-    md = (
-        "## Х\n"
-        "- один\n"
-        "- два\n"
-        "- три\n"
-    )
+    md = "## Х\n- один\n- два\n- три\n"
     state = _markdown_to_state(md)
     sec = state["sections"][0]
     lst = next(b for b in sec["blocks"] if b["kind"] == "list")
@@ -77,11 +64,7 @@ def test_unordered_list() -> None:
 
 
 def test_ordered_list() -> None:
-    md = (
-        "## Х\n"
-        "1. шаг 1\n"
-        "2. шаг 2\n"
-    )
+    md = "## Х\n1. шаг 1\n2. шаг 2\n"
     state = _markdown_to_state(md)
     sec = state["sections"][0]
     lst = next(b for b in sec["blocks"] if b["kind"] == "list")
@@ -90,13 +73,7 @@ def test_ordered_list() -> None:
 
 
 def test_gfm_table() -> None:
-    md = (
-        "## Х\n"
-        "| Параметр | Значение |\n"
-        "|---|---|\n"
-        "| Шрифт | TNR |\n"
-        "| Кегль | 14 |\n"
-    )
+    md = "## Х\n| Параметр | Значение |\n|---|---|\n| Шрифт | TNR |\n| Кегль | 14 |\n"
     state = _markdown_to_state(md)
     sec = state["sections"][0]
     tbl = next(b for b in sec["blocks"] if b["kind"] == "table")
@@ -122,11 +99,7 @@ def test_figure_image() -> None:
 
 
 def test_bibliography_detected_and_refs_populated() -> None:
-    md = (
-        "## Список использованных источников\n\n"
-        "1. Кнут Д. — М., 2007.\n"
-        "2. Кормен. — М., 2013.\n"
-    )
+    md = "## Список использованных источников\n\n1. Кнут Д. — М., 2007.\n2. Кормен. — М., 2013.\n"
     state = _markdown_to_state(md)
     bib = state["sections"][0]
     assert bib.get("is_bibliography") is True
@@ -166,9 +139,7 @@ def test_full_cycle_export_then_import(tmp_path: Path) -> None:
     md_path = tmp_path / "mid.md"
     out_state_path = tmp_path / "out.json"
 
-    state_path.write_text(
-        json.dumps(state_in, ensure_ascii=False), encoding="utf-8"
-    )
+    state_path.write_text(json.dumps(state_in, ensure_ascii=False), encoding="utf-8")
     subprocess.run(
         ["gostforge", "export-md", str(state_path), "-o", str(md_path)],
         check=True,

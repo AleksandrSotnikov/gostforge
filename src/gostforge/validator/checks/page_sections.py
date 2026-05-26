@@ -61,9 +61,7 @@ def _content_template_text(template: ContentTemplate | None) -> str:
 
 
 @register("K.02")
-def check_title_has_no_page_number(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_title_has_no_page_number(document: Document, profile: Profile) -> list[Violation]:
     """На титульном листе (``type == "title"``) номер страницы не печатается.
 
     ГОСТ 7.32-2017 п. 6.1.1: на титульном листе номер не проставляется,
@@ -79,12 +77,9 @@ def check_title_has_no_page_number(
                     check_code="K.02",
                     severity="error",
                     message=(
-                        f"На титульном листе (секция «{section.name}») "
-                        f"включена нумерация страницы"
+                        f"На титульном листе (секция «{section.name}») включена нумерация страницы"
                     ),
-                    location=(
-                        f"page_sections.{section.id}.page_numbering.visible"
-                    ),
+                    location=(f"page_sections.{section.id}.page_numbering.visible"),
                     suggestion="Отключить отображение номера на титульном листе",
                     details={"expected": "False", "actual": "True"},
                 )
@@ -107,9 +102,7 @@ def _first_main_section(document: Document) -> PageSection | None:
 
 
 @register("K.03")
-def check_main_section_start_value(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_main_section_start_value(document: Document, profile: Profile) -> list[Violation]:
     """Нумерация в основной части стартует с фиксированной страницы.
 
     На уровне секций (дубликат F.06 в более локальном контексте).
@@ -169,9 +162,7 @@ def check_main_section_start_value(
 
 
 @register("K.04")
-def check_no_numbering_restarts(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_no_numbering_restarts(document: Document, profile: Profile) -> list[Violation]:
     """Нумерация в работе сквозная: после первой секции рестартов быть не должно.
 
     Параметр ``allow_restart_in_appendix`` (bool, default False): если True,
@@ -181,9 +172,7 @@ def check_no_numbering_restarts(
     config = profile.checks.get("K.04")
     allow_restart_in_appendix = False
     if config is not None:
-        allow_restart_in_appendix = bool(
-            config.params.get("allow_restart_in_appendix", False)
-        )
+        allow_restart_in_appendix = bool(config.params.get("allow_restart_in_appendix", False))
 
     violations: list[Violation] = []
     sections = document.page_sections
@@ -245,10 +234,7 @@ def check_appendix_header(document: Document, profile: Profile) -> list[Violatio
                         f"колонтитул с заголовком приложения"
                     ),
                     location=f"page_sections.{section.id}.header",
-                    suggestion=(
-                        "Добавить верхний колонтитул вида "
-                        "«ПРИЛОЖЕНИЕ {appendix_letter}»"
-                    ),
+                    suggestion=("Добавить верхний колонтитул вида «ПРИЛОЖЕНИЕ {appendix_letter}»"),
                 )
             )
             continue
@@ -269,9 +255,7 @@ def check_appendix_header(document: Document, profile: Profile) -> list[Violatio
                         f"{{appendix_letter}}"
                     ),
                     location=f"page_sections.{section.id}.header",
-                    suggestion=(
-                        "В колонтитул вставить «ПРИЛОЖЕНИЕ {appendix_letter}»"
-                    ),
+                    suggestion=("В колонтитул вставить «ПРИЛОЖЕНИЕ {appendix_letter}»"),
                 )
             )
     return violations
@@ -321,9 +305,7 @@ def _lis_length(seq_a: Sequence[str], seq_b: Sequence[str]) -> list[int]:
 
 
 @register("K.06")
-def check_headers_not_linked_to_previous(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_headers_not_linked_to_previous(document: Document, profile: Profile) -> list[Violation]:
     """Колонтитулы PageSection-ов (кроме первой) должны быть отвязаны.
 
     По ГОСТ титульный лист, фронтматтер и основная часть имеют разные
@@ -371,9 +353,7 @@ def check_headers_not_linked_to_previous(
 
 
 @register("K.01")
-def check_sections_match_template(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_sections_match_template(document: Document, profile: Profile) -> list[Violation]:
     """Структура PageSection-ов соответствует ``sections_template`` профиля.
 
     Сравниваем последовательность типов секций (только главные:
@@ -393,9 +373,7 @@ def check_sections_match_template(
     if not expected_types:
         return []
 
-    actual_types = [
-        ps.type for ps in document.page_sections if ps.type in _MAJOR_TYPES
-    ]
+    actual_types = [ps.type for ps in document.page_sections if ps.type in _MAJOR_TYPES]
 
     violations: list[Violation] = []
     if not actual_types:
@@ -406,9 +384,7 @@ def check_sections_match_template(
                 Violation(
                     check_code="K.01",
                     severity="error",
-                    message=(
-                        f"Отсутствует секция «{tpl.name}» (тип {tpl.type})"
-                    ),
+                    message=(f"Отсутствует секция «{tpl.name}» (тип {tpl.type})"),
                     location="page_sections",
                     suggestion=f"Добавить секцию типа «{tpl.type}»",
                     details={"expected_type": tpl.type},
@@ -419,9 +395,7 @@ def check_sections_match_template(
     # Индексы expected_types, которые удалось выровнять (LCS).
     matched_indices = set(_lis_length(expected_types, actual_types))
     # Соответствующие шаблоны (с фильтрацией по главным типам).
-    template_filtered = [
-        t for t in profile.sections_template if t.type in _MAJOR_TYPES
-    ]
+    template_filtered = [t for t in profile.sections_template if t.type in _MAJOR_TYPES]
     for idx, tpl in enumerate(template_filtered):
         if idx in matched_indices:
             continue

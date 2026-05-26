@@ -62,10 +62,7 @@ def test_p01_forbidden_letter_violation() -> None:
     doc = _doc_with_content(list(sections))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "P.01"]
-    assert any(
-        v.details.get("letter") == "Ё" and "запрещённая" in v.message
-        for v in found
-    )
+    assert any(v.details.get("letter") == "Ё" and "запрещённая" in v.message for v in found)
 
 
 def test_p01_gap_in_sequence_violation() -> None:

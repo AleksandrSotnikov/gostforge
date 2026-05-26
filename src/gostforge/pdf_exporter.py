@@ -97,9 +97,7 @@ def convert_to_pdf(
         subprocess.run(cmd, check=True, timeout=timeout, capture_output=True)
         produced = Path(tmpdir) / (input_path.stem + ".pdf")
         if not produced.is_file():
-            raise RuntimeError(
-                f"LibreOffice не создал ожидаемый PDF: {produced}"
-            )
+            raise RuntimeError(f"LibreOffice не создал ожидаемый PDF: {produced}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(produced), str(output_path))
     return output_path
@@ -160,9 +158,7 @@ def convert_document(
         subprocess.run(cmd, check=True, timeout=timeout, capture_output=True)
         produced = Path(tmpdir) / (input_path.stem + "." + ext)
         if not produced.is_file():
-            raise RuntimeError(
-                f"LibreOffice не создал ожидаемый файл: {produced}"
-            )
+            raise RuntimeError(f"LibreOffice не создал ожидаемый файл: {produced}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(produced), str(output_path))
     return output_path

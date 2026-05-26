@@ -58,9 +58,7 @@ def _item_text(item: Sequence[InlineElement]) -> str:
 
 
 @register("L.01")
-def check_unordered_list_marker(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_unordered_list_marker(document: Document, profile: Profile) -> list[Violation]:
     """Маркер ненумерованного списка должен быть из списка разрешённых.
 
     Параметры `checks.L.01.params`:
@@ -107,10 +105,7 @@ def check_unordered_list_marker(
                     f"{', '.join(allowed)}"
                 ),
                 location=f"page_sections.{page_section.id}.list[{lb.id}]",
-                suggestion=(
-                    "Использовать один из разрешённых маркеров: "
-                    + ", ".join(allowed)
-                ),
+                suggestion=("Использовать один из разрешённых маркеров: " + ", ".join(allowed)),
                 details={
                     "list_id": lb.id,
                     "marker": marker,
@@ -151,9 +146,7 @@ def _ordered_item_format(item: Sequence[InlineElement]) -> str | None:
 
 
 @register("L.02")
-def check_ordered_list_uniform_format(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_ordered_list_uniform_format(document: Document, profile: Profile) -> list[Violation]:
     """Стиль нумерации нумерованных списков должен быть единообразным.
 
     Эвристика Фазы 1: для каждого ListBlock с ordered=True смотрим формат
@@ -163,11 +156,7 @@ def check_ordered_list_uniform_format(
     в сравнении не участвуют.
     """
     violations: list[Violation] = []
-    ordered_lists = [
-        (ps, lb)
-        for ps, lb in _all_list_blocks(document)
-        if lb.ordered and lb.items
-    ]
+    ordered_lists = [(ps, lb) for ps, lb in _all_list_blocks(document) if lb.ordered and lb.items]
     if len(ordered_lists) < 2:
         return violations
 
@@ -239,9 +228,7 @@ def _item_end_marker(item: Sequence[InlineElement]) -> str:
 
 
 @register("L.04")
-def check_list_item_punctuation_uniform(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_list_item_punctuation_uniform(document: Document, profile: Profile) -> list[Violation]:
     """Знаки препинания в конце пунктов списка должны быть единообразны.
 
     В каждом ListBlock все items[i] должны заканчиваться одинаково:
@@ -264,8 +251,7 @@ def check_list_item_punctuation_uniform(
                 check_code="L.04",
                 severity="info",
                 message=(
-                    f"В списке «{lb.id}» пункты оканчиваются по-разному: "
-                    f"{', '.join(readable)}"
+                    f"В списке «{lb.id}» пункты оканчиваются по-разному: {', '.join(readable)}"
                 ),
                 location=f"page_sections.{page_section.id}.list[{lb.id}]",
                 suggestion=(
@@ -282,9 +268,7 @@ def check_list_item_punctuation_uniform(
 
 
 @register("L.03")
-def check_list_item_indent_uniform(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_list_item_indent_uniform(document: Document, profile: Profile) -> list[Violation]:
     """Отступы пунктов списка должны быть одинаковыми.
 
     На Фазе 1 модель не хранит отступы для items внутри ListBlock —

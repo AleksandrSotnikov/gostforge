@@ -41,9 +41,7 @@ def test_paragraph_with_italic_run() -> None:
 def test_paragraph_with_bold_italic() -> None:
     block = {
         "kind": "paragraph",
-        "runs": [
-            {"kind": "text", "text": "оба", "bold": True, "italic": True}
-        ],
+        "runs": [{"kind": "text", "text": "оба", "bold": True, "italic": True}],
     }
     assert _paragraph_to_md(block) == "***оба***"
 

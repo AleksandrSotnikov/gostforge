@@ -123,9 +123,7 @@ def _collect_disabled_checks(document: Document) -> dict[str, set[str]]:
     return out
 
 
-def _is_violation_suppressed(
-    violation: Violation, disabled_map: dict[str, set[str]]
-) -> bool:
+def _is_violation_suppressed(violation: Violation, disabled_map: dict[str, set[str]]) -> bool:
     """True, если location violation указывает на секцию,
     отключившую этот код или все коды («*»)."""
     location = violation.location or ""

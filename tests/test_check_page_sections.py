@@ -97,9 +97,7 @@ def test_k03_correct_start_value() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="start_at", start_value=3
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=3),
         )
     )
     profile = _profile()
@@ -114,9 +112,7 @@ def test_k03_wrong_start_value_violation() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="start_at", start_value=1
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=1),
         )
     )
     profile = _profile()
@@ -132,9 +128,7 @@ def test_k03_missing_start_at_violation() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="continue"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="continue"),
         )
     )
     profile = _profile()
@@ -181,9 +175,7 @@ def test_k04_continuous_numbering_ok() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="continue"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="continue"),
         )
     )
     doc.page_sections.append(
@@ -191,9 +183,7 @@ def test_k04_continuous_numbering_ok() -> None:
             id="app",
             name="Приложения",
             type="appendix",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="continue"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="continue"),
         )
     )
     profile = _profile()
@@ -216,9 +206,7 @@ def test_k04_restart_in_middle_violation() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="restart"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="restart"),
         )
     )
     profile = _profile()
@@ -235,9 +223,7 @@ def test_k04_first_section_restart_ignored() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="restart"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="restart"),
         )
     )
     profile = _profile()
@@ -253,9 +239,7 @@ def test_k04_allow_restart_in_appendix_when_enabled() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="start_at", start_value=3
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=3),
         )
     )
     doc.page_sections.append(
@@ -263,9 +247,7 @@ def test_k04_allow_restart_in_appendix_when_enabled() -> None:
             id="app",
             name="Приложения",
             type="appendix",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="restart"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="restart"),
         )
     )
     profile = _profile()
@@ -290,9 +272,7 @@ def test_k05_appendix_with_proper_header_ok() -> None:
             name="Приложения",
             type="appendix",
             header=HeaderConfig(
-                default=ContentTemplate(
-                    center=[TextRun(text="ПРИЛОЖЕНИЕ {appendix_letter}")]
-                )
+                default=ContentTemplate(center=[TextRun(text="ПРИЛОЖЕНИЕ {appendix_letter}")])
             ),
         )
     )
@@ -324,9 +304,7 @@ def test_k05_appendix_header_without_keyword_violation() -> None:
             id="app",
             name="Приложения",
             type="appendix",
-            header=HeaderConfig(
-                default=ContentTemplate(center=[TextRun(text="Какой-то текст")])
-            ),
+            header=HeaderConfig(default=ContentTemplate(center=[TextRun(text="Какой-то текст")])),
         )
     )
     profile = _profile()
@@ -373,9 +351,7 @@ def test_k01_all_expected_sections_ok() -> None:
                 type=stype,  # type: ignore[arg-type]
                 page_numbering=PageNumberingConfig(visible=False)
                 if stype == "title"
-                else PageNumberingConfig(
-                    visible=True, start_mode="start_at", start_value=3
-                )
+                else PageNumberingConfig(visible=True, start_mode="start_at", start_value=3)
                 if stype == "main"
                 else PageNumberingConfig(visible=True, start_mode="continue"),
             )
@@ -393,9 +369,7 @@ def test_k01_missing_sections_violation() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="start_at", start_value=3
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=3),
         )
     )
     profile = _profile()

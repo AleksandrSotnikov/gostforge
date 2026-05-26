@@ -24,9 +24,7 @@ def test_single_filled_section() -> None:
         "sections": [
             {
                 "heading": "X",
-                "blocks": [
-                    {"kind": "paragraph", "text": "Это полный параграф работы."}
-                ],
+                "blocks": [{"kind": "paragraph", "text": "Это полный параграф работы."}],
             }
         ]
     }
@@ -152,9 +150,7 @@ def test_deep_subsubsection_counted() -> None:
                         "subsections": [
                             {
                                 "heading": "X.1.1",
-                                "blocks": [
-                                    {"kind": "paragraph", "text": "глубокий текст"}
-                                ],
+                                "blocks": [{"kind": "paragraph", "text": "глубокий текст"}],
                             }
                         ],
                     }

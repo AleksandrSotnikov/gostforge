@@ -28,9 +28,7 @@ def _reset_session_state() -> None:
 def test_save_state_version_creates_file(tmp_path: Path, monkeypatch) -> None:
     from gostforge.web import builder_editor
 
-    monkeypatch.setattr(
-        builder_editor, "_state_versions_dir", lambda: tmp_path
-    )
+    monkeypatch.setattr(builder_editor, "_state_versions_dir", lambda: tmp_path)
     state = {
         "title": "Курсовая работа",
         "year": 2026,
@@ -48,9 +46,7 @@ def test_save_state_version_sanitizes_title(tmp_path: Path, monkeypatch) -> None
     """Спецсимволы в title не ломают имя файла."""
     from gostforge.web import builder_editor
 
-    monkeypatch.setattr(
-        builder_editor, "_state_versions_dir", lambda: tmp_path
-    )
+    monkeypatch.setattr(builder_editor, "_state_versions_dir", lambda: tmp_path)
     state = {"title": "Работа/с\\плохими:символами?", "sections": []}
     out_path = builder_editor._save_state_version(state)
     # Спецсимволов в имени нет — только slash и .json.
@@ -64,12 +60,8 @@ def test_save_state_version_prunes_old(tmp_path: Path, monkeypatch) -> None:
     """Старые версии подрезаются до _VERSION_KEEP_COUNT (30)."""
     from gostforge.web import builder_editor
 
-    monkeypatch.setattr(
-        builder_editor, "_state_versions_dir", lambda: tmp_path
-    )
-    monkeypatch.setattr(
-        builder_editor, "_VERSION_KEEP_COUNT", 3
-    )
+    monkeypatch.setattr(builder_editor, "_state_versions_dir", lambda: tmp_path)
+    monkeypatch.setattr(builder_editor, "_VERSION_KEEP_COUNT", 3)
     import time
 
     for i in range(5):
@@ -82,14 +74,10 @@ def test_save_state_version_prunes_old(tmp_path: Path, monkeypatch) -> None:
     assert len(files) <= 3
 
 
-def test_list_state_versions_sorted_newest_first(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_list_state_versions_sorted_newest_first(tmp_path: Path, monkeypatch) -> None:
     from gostforge.web import builder_editor
 
-    monkeypatch.setattr(
-        builder_editor, "_state_versions_dir", lambda: tmp_path
-    )
+    monkeypatch.setattr(builder_editor, "_state_versions_dir", lambda: tmp_path)
     import time
 
     for i in range(3):
@@ -111,28 +99,26 @@ def test_cli_state_versions_list_empty(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     r = subprocess.run(
         ["gostforge", "state-versions", "list"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0
     assert "Версий" in r.stdout
 
 
-def test_cli_state_versions_restore_without_arg_fails(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_state_versions_restore_without_arg_fails(tmp_path: Path, monkeypatch) -> None:
     """`state-versions restore` без указания файла → exit 2."""
     monkeypatch.setenv("HOME", str(tmp_path))
     r = subprocess.run(
         ["gostforge", "state-versions", "restore"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode != 0
     assert "filename" in r.stderr or "filename" in r.stdout
 
 
-def test_cli_state_versions_restore_creates_file(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_state_versions_restore_creates_file(tmp_path: Path, monkeypatch) -> None:
     """Восстановление: версия копируется в output (или cwd по умолчанию)."""
     monkeypatch.setenv("HOME", str(tmp_path))
     # Создадим версию вручную.
@@ -145,11 +131,15 @@ def test_cli_state_versions_restore_creates_file(
     out = tmp_path / "restored.json"
     r = subprocess.run(
         [
-            "gostforge", "state-versions", "restore",
+            "gostforge",
+            "state-versions",
+            "restore",
             "test_work-20260526-120000.json",
-            "-o", str(out),
+            "-o",
+            str(out),
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0
     assert out.exists()
@@ -157,23 +147,24 @@ def test_cli_state_versions_restore_creates_file(
     assert restored["title"] == "test_work"
 
 
-def test_cli_state_versions_restore_partial_match(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_cli_state_versions_restore_partial_match(tmp_path: Path, monkeypatch) -> None:
     """Если указан частичный match имени — найдём по подстроке."""
     monkeypatch.setenv("HOME", str(tmp_path))
     versions_dir = tmp_path / ".gostforge" / "state-versions"
     versions_dir.mkdir(parents=True, exist_ok=True)
-    (versions_dir / "kursovaya-20260526-100000.json").write_text(
-        '{"title": "k", "sections": []}'
-    )
+    (versions_dir / "kursovaya-20260526-100000.json").write_text('{"title": "k", "sections": []}')
     out = tmp_path / "out.json"
     r = subprocess.run(
         [
-            "gostforge", "state-versions", "restore", "kursovaya",
-            "-o", str(out),
+            "gostforge",
+            "state-versions",
+            "restore",
+            "kursovaya",
+            "-o",
+            str(out),
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0
     assert out.exists()

@@ -135,9 +135,7 @@ def test_state_with_subsubsection_builds_correctly(tmp_path: Path) -> None:
                         "subsections": [
                             {
                                 "heading": "1.1.1 Пункт",
-                                "blocks": [
-                                    {"kind": "paragraph", "text": "Текст пункта."}
-                                ],
+                                "blocks": [{"kind": "paragraph", "text": "Текст пункта."}],
                             }
                         ],
                     }
@@ -184,9 +182,7 @@ def test_subsubsection_round_trip(tmp_path: Path) -> None:
                         "subsections": [
                             {
                                 "heading": "1.1.1 Пункт",
-                                "blocks": [
-                                    {"kind": "paragraph", "text": "Текст."}
-                                ],
+                                "blocks": [{"kind": "paragraph", "text": "Текст."}],
                             }
                         ],
                     }

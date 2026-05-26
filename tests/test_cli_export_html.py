@@ -35,7 +35,8 @@ def test_export_html_creates_standalone(tmp_path: Path) -> None:
     op = tmp_path / "o.html"
     r = subprocess.run(
         ["gostforge", "export-html", str(sp), "-o", str(op)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stderr
     html = op.read_text(encoding="utf-8")
@@ -53,7 +54,8 @@ def test_export_html_fragment_mode(tmp_path: Path) -> None:
     op = tmp_path / "o.html"
     r = subprocess.run(
         ["gostforge", "export-html", str(sp), "-o", str(op), "--fragment"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0
     html = op.read_text(encoding="utf-8")
@@ -67,7 +69,8 @@ def test_export_html_invalid_json(tmp_path: Path) -> None:
     bad.write_text("не JSON", encoding="utf-8")
     r = subprocess.run(
         ["gostforge", "export-html", str(bad), "-o", str(tmp_path / "x.html")],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode != 0
 
@@ -78,9 +81,7 @@ def test_export_html_invalid_json(tmp_path: Path) -> None:
 def test_html_escapes_special_chars() -> None:
     state = {
         "title": "<script>alert(1)</script>",
-        "sections": [
-            {"heading": "<b>заголовок</b>", "blocks": []}
-        ],
+        "sections": [{"heading": "<b>заголовок</b>", "blocks": []}],
     }
     html = _state_to_html(state, standalone=True)
     # HTML-инъекции должны быть экранированы.
@@ -91,18 +92,24 @@ def test_html_escapes_special_chars() -> None:
 def test_html_levels_h1_h2_h3() -> None:
     state = {
         "title": "T",
-        "sections": [{
-            "heading": "Глава 1",
-            "blocks": [],
-            "subsections": [{
-                "heading": "1.1 Подраздел",
+        "sections": [
+            {
+                "heading": "Глава 1",
                 "blocks": [],
-                "subsections": [{
-                    "heading": "1.1.1 Пункт",
-                    "blocks": [],
-                }],
-            }],
-        }],
+                "subsections": [
+                    {
+                        "heading": "1.1 Подраздел",
+                        "blocks": [],
+                        "subsections": [
+                            {
+                                "heading": "1.1.1 Пункт",
+                                "blocks": [],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ],
     }
     html = _state_to_html(state, standalone=True)
     assert "<h1>T</h1>" in html
@@ -238,13 +245,23 @@ def test_full_cycle_new_state_to_html(tmp_path: Path) -> None:
     sp = tmp_path / "s.json"
     op = tmp_path / "o.html"
     subprocess.run(
-        ["gostforge", "new-state", "--template", "coursework",
-         "--title", "Полный цикл", "-o", str(sp)],
-        check=True, capture_output=True,
+        [
+            "gostforge",
+            "new-state",
+            "--template",
+            "coursework",
+            "--title",
+            "Полный цикл",
+            "-o",
+            str(sp),
+        ],
+        check=True,
+        capture_output=True,
     )
     subprocess.run(
         ["gostforge", "export-html", str(sp), "-o", str(op)],
-        check=True, capture_output=True,
+        check=True,
+        capture_output=True,
     )
     html = op.read_text(encoding="utf-8")
     assert "<!DOCTYPE html>" in html
@@ -252,9 +269,7 @@ def test_full_cycle_new_state_to_html(tmp_path: Path) -> None:
 
 
 def test_paragraph_with_runs_inline() -> None:
-    text = _paragraph_to_html_inline(
-        {"kind": "paragraph", "runs": [{"kind": "text", "text": "X"}]}
-    )
+    text = _paragraph_to_html_inline({"kind": "paragraph", "runs": [{"kind": "text", "text": "X"}]})
     assert text == "X"
 
 

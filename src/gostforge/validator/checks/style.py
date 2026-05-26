@@ -207,10 +207,7 @@ def check_term_consistency(document: Document, profile: Profile) -> list[Violati
     from gostforge.validator.checks.text import _all_paragraphs as _all_p  # noqa: PLC0415
 
     full_text = " ".join(
-        "".join(
-            el.text for el in p.content
-            if hasattr(el, "text") and isinstance(el.text, str)
-        )
+        "".join(el.text for el in p.content if hasattr(el, "text") and isinstance(el.text, str))
         for p in _all_p(document)
     )
     if not full_text:
@@ -227,8 +224,10 @@ def check_term_consistency(document: Document, profile: Profile) -> list[Violati
             continue
         canonical_lower = canonical.lower()
         found_aliases = [
-            alias for alias in aliases
-            if isinstance(alias, str) and alias
+            alias
+            for alias in aliases
+            if isinstance(alias, str)
+            and alias
             and alias.lower() != canonical_lower
             and alias.lower() in full_text_lower
         ]
@@ -241,16 +240,10 @@ def check_term_consistency(document: Document, profile: Profile) -> list[Violati
                 message=(
                     f"Термин «{canonical}» используется в разных формах: "
                     + ", ".join(f"«{a}»" for a in found_aliases)
-                    + (
-                        f", а также «{canonical}»"
-                        if canonical_lower in full_text_lower
-                        else ""
-                    )
+                    + (f", а также «{canonical}»" if canonical_lower in full_text_lower else "")
                 ),
                 location="document",
-                suggestion=(
-                    f"Привести все упоминания к единому виду «{canonical}»"
-                ),
+                suggestion=(f"Привести все упоминания к единому виду «{canonical}»"),
                 details={
                     "canonical": canonical,
                     "aliases": ", ".join(found_aliases),
@@ -276,9 +269,7 @@ _BUREAUCRATIC_PATTERNS: list[tuple[str, str]] = [
 
 
 @register("X.06")
-def check_bureaucratic_style(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_bureaucratic_style(document: Document, profile: Profile) -> list[Violation]:
     """X.06 — канцеляризмы в научном тексте.
 
     Распознаёт типовые «бюрократические» обороты, которые делают
@@ -315,15 +306,10 @@ def check_bureaucratic_style(
     violations: list[Violation] = []
     for paragraph in _all_p(document):
         style = (paragraph.style_name or "").lower()
-        if (
-            style.startswith("heading")
-            or style.startswith("caption")
-            or style.startswith("list")
-        ):
+        if style.startswith("heading") or style.startswith("caption") or style.startswith("list"):
             continue
         text = "".join(
-            el.text for el in paragraph.content
-            if hasattr(el, "text") and isinstance(el.text, str)
+            el.text for el in paragraph.content if hasattr(el, "text") and isinstance(el.text, str)
         )
         if not text:
             continue
@@ -355,9 +341,7 @@ def check_bureaucratic_style(
 
 
 @register("X.07")
-def check_sentence_length(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_sentence_length(document: Document, profile: Profile) -> list[Violation]:
     """X.07 — слишком длинные предложения.
 
     Сложные предложения с 35+ словами трудно читать. Срабатывает на
@@ -384,8 +368,7 @@ def check_sentence_length(
         if style.startswith("heading") or style.startswith("caption"):
             continue
         text = "".join(
-            el.text for el in paragraph.content
-            if hasattr(el, "text") and isinstance(el.text, str)
+            el.text for el in paragraph.content if hasattr(el, "text") and isinstance(el.text, str)
         )
         if not text:
             continue
@@ -424,9 +407,7 @@ def _split_sentences(text: str) -> list[str]:
 
 
 @register("X.08")
-def check_word_repetition(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_word_repetition(document: Document, profile: Profile) -> list[Violation]:
     """X.08 — повтор одного слова через короткое расстояние (тавтология).
 
     «работа работа», «которая которая», «для для» — типичные ошибки
@@ -455,8 +436,7 @@ def check_word_repetition(
         if style.startswith("heading") or style.startswith("caption"):
             continue
         text = "".join(
-            el.text for el in paragraph.content
-            if hasattr(el, "text") and isinstance(el.text, str)
+            el.text for el in paragraph.content if hasattr(el, "text") and isinstance(el.text, str)
         )
         if not text:
             continue
@@ -480,14 +460,10 @@ def check_word_repetition(
                         check_code="X.08",
                         severity="info",
                         message=(
-                            f"Повтор «{w}» через {idx - last_seen[w]} слова "
-                            f"в абзаце «{preview}»"
+                            f"Повтор «{w}» через {idx - last_seen[w]} слова в абзаце «{preview}»"
                         ),
                         location=f"paragraph[{paragraph.id}]",
-                        suggestion=(
-                            "Замените одно из вхождений синонимом или "
-                            "перефразируйте"
-                        ),
+                        suggestion=("Замените одно из вхождений синонимом или перефразируйте"),
                         details={"paragraph_id": paragraph.id, "word": w},
                     )
                 )
@@ -499,13 +475,45 @@ def check_word_repetition(
 # Их повтор не считаем стилистической ошибкой.
 _STOP_WORDS_RU: frozenset[str] = frozenset(
     {
-        "быть", "была", "было", "были", "будет", "будут",
-        "этот", "эта", "это", "эти", "того", "тому", "тем", "тех",
-        "который", "которая", "которое", "которые", "которого",
-        "также", "более", "менее", "может", "могут", "могла",
-        "после", "перед", "между", "через", "около",
-        "если", "когда", "пока", "затем", "потом",
-        "однако", "поэтому", "поскольку",
-        "часть", "часто",
+        "быть",
+        "была",
+        "было",
+        "были",
+        "будет",
+        "будут",
+        "этот",
+        "эта",
+        "это",
+        "эти",
+        "того",
+        "тому",
+        "тем",
+        "тех",
+        "который",
+        "которая",
+        "которое",
+        "которые",
+        "которого",
+        "также",
+        "более",
+        "менее",
+        "может",
+        "могут",
+        "могла",
+        "после",
+        "перед",
+        "между",
+        "через",
+        "около",
+        "если",
+        "когда",
+        "пока",
+        "затем",
+        "потом",
+        "однако",
+        "поэтому",
+        "поскольку",
+        "часть",
+        "часто",
     }
 )

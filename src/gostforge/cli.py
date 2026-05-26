@@ -50,7 +50,9 @@ def _print_violations(target: Path, violations: list[Violation], quiet: bool) ->
         if counts.get(sev, 0) > 0
     )
     click.echo(
-        "  " + click.style("[FAIL]", fg="red", bold=True) + f"  Найдено нарушений: {len(violations)} ({summary})"
+        "  "
+        + click.style("[FAIL]", fg="red", bold=True)
+        + f"  Найдено нарушений: {len(violations)} ({summary})"
     )
 
     if quiet:
@@ -118,9 +120,7 @@ def _write_markdown_report(
     output.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _write_xlsx_report(
-    results: dict[str, list[Violation]], output: Path, profile_id: str
-) -> None:
+def _write_xlsx_report(results: dict[str, list[Violation]], output: Path, profile_id: str) -> None:
     """Сохранить отчёт в Excel: один лист «Сводка» + по листу на каждый файл."""
     # openpyxl уже в зависимостях; импорт локально, чтобы CLI грузился без него
     # при использовании только Markdown-отчётов.
@@ -156,7 +156,11 @@ def _write_xlsx_report(
 
     for file_path, violations in results.items():
         # Имя листа — обрезаем до 31 символа (ограничение Excel) и удаляем спецсимволы
-        sheet_name = Path(file_path).stem[:28] + "…" if len(Path(file_path).stem) > 28 else Path(file_path).stem
+        sheet_name = (
+            Path(file_path).stem[:28] + "…"
+            if len(Path(file_path).stem) > 28
+            else Path(file_path).stem
+        )
         sheet_name = "".join(c for c in sheet_name if c not in "[]:*?/\\") or "файл"
         # Уникализация на случай совпадения имён
         base = sheet_name
@@ -183,9 +187,7 @@ def _write_xlsx_report(
     wb.save(str(output))
 
 
-def _write_report(
-    results: dict[str, list[Violation]], output: Path, profile_id: str
-) -> str:
+def _write_report(results: dict[str, list[Violation]], output: Path, profile_id: str) -> str:
     """Выбрать формат отчёта по расширению файла. Возвращает подпись формата."""
     suffix = output.suffix.lower()
     if suffix == ".xlsx":
@@ -220,9 +222,7 @@ def main() -> None:
     is_flag=True,
     help="Не записывать результаты проверки в локальную БД истории.",
 )
-def check(
-    path: Path, profile: str, report: Path | None, quiet: bool, no_record: bool
-) -> None:
+def check(path: Path, profile: str, report: Path | None, quiet: bool, no_record: bool) -> None:
     """Проверить документ или папку документов на соответствие профилю."""
     try:
         prof = load_profile(profile)
@@ -241,17 +241,10 @@ def check(
     runnable = enabled_codes & available
     skipped = enabled_codes - available
 
-    click.echo(
-        click.style("Профиль: ", bold=True) + profile + f" (v{prof.version})"
-    )
-    click.echo(
-        f"Будет запущено проверок: {len(runnable)} из {len(enabled_codes)} включённых"
-    )
+    click.echo(click.style("Профиль: ", bold=True) + profile + f" (v{prof.version})")
+    click.echo(f"Будет запущено проверок: {len(runnable)} из {len(enabled_codes)} включённых")
     if skipped:
-        click.echo(
-            click.style("  Не реализованы: ", fg="yellow")
-            + ", ".join(sorted(skipped))
-        )
+        click.echo(click.style("  Не реализованы: ", fg="yellow") + ", ".join(sorted(skipped)))
 
     results: dict[str, list[Violation]] = {}
     total_errors = 0
@@ -283,9 +276,7 @@ def check(
         sys.exit(1)
 
 
-def _record_check_results(
-    results: dict[str, list[Violation]], profile_id: str
-) -> None:
+def _record_check_results(results: dict[str, list[Violation]], profile_id: str) -> None:
     """Сохранить результаты прогона в локальную БД истории.
 
     Ошибки БД (нет места, нет прав) логируются и проглатываются —
@@ -314,13 +305,13 @@ def _record_check_results(
 def _print_fixes(applied: list[FixApplied]) -> None:
     """Вывести таблицу применённых автоправок."""
     if not applied:
-        click.echo("  " + click.style("[OK]", fg="green", bold=True) + "  Ничего исправлять не пришлось")
+        click.echo(
+            "  " + click.style("[OK]", fg="green", bold=True) + "  Ничего исправлять не пришлось"
+        )
         return
 
     click.echo(
-        "  "
-        + click.style("[FIX]", fg="cyan", bold=True)
-        + f"  Применено правок: {len(applied)}"
+        "  " + click.style("[FIX]", fg="cyan", bold=True) + f"  Применено правок: {len(applied)}"
     )
     for record in applied:
         code = click.style(record.fixer_code, bold=True)
@@ -349,9 +340,7 @@ def _print_fixes(applied: list[FixApplied]) -> None:
     is_flag=True,
     help="Не записывать файл, только показать какие правки были бы применены.",  # noqa: RUF001
 )
-def fix_cmd(
-    path: Path, output: Path, profile: str, only: tuple[str, ...], dry_run: bool
-) -> None:
+def fix_cmd(path: Path, output: Path, profile: str, only: tuple[str, ...], dry_run: bool) -> None:
     """Применить безопасные автоисправления к .docx и записать результат в OUTPUT."""
     try:
         prof = load_profile(profile)
@@ -445,10 +434,7 @@ def profiles_install(path: Path, overwrite: bool) -> None:
     )
     click.echo(f"  Источник:    {rec.source}")
     click.echo(f"  Установлен:  {rec.installed_at}")
-    click.echo(
-        "\nИспользовать: gostforge check FILE.docx --profile "
-        + rec.profile_id
-    )
+    click.echo("\nИспользовать: gostforge check FILE.docx --profile " + rec.profile_id)
 
 
 @profiles.command("uninstall")
@@ -469,9 +455,7 @@ def profiles_uninstall(profile_id: str) -> None:
     with get_connection() as conn:
         removed = uninstall_profile(conn, profile_id)
     if removed:
-        click.echo(
-            click.style(f"Профиль удалён: {profile_id}", fg="green", bold=True)
-        )
+        click.echo(click.style(f"Профиль удалён: {profile_id}", fg="green", bold=True))
     else:
         click.echo(
             click.style(
@@ -661,8 +645,7 @@ def ui(host: str, port: int) -> None:
         import streamlit  # noqa: F401
     except ImportError:
         click.echo(
-            "Streamlit не установлен. Установите gostforge[ui]:\n"
-            "  pip install -e \".[ui]\"",
+            'Streamlit не установлен. Установите gostforge[ui]:\n  pip install -e ".[ui]"',
             err=True,
         )
         sys.exit(2)
@@ -688,9 +671,7 @@ def ui(host: str, port: int) -> None:
 @main.command()
 @click.option("--host", default="127.0.0.1", help="Адрес для bind (по умолчанию 127.0.0.1).")
 @click.option("--port", default=8000, help="Порт (по умолчанию 8000).")
-@click.option(
-    "--reload", is_flag=True, help="Включить hot-reload для разработки."
-)
+@click.option("--reload", is_flag=True, help="Включить hot-reload для разработки.")
 def serve(host: str, port: int, reload: bool) -> None:
     """Запустить REST API gostforge на FastAPI/uvicorn.
 
@@ -702,8 +683,7 @@ def serve(host: str, port: int, reload: bool) -> None:
         import uvicorn  # noqa: F401
     except ImportError:
         click.echo(
-            "FastAPI/uvicorn не установлены. Установите gostforge[api]:\n"
-            '  pip install -e ".[api]"',
+            'FastAPI/uvicorn не установлены. Установите gostforge[api]:\n  pip install -e ".[api]"',
             err=True,
         )
         sys.exit(2)
@@ -720,9 +700,7 @@ def serve(host: str, port: int, reload: bool) -> None:
 
 @main.command()
 @click.option("--limit", "-n", default=20, help="Сколько последних записей показать.")
-@click.option(
-    "--filename", "-f", default=None, help="Фильтр по имени файла (точное совпадение)."
-)
+@click.option("--filename", "-f", default=None, help="Фильтр по имени файла (точное совпадение).")
 @click.option(
     "--id",
     "submission_id",
@@ -769,12 +747,9 @@ def history(limit: int, filename: str | None, submission_id: int | None) -> None
                 f"{click.style(str(s.info_count), fg='cyan')}i"
             )
             click.echo(
-                f"  #{s.id:>4}  {s.created_at}  {severity_str}  "
-                f"[{s.profile_id}]  {s.filename}"
+                f"  #{s.id:>4}  {s.created_at}  {severity_str}  [{s.profile_id}]  {s.filename}"
             )
-        click.echo(
-            "\nДля деталей: gostforge history --id <N>"
-        )
+        click.echo("\nДля деталей: gostforge history --id <N>")
 
 
 @main.group()
@@ -810,9 +785,7 @@ def _default_author() -> str:
     default="anonymous",
     help="Роль автора (student/supervisor/anonymous).",
 )
-def comment_add(
-    submission_id: int, body: str, author: str | None, role: str
-) -> None:
+def comment_add(submission_id: int, body: str, author: str | None, role: str) -> None:
     """Добавить комментарий к submission.
 
     Пример:
@@ -876,9 +849,7 @@ def comment_list(submission_id: int, unresolved: bool) -> None:
             "anonymous": "bright_black",
         }.get(c.role, "white")
         role_label = click.style(f"[{c.role}]", fg=role_color)
-        status = (
-            click.style("✓", fg="green") if c.resolved else click.style("●", fg="yellow")
-        )
+        status = click.style("✓", fg="green") if c.resolved else click.style("●", fg="yellow")
         author = c.author or "—"
         click.echo(
             f"#{c.id} {status} {role_label} {author} "
@@ -908,9 +879,7 @@ def comment_resolve(comment_id: int, reopen: bool) -> None:
         )
         sys.exit(1)
     action = "переоткрыт" if reopen else "закрыт"
-    click.echo(
-        click.style(f"Комментарий #{comment_id} {action}.", fg="green", bold=True)
-    )
+    click.echo(click.style(f"Комментарий #{comment_id} {action}.", fg="green", bold=True))
 
 
 @comment.command("delete")
@@ -927,9 +896,7 @@ def comment_delete(comment_id: int) -> None:
             err=True,
         )
         sys.exit(1)
-    click.echo(
-        click.style(f"Комментарий #{comment_id} удалён.", fg="green", bold=True)
-    )
+    click.echo(click.style(f"Комментарий #{comment_id} удалён.", fg="green", bold=True))
 
 
 def _print_submission_details(sub: object) -> None:
@@ -949,17 +916,10 @@ def _print_submission_details(sub: object) -> None:
     else:
         click.echo("\n  Нарушения:")
         for v in sub.violations:  # type: ignore[attr-defined]
-            color = {"error": "red", "warning": "yellow", "info": "cyan"}.get(
-                v.severity, "white"
-            )
-            click.echo(
-                f"    {click.style(v.severity.upper(), fg=color)}  "
-                f"{v.code:>6}  {v.message}"
-            )
+            color = {"error": "red", "warning": "yellow", "info": "cyan"}.get(v.severity, "white")
+            click.echo(f"    {click.style(v.severity.upper(), fg=color)}  {v.code:>6}  {v.message}")
             if v.location:
-                click.echo(
-                    click.style(f"            {v.location}", fg="bright_black")
-                )
+                click.echo(click.style(f"            {v.location}", fg="bright_black"))
             if v.suggestion:
                 click.echo(click.style(f"          → {v.suggestion}", fg="green"))
 
@@ -987,9 +947,7 @@ def _print_submission_comments(submission_id: int) -> None:
             "anonymous": "bright_black",
         }.get(c.role, "white")
         role_label = click.style(f"[{c.role}]", fg=role_color)
-        status = (
-            click.style(" ✓", fg="green") if c.resolved else click.style(" ●", fg="yellow")
-        )
+        status = click.style(" ✓", fg="green") if c.resolved else click.style(" ●", fg="yellow")
         author = c.author or "—"
         click.echo(
             f"    #{c.id}{status}  {role_label}  {author}  "
@@ -1073,9 +1031,7 @@ def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
     errors_a = sum(1 for v in violations_a if v.severity == "error")
     errors_b = sum(1 for v in violations_b if v.severity == "error")
 
-    click.echo(
-        click.style("Профиль: ", bold=True) + profile + f" (v{prof.version})"
-    )
+    click.echo(click.style("Профиль: ", bold=True) + profile + f" (v{prof.version})")
     click.echo(
         click.style("A: ", bold=True)
         + f"{file_a.name} — {len(violations_a)} нарушений ({errors_a} ошибок)"
@@ -1090,17 +1046,13 @@ def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
         sys.exit(0)
 
     if fixed:
-        click.echo(
-            "\n"
-            + click.style(f"Исчезло нарушений: {len(fixed)}", fg="green", bold=True)
-        )
+        click.echo("\n" + click.style(f"Исчезло нарушений: {len(fixed)}", fg="green", bold=True))
         if not quiet:
             _print_violations_brief(fixed)
 
     if introduced:
         click.echo(
-            "\n"
-            + click.style(f"Появилось нарушений: {len(introduced)}", fg="red", bold=True)
+            "\n" + click.style(f"Появилось нарушений: {len(introduced)}", fg="red", bold=True)
         )
         if not quiet:
             _print_violations_brief(introduced)
@@ -1204,6 +1156,7 @@ def annotate(path: Path, output: Path, profile: str, style: str) -> None:
     красным цветом. Пометки уровня документа уходят в первый параграф.
     """
     from gostforge.annotator import annotate_docx
+
     try:
         prof = load_profile(profile)
     except FileNotFoundError as e:
@@ -1243,14 +1196,10 @@ def pdf(path: Path, output: Path, timeout: float) -> None:
         click.echo(f"Ошибка: {e}", err=True)
         sys.exit(3)
     except subprocess.TimeoutExpired:
-        click.echo(
-            f"Конвертация прервана по таймауту ({timeout}s)", err=True
-        )
+        click.echo(f"Конвертация прервана по таймауту ({timeout}s)", err=True)
         sys.exit(4)
     except subprocess.CalledProcessError as e:
-        click.echo(
-            f"LibreOffice вернул ошибку (код {e.returncode}):", err=True
-        )
+        click.echo(f"LibreOffice вернул ошибку (код {e.returncode}):", err=True)
         stderr = e.stderr or b""
         click.echo(stderr.decode("utf-8", errors="replace"), err=True)
         sys.exit(5)
@@ -1280,9 +1229,7 @@ def pdf(path: Path, output: Path, timeout: float) -> None:
     default=120.0,
     help="Таймаут конвертации в секундах.",
 )
-def convert_cmd(
-    path: Path, output: Path, target_format: str | None, timeout: float
-) -> None:
+def convert_cmd(path: Path, output: Path, target_format: str | None, timeout: float) -> None:
     """Сконвертировать документ в другой формат через LibreOffice.
 
     Главный сценарий — старый Word ``.doc`` → ``.docx`` (который
@@ -1310,21 +1257,15 @@ def convert_cmd(
         sys.exit(2)
 
     try:
-        result = convert_document(
-            path, output, target_format=fmt, timeout=timeout
-        )
+        result = convert_document(path, output, target_format=fmt, timeout=timeout)
     except LibreOfficeNotFoundError as e:
         click.echo(f"Ошибка: {e}", err=True)
         sys.exit(3)
     except subprocess.TimeoutExpired:
-        click.echo(
-            f"Конвертация прервана по таймауту ({timeout}s)", err=True
-        )
+        click.echo(f"Конвертация прервана по таймауту ({timeout}s)", err=True)
         sys.exit(4)
     except subprocess.CalledProcessError as e:
-        click.echo(
-            f"LibreOffice вернул ошибку (код {e.returncode}):", err=True
-        )
+        click.echo(f"LibreOffice вернул ошибку (код {e.returncode}):", err=True)
         stderr = e.stderr or b""
         click.echo(stderr.decode("utf-8", errors="replace"), err=True)
         sys.exit(5)
@@ -1415,9 +1356,7 @@ def new(
     default="empty",
     help="Тип шаблона (по умолчанию пустой каркас).",
 )
-@click.option(
-    "--title", type=str, default="Новая работа", help="Название работы."
-)
+@click.option("--title", type=str, default="Новая работа", help="Название работы.")
 @click.option("--author", type=str, default="", help="Автор.")
 @click.option(
     "--year",
@@ -1426,7 +1365,10 @@ def new(
     help="Год работы (по умолчанию текущий).",
 )
 @click.option(
-    "--profile", "profile_id", type=str, default="gost-7.32-2017",
+    "--profile",
+    "profile_id",
+    type=str,
+    default="gost-7.32-2017",
     help="Идентификатор профиля.",
 )
 @click.option(
@@ -1478,9 +1420,7 @@ def new_state_cmd(
             "sections": [
                 {
                     "heading": "Введение",
-                    "blocks": [
-                        {"kind": "paragraph", "text": ""}
-                    ],
+                    "blocks": [{"kind": "paragraph", "text": ""}],
                 },
                 {
                     "heading": "Список использованных источников",
@@ -1495,13 +1435,9 @@ def new_state_cmd(
         # содержимое, что и `gostforge new --template=X`, но в формате
         # для конструктора.
         if template == "coursework":
-            builder = coursework_template(
-                title=title, author=author, year=year
-            )
+            builder = coursework_template(title=title, author=author, year=year)
         elif template == "thesis":
-            builder = bachelor_thesis_template(
-                title=title, author=author, year=year
-            )
+            builder = bachelor_thesis_template(title=title, author=author, year=year)
         else:  # research_report
             builder = research_report_template(title=title, year=year)
         document = builder.build()
@@ -1535,9 +1471,7 @@ def new_state_cmd(
     default=None,
     help="Профиль для экспорта. По умолчанию — из state.json (profile_id).",
 )
-def generate_cmd(
-    state_path: Path, output: Path, profile_override: str | None
-) -> None:
+def generate_cmd(state_path: Path, output: Path, profile_override: str | None) -> None:
     """Сгенерировать .docx из JSON-state конструктора.
 
     Это зеркало команды ``import-docx``: вместе они образуют полный
@@ -1591,7 +1525,8 @@ def generate_cmd(
     help="Куда сохранить .html.",
 )
 @click.option(
-    "--standalone/--fragment", default=True,
+    "--standalone/--fragment",
+    default=True,
     help="standalone — полный HTML с CSS; fragment — только <body>-контент.",
 )
 def export_html_cmd(state_path: Path, output: Path, standalone: bool) -> None:
@@ -1691,9 +1626,7 @@ def _state_to_html(state: dict[str, Any], *, standalone: bool = True) -> str:
     return "\n".join(parts) + "\n"
 
 
-def _section_to_html(
-    section: dict[str, Any], *, depth: int, parts: list[str]
-) -> None:
+def _section_to_html(section: dict[str, Any], *, depth: int, parts: list[str]) -> None:
     import html as html_mod  # noqa: PLC0415
 
     heading = (section.get("heading") or "").strip() or "(без названия)"
@@ -1758,19 +1691,14 @@ def _block_to_html(block: dict[str, Any], *, parts: list[str]) -> None:
         caption = block.get("caption", "")
         parts.append("<figure>")
         if path:
-            parts.append(
-                f'  <img src="{html_mod.escape(path)}" '
-                f'alt="{html_mod.escape(caption)}">'
-            )
+            parts.append(f'  <img src="{html_mod.escape(path)}" alt="{html_mod.escape(caption)}">')
         if caption:
             parts.append(f"  <figcaption>{html_mod.escape(caption)}</figcaption>")
         parts.append("</figure>")
     elif kind == "formula":
         latex = block.get("latex", "")
         if latex:
-            parts.append(
-                f'<div class="formula">$$ {html_mod.escape(latex)} $$</div>'
-            )
+            parts.append(f'<div class="formula">$$ {html_mod.escape(latex)} $$</div>')
 
 
 def _paragraph_to_html_inline(block: dict[str, Any]) -> str:
@@ -1876,9 +1804,7 @@ def _state_to_markdown(state: dict[str, Any]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _section_to_md(
-    section: dict[str, Any], *, depth: int, lines: list[str]
-) -> None:
+def _section_to_md(section: dict[str, Any], *, depth: int, lines: list[str]) -> None:
     """Записать один раздел и его потомков в lines.
 
     ``depth`` — уровень заголовка (1=#, 2=##, ...). Top-level разделы
@@ -1928,9 +1854,7 @@ def _paragraph_to_md(block: dict[str, Any]) -> str:
             elif r.get("kind") == "citation":
                 sid = r.get("source_id", "")
                 page = r.get("page", "")
-                out_parts.append(
-                    f"[{sid}, с. {page}]" if page else f"[{sid}]"
-                )
+                out_parts.append(f"[{sid}, с. {page}]" if page else f"[{sid}]")
             elif r.get("kind") == "xref":
                 # xref в Markdown ёще нет нативного аналога — кладём
                 # placeholder. import-md его обратно не превратит,
@@ -2007,7 +1931,9 @@ def _block_to_md(block: dict[str, Any], *, lines: list[str]) -> None:
 @main.command("stats-state")
 @click.argument("state_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
-    "--json", "as_json", is_flag=True,
+    "--json",
+    "as_json",
+    is_flag=True,
     help="Вывод в JSON (для скриптов). По умолчанию — таблица.",
 )
 def stats_state_cmd(state_path: Path, as_json: bool) -> None:
@@ -2065,7 +1991,9 @@ def stats_state_cmd(state_path: Path, as_json: bool) -> None:
 @main.command("check-state")
 @click.argument("state_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
-    "--json", "as_json", is_flag=True,
+    "--json",
+    "as_json",
+    is_flag=True,
     help="Вывод в JSON (для скриптов).",
 )
 @click.option(
@@ -2075,9 +2003,7 @@ def stats_state_cmd(state_path: Path, as_json: bool) -> None:
     default=None,
     help="Профиль для проверки. По умолчанию — из state.profile_id.",
 )
-def check_state_cmd(
-    state_path: Path, as_json: bool, profile_override: str | None
-) -> None:
+def check_state_cmd(state_path: Path, as_json: bool, profile_override: str | None) -> None:
     """Прогон нормоконтроля над state-файлом без сохранения в .docx.
 
     Использует тот же путь, что и live-нормоконтроль в UI: state →
@@ -2147,12 +2073,9 @@ def check_state_cmd(
     "--output",
     type=click.Path(path_type=Path),
     default=None,
-    help="Куда восстановить version (для подкоманды 'restore'). "
-    "По умолчанию — рядом с оригиналом.",
+    help="Куда восстановить version (для подкоманды 'restore'). По умолчанию — рядом с оригиналом.",
 )
-def state_versions_cmd(
-    subcommand: str, version: str | None, output: Path | None
-) -> None:
+def state_versions_cmd(subcommand: str, version: str | None, output: Path | None) -> None:
     """Управление версиями state-файлов конструктора.
 
     Версии создаются автоматически каждые 5 минут активной работы
@@ -2195,8 +2118,7 @@ def state_versions_cmd(
     # subcommand == "restore"
     if not version:
         click.echo(
-            "Для 'restore' нужен аргумент <filename> "
-            "(см. 'gostforge state-versions list').",
+            "Для 'restore' нужен аргумент <filename> (см. 'gostforge state-versions list').",
             err=True,
         )
         sys.exit(2)
@@ -2238,9 +2160,7 @@ def state_versions_cmd(
     default=None,
     help="Применить только указанные фиксеры (через запятую, например 'T.08,T.09').",
 )
-def apply_fixes_cmd(
-    state_path: Path, output: Path, only: str | None
-) -> None:
+def apply_fixes_cmd(state_path: Path, output: Path, only: str | None) -> None:
     """Применить автофиксы к state и сохранить результат.
 
     Цикл: state → собрать docx → парсить → fixer.fix() → новый state.
@@ -2374,9 +2294,7 @@ def diff_state_cmd(state_a: Path, state_b: Path, mode: str) -> None:
             click.echo(f"    ~ {entry['heading']}: {entry['summary']}")
 
 
-def _state_diff_summary(
-    a: dict[str, Any], b: dict[str, Any]
-) -> dict[str, Any]:
+def _state_diff_summary(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
     """Сравнить два state-словаря, вернуть структуру изменений.
 
     Маппит разделы по индексу и по заголовку: если в обоих state
@@ -2392,12 +2310,8 @@ def _state_diff_summary(
 
     a_sections = a.get("sections") or []
     b_sections = b.get("sections") or []
-    a_by_heading = {
-        (s.get("heading") or f"#{i}"): s for i, s in enumerate(a_sections)
-    }
-    b_by_heading = {
-        (s.get("heading") or f"#{i}"): s for i, s in enumerate(b_sections)
-    }
+    a_by_heading = {(s.get("heading") or f"#{i}"): s for i, s in enumerate(a_sections)}
+    b_by_heading = {(s.get("heading") or f"#{i}"): s for i, s in enumerate(b_sections)}
 
     a_keys = set(a_by_heading)
     b_keys = set(b_by_heading)
@@ -2446,11 +2360,16 @@ def _compare_sections(a: dict[str, Any], b: dict[str, Any]) -> str:
     help="Куда сохранить JSON-state.",
 )
 @click.option(
-    "--title", type=str, default=None,
+    "--title",
+    type=str,
+    default=None,
     help="Название работы (по умолчанию — из первого # заголовка).",
 )
 @click.option(
-    "--profile", "profile_id", type=str, default="gost-7.32-2017",
+    "--profile",
+    "profile_id",
+    type=str,
+    default="gost-7.32-2017",
     help="Идентификатор профиля.",
 )
 def import_md_cmd(
@@ -2516,9 +2435,7 @@ def _parse_md_inline(text: str) -> list[dict[str, Any]]:
         if m.start() > last_end:
             runs.append({"kind": "text", "text": text[last_end : m.start()]})
         if m.group(2) is not None:
-            runs.append(
-                {"kind": "text", "text": m.group(2), "bold": True, "italic": True}
-            )
+            runs.append({"kind": "text", "text": m.group(2), "bold": True, "italic": True})
         elif m.group(3) is not None:
             runs.append({"kind": "text", "text": m.group(3), "bold": True})
         elif m.group(4) is not None:
@@ -2605,8 +2522,10 @@ def _markdown_to_state(
             continue
 
         # GFM-таблица: строка из | ... |, следом разделитель |---|, следом данные.
-        if stripped.startswith("|") and i + 1 < len(lines) and re.match(
-            r"^\|[\s\-:|]+\|\s*$", lines[i + 1].strip()
+        if (
+            stripped.startswith("|")
+            and i + 1 < len(lines)
+            and re.match(r"^\|[\s\-:|]+\|\s*$", lines[i + 1].strip())
         ):
             blocks = current_blocks()
             if blocks is None:
@@ -2657,18 +2576,12 @@ def _markdown_to_state(
                 else:
                     break
             # bibliography-секция: items → references.
-            if (
-                section_stack
-                and section_stack[-1][1].get("is_bibliography")
-                and ordered
-            ):
+            if section_stack and section_stack[-1][1].get("is_bibliography") and ordered:
                 section_stack[-1][1].setdefault("references", []).extend(items)
             else:
                 blocks = current_blocks()
                 if blocks is not None:
-                    blocks.append(
-                        {"kind": "list", "ordered": ordered, "items": items}
-                    )
+                    blocks.append({"kind": "list", "ordered": ordered, "items": items})
             continue
 
         # Figure: ![caption](path).
@@ -2693,9 +2606,7 @@ def _markdown_to_state(
                 # Если параграф содержит rich-markdown (** / *), разбираем
                 # в runs. Иначе кладём как простой text.
                 runs = _parse_md_inline(stripped)
-                if runs and any(
-                    r.get("bold") or r.get("italic") for r in runs
-                ):
+                if runs and any(r.get("bold") or r.get("italic") for r in runs):
                     blocks.append({"kind": "paragraph", "runs": runs})
                 else:
                     blocks.append({"kind": "paragraph", "text": stripped})
@@ -2752,9 +2663,7 @@ def import_docx_cmd(path: Path, output: Path) -> None:
     rid_to_path = extract_embedded_images(path, images_dir)
     if rid_to_path:
         remap_embedded_image_paths_in_state(state, rid_to_path)
-    output.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    output.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     n_sec = len(state.get("sections", []))
     n_img = len(rid_to_path)
     msg = f"Разложено {n_sec} разделов в {output}."
@@ -2786,9 +2695,7 @@ def import_docx_cmd(path: Path, output: Path) -> None:
     default=None,
     help="Название работы. По умолчанию — имя файла.",
 )
-def import_pdf_cmd(
-    path: Path, output: Path, profile_id: str, title: str | None
-) -> None:
+def import_pdf_cmd(path: Path, output: Path, profile_id: str, title: str | None) -> None:
     """Извлечь структуру PDF в JSON-state конструктора.
 
     Полезно, когда исходник работы есть только в PDF: вытаскивает
@@ -2813,16 +2720,12 @@ def import_pdf_cmd(
     )
 
     try:
-        state = import_pdf_to_state(
-            path, profile_id=profile_id, title=title
-        )
+        state = import_pdf_to_state(path, profile_id=profile_id, title=title)
     except PdfImportError as e:
         click.echo(f"Ошибка импорта PDF: {e}", err=True)
         sys.exit(3)
 
-    output.write_text(
-        json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+    output.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     n_sec = len(state.get("sections", []))
     click.echo(
         f"Извлечено {n_sec} разделов из PDF → {output}. "

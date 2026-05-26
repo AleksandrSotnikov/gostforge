@@ -32,35 +32,111 @@ from ..engine import Violation, register
 # написания). Используется для определения паттерна «число + единица».
 _SI_UNITS = (
     # Длина
-    "мм", "см", "дм", "м", "км",
-    "нм", "мкм",
-    "mm", "cm", "m", "km",
+    "мм",
+    "см",
+    "дм",
+    "м",
+    "км",
+    "нм",
+    "мкм",
+    "mm",
+    "cm",
+    "m",
+    "km",
     # Масса
-    "мкг", "мг", "г", "кг", "т",
-    "g", "kg", "t",
+    "мкг",
+    "мг",
+    "г",
+    "кг",
+    "т",
+    "g",
+    "kg",
+    "t",
     # Время
-    "мс", "мкс", "нс", "с", "мин", "ч", "сут",
-    "ms", "s", "min", "h",
+    "мс",
+    "мкс",
+    "нс",
+    "с",
+    "мин",
+    "ч",
+    "сут",
+    "ms",
+    "s",
+    "min",
+    "h",
     # Площадь и объём
-    "м²", "м³", "см²", "см³", "л", "мл",
+    "м²",
+    "м³",
+    "см²",
+    "см³",
+    "л",
+    "мл",
     # Электрические
-    "В", "мВ", "кВ", "А", "мА", "Ом", "Ω", "Вт", "кВт", "МВт",
-    "V", "mV", "kV", "A", "mA", "W", "kW", "MW",
+    "В",
+    "мВ",
+    "кВ",
+    "А",
+    "мА",
+    "Ом",
+    "Ω",
+    "Вт",
+    "кВт",
+    "МВт",
+    "V",
+    "mV",
+    "kV",
+    "A",
+    "mA",
+    "W",
+    "kW",
+    "MW",
     # Температура
-    "°C", "°F", "K", "°К",
+    "°C",
+    "°F",
+    "K",
+    "°К",
     # Давление
-    "Па", "кПа", "МПа", "ГПа", "бар", "атм",
-    "Pa", "kPa", "MPa", "bar", "atm",
+    "Па",
+    "кПа",
+    "МПа",
+    "ГПа",
+    "бар",
+    "атм",
+    "Pa",
+    "kPa",
+    "MPa",
+    "bar",
+    "atm",
     # Частота
-    "Гц", "кГц", "МГц", "ГГц",
-    "Hz", "kHz", "MHz", "GHz",
+    "Гц",
+    "кГц",
+    "МГц",
+    "ГГц",
+    "Hz",
+    "kHz",
+    "MHz",
+    "GHz",
     # Информатика
-    "бит", "Б", "кБ", "МБ", "ГБ", "ТБ",
-    "bit", "B", "KB", "MB", "GB", "TB",
+    "бит",
+    "Б",
+    "кБ",
+    "МБ",
+    "ГБ",
+    "ТБ",
+    "bit",
+    "B",
+    "KB",
+    "MB",
+    "GB",
+    "TB",
     # Проценты и доли
-    "%", "‰", "ppm",
+    "%",
+    "‰",
+    "ppm",
     # Углы
-    "°", "рад", "град",
+    "°",
+    "рад",
+    "град",
 )
 
 # Распознаваемые «нестандартные» написания, которые должны быть приведены
@@ -98,9 +174,7 @@ def _all_paragraphs(document: Document) -> list[Paragraph]:
 
 
 def _paragraph_text(paragraph: Paragraph) -> str:
-    return "".join(
-        el.text for el in paragraph.content if isinstance(el, TextRun)
-    )
+    return "".join(el.text for el in paragraph.content if isinstance(el, TextRun))
 
 
 def _preview(text: str, limit: int = 50) -> str:
@@ -134,9 +208,7 @@ _RE_UNIT_WITH_TRAILING_DOT = re.compile(
 
 
 @register("U.01")
-def check_nbsp_between_number_and_unit(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_nbsp_between_number_and_unit(document: Document, profile: Profile) -> list[Violation]:
     """Между числом и единицей измерения должен быть неразрывный пробел.
 
     По ГОСТ Р 8.000-2015 (СИ) число и обозначение единицы пишутся через
@@ -180,9 +252,7 @@ def check_nbsp_between_number_and_unit(
 
 
 @register("U.02")
-def check_no_punctuation_before_unit(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_no_punctuation_before_unit(document: Document, profile: Profile) -> list[Violation]:
     """Между числом и единицей не должно быть знака препинания.
 
     Запрещено: «10.кг», «50,%», «20.°C».
@@ -207,9 +277,7 @@ def check_no_punctuation_before_unit(
                         f"между числом и единицей не должно быть «{punct}»"
                     ),
                     location=f"paragraph[{paragraph.id}]",
-                    suggestion=(
-                        f"Заменить на «{num} {unit}» (с неразрывным пробелом)"
-                    ),
+                    suggestion=(f"Заменить на «{num} {unit}» (с неразрывным пробелом)"),
                     details={
                         "paragraph_id": paragraph.id,
                         "punct": punct,
@@ -221,9 +289,7 @@ def check_no_punctuation_before_unit(
 
 
 @register("U.03")
-def check_unit_no_trailing_dot(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_unit_no_trailing_dot(document: Document, profile: Profile) -> list[Violation]:
     """Единицы измерения СИ пишутся без точки в конце.
 
     Допустимо: «10 кг», «20 м», «5 с».
@@ -269,9 +335,7 @@ def check_unit_no_trailing_dot(
                         f"точка после единицы измерения «{unit}» не ставится"
                     ),
                     location=f"paragraph[{paragraph.id}]",
-                    suggestion=(
-                        f"Заменить «{unit}.» на «{unit}»"
-                    ),
+                    suggestion=(f"Заменить «{unit}.» на «{unit}»"),
                     details={
                         "paragraph_id": paragraph.id,
                         "unit": unit,

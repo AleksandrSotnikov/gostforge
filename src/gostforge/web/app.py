@@ -25,7 +25,7 @@ try:
     import streamlit as st
 except ImportError as exc:  # pragma: no cover - проверяется при отсутствии пакета
     raise ImportError(
-        "Установите gostforge[ui] для веб-интерфейса: pip install -e \".[ui]\""
+        'Установите gostforge[ui] для веб-интерфейса: pip install -e ".[ui]"'
     ) from exc
 
 from gostforge import __version__
@@ -133,9 +133,7 @@ def _render_stats_table(name: str, document: Document) -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
-def _build_report_bytes(
-    results: dict[str, list[Violation]], profile_id: str, fmt: str
-) -> bytes:
+def _build_report_bytes(results: dict[str, list[Violation]], profile_id: str, fmt: str) -> bytes:
     """Сгенерировать отчёт во временный файл и вернуть его байты."""
     suffix = ".md" if fmt == "markdown" else ".xlsx"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -170,9 +168,7 @@ def _render_sidebar(profiles: list[str]) -> str:
         f"**Будет запущено:** {len(runnable)} из {len(enabled_codes)} включённых"
     )
     if skipped:
-        st.sidebar.warning(
-            "Не реализованы: " + ", ".join(sorted(skipped))
-        )
+        st.sidebar.warning("Не реализованы: " + ", ".join(sorted(skipped)))
 
     with st.sidebar.expander("Показать параметры профиля"):
         st.json(json.loads(prof.model_dump_json()))
@@ -347,9 +343,7 @@ def _render_main(profile_id: str) -> None:
         _render_pdf_tab(uploads)
 
     total = sum(len(v) for v in results.values())
-    st.markdown(
-        f"**Итого:** проверено файлов {len(results)}, всего нарушений {total}."
-    )
+    st.markdown(f"**Итого:** проверено файлов {len(results)}, всего нарушений {total}.")
 
     col_md, col_xlsx = st.columns(2)
     with col_md:
@@ -441,9 +435,7 @@ def _render_builder_mode() -> None:
         "Шаблон",
         options=list(_TEMPLATE_LABELS.keys()),
         format_func=lambda key: _TEMPLATE_LABELS[key],
-        help=(
-            "Скелет работы: какие разделы будут предзаполнены плейсхолдерами."
-        ),
+        help=("Скелет работы: какие разделы будут предзаполнены плейсхолдерами."),
     )
 
     title = st.sidebar.text_input(
@@ -482,8 +474,7 @@ def _render_builder_mode() -> None:
     )
 
     st.markdown(
-        f"**Шаблон:** {_TEMPLATE_LABELS[template_id]}\n\n"
-        f"**Название:** {title or '_(не указано)_'}"
+        f"**Шаблон:** {_TEMPLATE_LABELS[template_id]}\n\n**Название:** {title or '_(не указано)_'}"
     )
 
     if not title.strip():
@@ -508,9 +499,7 @@ def _render_builder_mode() -> None:
             "Скачать болванку",
             data=data,
             file_name=f"{template_id}.docx",
-            mime=(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ),
+            mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
             key=f"download_builder_{template_id}",
         )
 

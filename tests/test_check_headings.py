@@ -16,9 +16,7 @@ from gostforge.validator.engine import registered_checks
 
 def _doc(sections: list[LogicalSection]) -> Document:
     doc = Document()
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=list(sections))
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=list(sections)))
     return doc
 
 
@@ -52,9 +50,7 @@ def test_h01_registered() -> None:
 
 
 def test_h01_correct_heading_no_violation() -> None:
-    doc = _doc(
-        [_heading("ВВЕДЕНИЕ", font="Times New Roman", size_pt=14, bold=True)]
-    )
+    doc = _doc([_heading("ВВЕДЕНИЕ", font="Times New Roman", size_pt=14, bold=True)])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.01"]
     assert found == []
@@ -110,36 +106,28 @@ def test_h02_correct_heading_no_violation() -> None:
 
     По профилю heading_2: TNR, 14pt, bold, без uppercase.
     """
-    doc = _doc(
-        [_heading("Подраздел", level=2, font="Times New Roman", size_pt=14, bold=True)]
-    )
+    doc = _doc([_heading("Подраздел", level=2, font="Times New Roman", size_pt=14, bold=True)])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
     assert found == []
 
 
 def test_h02_wrong_font_violation() -> None:
-    doc = _doc(
-        [_heading("Подраздел", level=2, font="Arial", size_pt=14, bold=True)]
-    )
+    doc = _doc([_heading("Подраздел", level=2, font="Arial", size_pt=14, bold=True)])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
     assert any("Arial" in v.message for v in found)
 
 
 def test_h02_wrong_size_violation() -> None:
-    doc = _doc(
-        [_heading("Подраздел", level=2, font="Times New Roman", size_pt=12, bold=True)]
-    )
+    doc = _doc([_heading("Подраздел", level=2, font="Times New Roman", size_pt=12, bold=True)])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
     assert any("12" in v.message for v in found)
 
 
 def test_h02_not_bold_violation() -> None:
-    doc = _doc(
-        [_heading("Подраздел", level=2, font="Times New Roman", size_pt=14, bold=False)]
-    )
+    doc = _doc([_heading("Подраздел", level=2, font="Times New Roman", size_pt=14, bold=False)])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
     assert any("полужирным" in v.message for v in found)
@@ -183,11 +171,12 @@ def test_h02_traverses_nested_sections() -> None:
 
 def test_h02_uppercase_param_enforced() -> None:
     """Если в профиле heading_2.uppercase=True — заголовок должен быть в верхнем регистре."""
-    doc = _doc(
-        [_heading("Подраздел", level=2, font="Times New Roman", size_pt=14, bold=True)]
-    )
+    doc = _doc([_heading("Подраздел", level=2, font="Times New Roman", size_pt=14, bold=True)])
     profile = load_profile("gost-7.32-2017")
-    profile.styles.extra["heading_2"] = {**profile.styles.extra.get("heading_2", {}), "uppercase": True}
+    profile.styles.extra["heading_2"] = {
+        **profile.styles.extra.get("heading_2", {}),
+        "uppercase": True,
+    }
     found = [v for v in validate(doc, profile) if v.check_code == "H.02"]
     assert any("верхнем регистре" in v.message for v in found)
 
@@ -400,9 +389,7 @@ def test_h04_sublevels_ignored() -> None:
     outer1 = LogicalSection(
         id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[inner1, inner2]
     )
-    outer2 = LogicalSection(
-        id="o2", level=1, heading=[TextRun(text="2 Проект")]
-    )
+    outer2 = LogicalSection(id="o2", level=1, heading=[TextRun(text="2 Проект")])
     doc = _doc([outer1, outer2])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.04"]
@@ -418,9 +405,7 @@ def test_h05_registered() -> None:
 
 def test_h05_correct_hierarchy_no_violation() -> None:
     inner = _heading("1.1 Подраздел", level=2)
-    outer = LogicalSection(
-        id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[inner]
-    )
+    outer = LogicalSection(id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[inner])
     doc = _doc([outer])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.05"]
@@ -430,9 +415,7 @@ def test_h05_correct_hierarchy_no_violation() -> None:
 def test_h05_skip_level_violation() -> None:
     """После level=1 сразу level=3 — нарушение."""
     deep = _heading("1.1.1 Глубокий", level=3)
-    outer = LogicalSection(
-        id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[deep]
-    )
+    outer = LogicalSection(id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[deep])
     doc = _doc([outer])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.05"]
@@ -444,12 +427,8 @@ def test_h05_multiple_skips_violations() -> None:
     """Каждый перескок — отдельный Violation."""
     deep_a = _heading("Глубокий A", level=3)
     deep_b = _heading("Глубокий B", level=3)
-    outer_a = LogicalSection(
-        id="oa", level=1, heading=[TextRun(text="A")], children=[deep_a]
-    )
-    outer_b = LogicalSection(
-        id="ob", level=1, heading=[TextRun(text="B")], children=[deep_b]
-    )
+    outer_a = LogicalSection(id="oa", level=1, heading=[TextRun(text="A")], children=[deep_a])
+    outer_b = LogicalSection(id="ob", level=1, heading=[TextRun(text="B")], children=[deep_b])
     doc = _doc([outer_a, outer_b])
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "H.05"]
@@ -459,9 +438,7 @@ def test_h05_multiple_skips_violations() -> None:
 def test_h05_decrease_level_ok() -> None:
     """Сначала level=2, потом level=1 — это нормально (уменьшение разрешено)."""
     inner = _heading("1.1 Подраздел", level=2)
-    outer1 = LogicalSection(
-        id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[inner]
-    )
+    outer1 = LogicalSection(id="o1", level=1, heading=[TextRun(text="1 Анализ")], children=[inner])
     outer2 = LogicalSection(id="o2", level=1, heading=[TextRun(text="2 Проект")])
     doc = _doc([outer1, outer2])
     profile = load_profile("gost-7.32-2017")

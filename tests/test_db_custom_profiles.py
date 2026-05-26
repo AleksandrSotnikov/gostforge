@@ -27,7 +27,7 @@ def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return p
 
 
-_VALID_YAML = '''
+_VALID_YAML = """
 id: kafedra-prog-2026
 name: Программирование 2026 (моя кафедра)
 version: "1.0"
@@ -39,14 +39,14 @@ checks:
     severity: error
     params:
       body_size: 12
-'''
+"""
 
 
-_MINIMAL_YAML = '''
+_MINIMAL_YAML = """
 id: minimal-test
 name: Минимальный
 version: "1.0"
-'''
+"""
 
 
 # --- Миграция --------------------------------------------------------------
@@ -57,9 +57,7 @@ def test_migration_v2_creates_custom_profiles_table(db_path: Path) -> None:
         assert current_schema_version(conn) >= 2
         tables = {
             r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         assert "custom_profiles" in tables
 
@@ -89,7 +87,7 @@ def test_install_rejects_yaml_without_required_fields(db_path: Path) -> None:
         with pytest.raises(ValueError, match="валидацию"):
             install_profile(
                 conn,
-                yaml_content='description: только описание\n',
+                yaml_content="description: только описание\n",
             )
 
 
@@ -111,8 +109,8 @@ def test_install_overwrite_updates_existing(db_path: Path) -> None:
     with get_connection() as conn:
         rec1 = install_profile(conn, yaml_content=_VALID_YAML, source="manual")
         updated_yaml = _VALID_YAML.replace(
-            'name: Программирование 2026 (моя кафедра)',
-            'name: Обновлённое имя',
+            "name: Программирование 2026 (моя кафедра)",
+            "name: Обновлённое имя",
         )
         rec2 = install_profile(
             conn, yaml_content=updated_yaml, source="github.com/...", overwrite=True
@@ -214,9 +212,9 @@ def test_is_custom_profile_returns_correct_flag(db_path: Path) -> None:
 def test_custom_profile_overrides_builtin_with_same_id(db_path: Path) -> None:
     """Если custom-профиль имеет id builtin — приоритет custom."""
     # Создаём YAML с id одноимённым builtin, но другим именем.
-    override = _VALID_YAML.replace(
-        "id: kafedra-prog-2026", "id: gost-7.32-2017"
-    ).replace("extends: gost-7.32-2017\n", "")
+    override = _VALID_YAML.replace("id: kafedra-prog-2026", "id: gost-7.32-2017").replace(
+        "extends: gost-7.32-2017\n", ""
+    )
     with get_connection() as conn:
         install_profile(conn, yaml_content=override)
     p = load_profile("gost-7.32-2017")

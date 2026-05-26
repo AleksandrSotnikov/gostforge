@@ -99,9 +99,7 @@ def test_t01_recurses_into_logical_sections() -> None:
     )
     section = LogicalSection(id="s1", level=1, children=[wrong_para])
     doc = Document()
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=[section])
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[section]))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.01"]
     assert len(found) == 1
@@ -385,16 +383,10 @@ def test_t07_three_empty_paragraphs_at_end_violation() -> None:
 
 def test_t07_chain_resets_across_logical_section_boundary() -> None:
     """Пустой абзац в конце одного раздела и в начале следующего — не цепочка."""
-    sec_a = LogicalSection(
-        id="a", level=1, children=[_text_para("a1"), _empty_para("a2")]
-    )
-    sec_b = LogicalSection(
-        id="b", level=1, children=[_empty_para("b1"), _text_para("b2")]
-    )
+    sec_a = LogicalSection(id="a", level=1, children=[_text_para("a1"), _empty_para("a2")])
+    sec_b = LogicalSection(id="b", level=1, children=[_empty_para("b1"), _text_para("b2")])
     doc = Document()
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=[sec_a, sec_b])
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[sec_a, sec_b]))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.07"]
     assert found == []
@@ -628,7 +620,7 @@ def test_t10_single_ascii_quote_violation() -> None:
     """Непарная ASCII-кавычка — отдельное сообщение."""
     paragraph = Paragraph(
         id="p1",
-        content=[TextRun(text='Незакрытая кавычка тут.')],
+        content=[TextRun(text="Незакрытая кавычка тут.")],
         style_name="Normal",
     )
     paragraph.content = [TextRun(text='Незакрытая " тут.')]
@@ -645,7 +637,7 @@ def test_t10_quotes_split_across_runs_still_caught() -> None:
         id="p1",
         content=[
             TextRun(text='Начало "', bold=False),
-            TextRun(text='слово', bold=True),
+            TextRun(text="слово", bold=True),
             TextRun(text='" конец.', bold=False),
         ],
         style_name="Normal",
@@ -943,9 +935,7 @@ def test_t06_registered() -> None:
 
 def test_t06_hyphenation_disabled_no_violation() -> None:
     doc = Document(auto_hyphenation=False)
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", page=PageGeometry())
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", page=PageGeometry()))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.06"]
     assert found == []
@@ -953,9 +943,7 @@ def test_t06_hyphenation_disabled_no_violation() -> None:
 
 def test_t06_hyphenation_enabled_violation() -> None:
     doc = Document(auto_hyphenation=True)
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", page=PageGeometry())
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", page=PageGeometry()))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.06"]
     assert len(found) == 1
@@ -965,9 +953,7 @@ def test_t06_hyphenation_enabled_violation() -> None:
 def test_t06_none_value_skipped() -> None:
     """None означает «не определено» — проверка не применяется."""
     doc = Document(auto_hyphenation=None)
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", page=PageGeometry())
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", page=PageGeometry()))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "T.06"]
     assert found == []

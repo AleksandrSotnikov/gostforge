@@ -348,7 +348,9 @@ class DocumentMetadata:
     organization: str = ""
     department: str = ""
     year: int | None = None
-    work_type: Literal["coursework", "bachelor_thesis", "master_thesis", "research_report", "other"] = "other"
+    work_type: Literal[
+        "coursework", "bachelor_thesis", "master_thesis", "research_report", "other"
+    ] = "other"
 
 
 @dataclass

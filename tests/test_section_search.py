@@ -27,9 +27,7 @@ def test_query_matches_heading() -> None:
 def test_query_matches_paragraph_text() -> None:
     sec = {
         "heading": "Глава 1",
-        "blocks": [
-            {"kind": "paragraph", "text": "Алгоритм Дейкстры используется"}
-        ],
+        "blocks": [{"kind": "paragraph", "text": "Алгоритм Дейкстры используется"}],
     }
     assert _section_matches_query(sec, "дейкстры")
     assert not _section_matches_query(sec, "флойда")

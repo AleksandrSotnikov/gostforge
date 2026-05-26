@@ -88,10 +88,7 @@ def test_get_connection_initializes_schema(db_path: Path) -> None:
     assert current_schema_version(conn) >= 1
     # Таблицы созданы.
     tables = {
-        r[0]
-        for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()
+        r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
     assert {"submissions", "violations", "schema_version"} <= tables
     conn.close()
@@ -109,16 +106,12 @@ def test_get_connection_idempotent(db_path: Path) -> None:
     """Повторное открытие на той же БД не делает дублирующих миграций."""
     conn1 = get_connection()
     initial_version = current_schema_version(conn1)
-    initial_count = conn1.execute(
-        "SELECT COUNT(*) FROM schema_version"
-    ).fetchone()[0]
+    initial_count = conn1.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0]
     conn1.close()
 
     conn2 = get_connection()
     assert current_schema_version(conn2) == initial_version
-    final_count = conn2.execute(
-        "SELECT COUNT(*) FROM schema_version"
-    ).fetchone()[0]
+    final_count = conn2.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0]
     assert final_count == initial_count
     conn2.close()
 
@@ -332,9 +325,7 @@ def test_submission_dataclass_round_trip(db_path: Path) -> None:
 def test_can_be_used_as_context_manager(db_path: Path) -> None:
     """sqlite3.Connection поддерживает with — commit на выходе."""
     with get_connection() as conn:
-        record_submission(
-            conn, filename="x.docx", profile_id="x", violations=[]
-        )
+        record_submission(conn, filename="x.docx", profile_id="x", violations=[])
     # Открываем заново — запись на месте.
     with get_connection() as conn:
         items = list_submissions(conn)

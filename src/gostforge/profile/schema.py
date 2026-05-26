@@ -372,8 +372,7 @@ def _deep_merge(parent: Any, child: Any) -> Any:
 
 # Поля, которые должны браться у ребёнка как есть (не сливаются),
 # потому что идентифицируют сам профиль.
-_CHILD_OVERRIDE_FIELDS = {"id", "name", "version", "extends", "effective_from",
-                          "effective_until"}
+_CHILD_OVERRIDE_FIELDS = {"id", "name", "version", "extends", "effective_from", "effective_until"}
 
 
 def _merge_profile(parent: Profile, child: Profile) -> Profile:

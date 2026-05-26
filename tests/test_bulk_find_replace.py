@@ -16,9 +16,7 @@ def test_replace_in_paragraph_text() -> None:
         "sections": [
             {
                 "heading": "X",
-                "blocks": [
-                    {"kind": "paragraph", "text": "БД используется для БД."}
-                ],
+                "blocks": [{"kind": "paragraph", "text": "БД используется для БД."}],
             }
         ]
     }
@@ -129,9 +127,7 @@ def test_replace_in_subsections() -> None:
                 "subsections": [
                     {
                         "heading": "Подраздел про foo",
-                        "blocks": [
-                            {"kind": "paragraph", "text": "foo bar"}
-                        ],
+                        "blocks": [{"kind": "paragraph", "text": "foo bar"}],
                     }
                 ],
             }

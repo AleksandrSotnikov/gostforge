@@ -172,12 +172,7 @@ def test_filter_with_violation_without_location() -> None:
 
 
 def test_skip_checks_adds_codes() -> None:
-    b = (
-        work("X", year=2026)
-        .section("Титул")
-        .paragraph("p")
-        .skip_checks("T.01", "H.01")
-    )
+    b = work("X", year=2026).section("Титул").paragraph("p").skip_checks("T.01", "H.01")
     doc = b.build()
     sec = doc.page_sections[0].content[0]
     assert isinstance(sec, LogicalSection)
@@ -185,37 +180,21 @@ def test_skip_checks_adds_codes() -> None:
 
 
 def test_skip_checks_deduplicates() -> None:
-    b = (
-        work("X", year=2026)
-        .section("Титул")
-        .paragraph("p")
-        .skip_checks("T.01", "T.01", "H.01")
-    )
+    b = work("X", year=2026).section("Титул").paragraph("p").skip_checks("T.01", "T.01", "H.01")
     doc = b.build()
     sec = doc.page_sections[0].content[0]
     assert sec.disabled_checks == ["H.01", "T.01"]
 
 
 def test_skip_checks_multiple_calls_accumulate() -> None:
-    b = (
-        work("X", year=2026)
-        .section("Титул")
-        .paragraph("p")
-        .skip_checks("T.01")
-        .skip_checks("H.01")
-    )
+    b = work("X", year=2026).section("Титул").paragraph("p").skip_checks("T.01").skip_checks("H.01")
     doc = b.build()
     sec = doc.page_sections[0].content[0]
     assert sec.disabled_checks == ["H.01", "T.01"]
 
 
 def test_skip_all_checks_uses_wildcard() -> None:
-    b = (
-        work("X", year=2026)
-        .section("Титул")
-        .paragraph("p")
-        .skip_all_checks()
-    )
+    b = work("X", year=2026).section("Титул").paragraph("p").skip_all_checks()
     doc = b.build()
     sec = doc.page_sections[0].content[0]
     assert sec.disabled_checks == ["*"]
@@ -295,7 +274,5 @@ def test_skip_specific_check_filters_only_that_code() -> None:
     violations = validate(doc, profile)
     # R.10 для bib-секции отфильтрован.
     sec_id = doc.page_sections[0].content[0].id
-    r10_in_sec = [
-        v for v in violations if v.check_code == "R.10" and sec_id in v.location
-    ]
+    r10_in_sec = [v for v in violations if v.check_code == "R.10" and sec_id in v.location]
     assert not r10_in_sec

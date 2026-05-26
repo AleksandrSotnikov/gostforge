@@ -291,9 +291,7 @@ def _autosave_now() -> None:
         return
 
     # Версионирование: каждые VERSION_INTERVAL_SEC кладём snapshot.
-    last_version = float(
-        st.session_state.get("builder_version_ts", 0.0)
-    )
+    last_version = float(st.session_state.get("builder_version_ts", 0.0))
     if now - last_version >= _VERSION_INTERVAL_SEC:
         try:
             state = _get_state()
@@ -302,9 +300,7 @@ def _autosave_now() -> None:
         except Exception as exc:  # pragma: no cover
             import logging
 
-            logging.getLogger(__name__).warning(
-                "state version save failed: %s", exc
-            )
+            logging.getLogger(__name__).warning("state version save failed: %s", exc)
 
 
 _VERSION_INTERVAL_SEC = 5 * 60.0  # одна версия каждые 5 минут активной работы
@@ -397,10 +393,7 @@ def _render_autosave_banner() -> None:
     candidate = _try_load_autosave_state()
     if candidate is None:
         return
-    st.info(
-        "Обнаружено автосохранение предыдущей сессии. "
-        "Восстановить, чтобы продолжить работу?"
-    )
+    st.info("Обнаружено автосохранение предыдущей сессии. Восстановить, чтобы продолжить работу?")
     cols = st.columns([1, 1, 6])
     if cols[0].button("Восстановить", key="builder_autosave_restore"):
         _normalize_state_paragraphs(candidate)
@@ -668,9 +661,7 @@ def _reconstruct_section_hierarchy(flat: list[Any]) -> list[Any]:
     return top
 
 
-def extract_embedded_images(
-    docx_path: Path, target_dir: Path
-) -> dict[str, Path]:
+def extract_embedded_images(docx_path: Path, target_dir: Path) -> dict[str, Path]:
     """Распаковать все embedded-картинки из .docx в target_dir.
 
     Возвращает {rId: extracted_path}. Используется при импорте чужой
@@ -691,9 +682,7 @@ def extract_embedded_images(
 
     target_dir.mkdir(parents=True, exist_ok=True)
     mapping: dict[str, Path] = {}
-    IMAGE_REL_TYPE = (
-        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-    )
+    IMAGE_REL_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
 
     try:
         with zipfile.ZipFile(docx_path) as zf:
@@ -711,11 +700,7 @@ def extract_embedded_images(
                 if not r_id or not target:
                     continue
                 # target обычно вида 'media/image1.png' (относительно word/).
-                zip_path = (
-                    f"word/{target}"
-                    if not target.startswith("word/")
-                    else target
-                )
+                zip_path = f"word/{target}" if not target.startswith("word/") else target
                 try:
                     blob = zf.read(zip_path)
                 except KeyError:
@@ -738,12 +723,13 @@ def remap_embedded_image_paths_in_state(
     Мутирует state на месте. Если rId не найден в mapping — путь
     остаётся как был (экспортёр запишет placeholder).
     """
+
     def walk_blocks(blocks: list[dict[str, Any]]) -> None:
         for b in blocks:
             if b.get("kind") == "figure":
                 path = b.get("image_path", "")
                 if path.startswith("embedded:"):
-                    rid = path[len("embedded:"):]
+                    rid = path[len("embedded:") :]
                     if rid in rid_to_path:
                         b["image_path"] = str(rid_to_path[rid])
 
@@ -805,9 +791,7 @@ def document_to_state(document: Any) -> dict[str, Any]:
     )
 
     if not isinstance(document, Document):
-        raise TypeError(
-            f"document_to_state ожидает Document, получено {type(document).__name__}"
-        )
+        raise TypeError(f"document_to_state ожидает Document, получено {type(document).__name__}")
 
     metadata = document.metadata
     state: dict[str, Any] = {
@@ -842,9 +826,7 @@ def document_to_state(document: Any) -> dict[str, Any]:
         already_built = bool(nested_section_ids)
         if already_built:
             # Берём только секции, не являющиеся child-ом другой.
-            top_sections.extend(
-                [s for s in flat if s.id not in nested_section_ids]
-            )
+            top_sections.extend([s for s in flat if s.id not in nested_section_ids])
         else:
             top_sections.extend(_reconstruct_section_hierarchy(flat))
 
@@ -909,9 +891,7 @@ def document_to_state(document: Any) -> dict[str, Any]:
             if simple:
                 return {
                     "kind": "paragraph",
-                    "text": "".join(
-                        el.text for el in block.content if isinstance(el, TextRun)
-                    ),
+                    "text": "".join(el.text for el in block.content if isinstance(el, TextRun)),
                 }
             return {"kind": "paragraph", "runs": _inline_to_runs(block.content)}
         if isinstance(block, Table):
@@ -978,9 +958,7 @@ def document_to_state(document: Any) -> dict[str, Any]:
                     ref_text = bd.get("text", "")
                     if not ref_text and bd.get("runs"):
                         ref_text = "".join(
-                            r.get("text", "")
-                            for r in bd["runs"]
-                            if r.get("kind") == "text"
+                            r.get("text", "") for r in bd["runs"] if r.get("kind") == "text"
                         )
                     if ref_text.strip():
                         out["references"].append(ref_text)
@@ -993,9 +971,7 @@ def document_to_state(document: Any) -> dict[str, Any]:
 
     # Если в Document есть отдельная bibliography (после _extract_bibliography),
     # но соответствующего LogicalSection-а нет в верхних — добавим.
-    if document.bibliography and not any(
-        s.get("is_bibliography") for s in state["sections"]
-    ):
+    if document.bibliography and not any(s.get("is_bibliography") for s in state["sections"]):
         state["sections"].append(
             {
                 "heading": "Список использованных источников",
@@ -1003,7 +979,8 @@ def document_to_state(document: Any) -> dict[str, Any]:
                 "subsections": [],
                 "is_bibliography": True,
                 "references": [
-                    e.fields.get("raw", "") for e in document.bibliography
+                    e.fields.get("raw", "")
+                    for e in document.bibliography
                     if isinstance(e, BibliographyEntry)
                 ],
                 "disabled_checks": [],
@@ -1053,9 +1030,7 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
                 _apply_blocks(sub_builder, sub.get("blocks") or [])
                 # Рекурсия для подразделов 3-го уровня и глубже.
                 for subsub in sub.get("subsections") or []:
-                    subsub_builder = sub_builder.subsection(
-                        subsub.get("heading", "Подраздел")
-                    )
+                    subsub_builder = sub_builder.subsection(subsub.get("heading", "Подраздел"))
                     _apply_blocks(subsub_builder, subsub.get("blocks") or [])
             if sec.get("is_bibliography"):
                 for ref in sec.get("references") or []:
@@ -1492,20 +1467,32 @@ def _render_style_overrides_section(state: dict[str, Any]) -> None:
         defaults = base.styles.page.margins_mm
         cols = st.columns(2)
         margins["top"] = cols[0].number_input(
-            "Верх", value=int(margins.get("top", defaults.get("top", 20))),
-            min_value=0, max_value=100, key="ov_margin_top",
+            "Верх",
+            value=int(margins.get("top", defaults.get("top", 20))),
+            min_value=0,
+            max_value=100,
+            key="ov_margin_top",
         )
         margins["right"] = cols[1].number_input(
-            "Право", value=int(margins.get("right", defaults.get("right", 15))),
-            min_value=0, max_value=100, key="ov_margin_right",
+            "Право",
+            value=int(margins.get("right", defaults.get("right", 15))),
+            min_value=0,
+            max_value=100,
+            key="ov_margin_right",
         )
         margins["bottom"] = cols[0].number_input(
-            "Низ", value=int(margins.get("bottom", defaults.get("bottom", 20))),
-            min_value=0, max_value=100, key="ov_margin_bottom",
+            "Низ",
+            value=int(margins.get("bottom", defaults.get("bottom", 20))),
+            min_value=0,
+            max_value=100,
+            key="ov_margin_bottom",
         )
         margins["left"] = cols[1].number_input(
-            "Лево", value=int(margins.get("left", defaults.get("left", 30))),
-            min_value=0, max_value=100, key="ov_margin_left",
+            "Лево",
+            value=int(margins.get("left", defaults.get("left", 30))),
+            min_value=0,
+            max_value=100,
+            key="ov_margin_left",
         )
 
         # --- Основной текст ---
@@ -1519,27 +1506,37 @@ def _render_style_overrides_section(state: dict[str, Any]) -> None:
         overrides["body_size_pt"] = cols[0].number_input(
             "Кегль (pt)",
             value=float(overrides.get("body_size_pt", base.styles.body.size_pt)),
-            min_value=8.0, max_value=24.0, step=0.5, key="ov_body_size",
+            min_value=8.0,
+            max_value=24.0,
+            step=0.5,
+            key="ov_body_size",
         )
         overrides["body_line_spacing"] = cols[1].number_input(
             "Межстрочный",
             value=float(overrides.get("body_line_spacing", base.styles.body.line_spacing)),
-            min_value=1.0, max_value=3.0, step=0.1, key="ov_line_spacing",
+            min_value=1.0,
+            max_value=3.0,
+            step=0.1,
+            key="ov_line_spacing",
         )
         overrides["body_first_line_indent_cm"] = st.number_input(
             "Отступ первой строки (см)",
-            value=float(overrides.get(
-                "body_first_line_indent_cm", base.styles.body.first_line_indent_cm
-            )),
-            min_value=0.0, max_value=3.0, step=0.05, key="ov_indent",
+            value=float(
+                overrides.get("body_first_line_indent_cm", base.styles.body.first_line_indent_cm)
+            ),
+            min_value=0.0,
+            max_value=3.0,
+            step=0.05,
+            key="ov_indent",
         )
         cols = st.columns(2)
         overrides["body_space_before_pt"] = cols[0].number_input(
             "Интервал перед абзацем (pt)",
-            value=float(overrides.get(
-                "body_space_before_pt", base.styles.body.space_before_pt
-            )),
-            min_value=0.0, max_value=72.0, step=1.0, key="ov_body_before",
+            value=float(overrides.get("body_space_before_pt", base.styles.body.space_before_pt)),
+            min_value=0.0,
+            max_value=72.0,
+            step=1.0,
+            key="ov_body_before",
             help=(
                 "По ГОСТ Р 2.105-2019 / 7.32-2017 — 0 pt: разделение "
                 "достигается красной строкой и полуторным межстрочным "
@@ -1549,10 +1546,11 @@ def _render_style_overrides_section(state: dict[str, Any]) -> None:
         )
         overrides["body_space_after_pt"] = cols[1].number_input(
             "Интервал после абзаца (pt)",
-            value=float(overrides.get(
-                "body_space_after_pt", base.styles.body.space_after_pt
-            )),
-            min_value=0.0, max_value=72.0, step=1.0, key="ov_body_after",
+            value=float(overrides.get("body_space_after_pt", base.styles.body.space_after_pt)),
+            min_value=0.0,
+            max_value=72.0,
+            step=1.0,
+            key="ov_body_after",
             help="См. подсказку для «Интервал перед абзацем».",
         )
 
@@ -1560,9 +1558,7 @@ def _render_style_overrides_section(state: dict[str, Any]) -> None:
         st.markdown("**Заголовки**")
         overrides["heading1_uppercase"] = st.checkbox(
             "Глава 1 — ВЕРХНИЙ РЕГИСТР",
-            value=bool(overrides.get(
-                "heading1_uppercase", base.styles.heading_1.uppercase
-            )),
+            value=bool(overrides.get("heading1_uppercase", base.styles.heading_1.uppercase)),
             key="ov_h1_upper",
         )
         overrides["heading1_color"] = st.text_input(
@@ -1574,17 +1570,23 @@ def _render_style_overrides_section(state: dict[str, Any]) -> None:
         cols = st.columns(2)
         overrides["heading1_spacing_before_pt"] = cols[0].number_input(
             "Отступ до (pt)",
-            value=float(overrides.get(
-                "heading1_spacing_before_pt", base.styles.heading_1.spacing_before_pt
-            )),
-            min_value=0.0, max_value=72.0, step=1.0, key="ov_h1_before",
+            value=float(
+                overrides.get("heading1_spacing_before_pt", base.styles.heading_1.spacing_before_pt)
+            ),
+            min_value=0.0,
+            max_value=72.0,
+            step=1.0,
+            key="ov_h1_before",
         )
         overrides["heading1_spacing_after_pt"] = cols[1].number_input(
             "Отступ после (pt)",
-            value=float(overrides.get(
-                "heading1_spacing_after_pt", base.styles.heading_1.spacing_after_pt
-            )),
-            min_value=0.0, max_value=72.0, step=1.0, key="ov_h1_after",
+            value=float(
+                overrides.get("heading1_spacing_after_pt", base.styles.heading_1.spacing_after_pt)
+            ),
+            min_value=0.0,
+            max_value=72.0,
+            step=1.0,
+            key="ov_h1_after",
         )
 
         # --- Списки ---
@@ -1605,22 +1607,16 @@ def _render_style_overrides_section(state: dict[str, Any]) -> None:
         # --- Таблицы ---
         st.markdown("**Таблицы**")
         border_options = ["single", "double", "dashed", "dotted", "none"]
-        current_border = overrides.get(
-            "table_border_style", base.styles.table.border_style
-        )
+        current_border = overrides.get("table_border_style", base.styles.table.border_style)
         overrides["table_border_style"] = st.selectbox(
             "Стиль рамки",
             options=border_options,
-            index=border_options.index(current_border)
-            if current_border in border_options
-            else 0,
+            index=border_options.index(current_border) if current_border in border_options else 0,
             key="ov_tbl_border",
         )
         overrides["table_header_bold"] = st.checkbox(
             "Жирная шапка",
-            value=bool(overrides.get(
-                "table_header_bold", base.styles.table.header_bold
-            )),
+            value=bool(overrides.get("table_header_bold", base.styles.table.header_bold)),
             key="ov_tbl_bold",
         )
 
@@ -1653,9 +1649,7 @@ def _apply_style_overrides(profile: Any, overrides: dict[str, Any]) -> Any:
     if "body_line_spacing" in overrides:
         p.styles.body.line_spacing = float(overrides["body_line_spacing"])
     if "body_first_line_indent_cm" in overrides:
-        p.styles.body.first_line_indent_cm = float(
-            overrides["body_first_line_indent_cm"]
-        )
+        p.styles.body.first_line_indent_cm = float(overrides["body_first_line_indent_cm"])
     if "body_space_before_pt" in overrides:
         p.styles.body.space_before_pt = float(overrides["body_space_before_pt"])
     if "body_space_after_pt" in overrides:
@@ -1666,13 +1660,9 @@ def _apply_style_overrides(profile: Any, overrides: dict[str, Any]) -> Any:
     if "heading1_color" in overrides and overrides["heading1_color"]:
         p.styles.heading_1.color = overrides["heading1_color"]
     if "heading1_spacing_before_pt" in overrides:
-        p.styles.heading_1.spacing_before_pt = float(
-            overrides["heading1_spacing_before_pt"]
-        )
+        p.styles.heading_1.spacing_before_pt = float(overrides["heading1_spacing_before_pt"])
     if "heading1_spacing_after_pt" in overrides:
-        p.styles.heading_1.spacing_after_pt = float(
-            overrides["heading1_spacing_after_pt"]
-        )
+        p.styles.heading_1.spacing_after_pt = float(overrides["heading1_spacing_after_pt"])
     # Списки.
     if "bullet_char" in overrides and overrides["bullet_char"]:
         p.styles.lists.bullet_char = overrides["bullet_char"]
@@ -1787,9 +1777,7 @@ def _highlight_query_in_text(text: str, query: str) -> str:
     # чтобы не сломаться на спец-символах.
     escaped_query = re.escape(html.escape(query))
     pattern = re.compile(escaped_query, re.IGNORECASE)
-    return pattern.sub(
-        lambda m: f"<mark>{m.group(0)}</mark>", escaped_text
-    )
+    return pattern.sub(lambda m: f"<mark>{m.group(0)}</mark>", escaped_text)
 
 
 def _section_matches_query(section: dict[str, Any], query: str) -> bool:
@@ -1810,9 +1798,7 @@ def _section_matches_query(section: dict[str, Any], query: str) -> bool:
         kind = b.get("kind", "")
         text = b.get("text", "")
         if not text and b.get("runs"):
-            text = "".join(
-                r.get("text", "") for r in b["runs"] if r.get("kind") == "text"
-            )
+            text = "".join(r.get("text", "") for r in b["runs"] if r.get("kind") == "text")
         if kind == "table":
             text += " " + str(b.get("caption", ""))
             for row in b.get("rows", []):
@@ -2106,8 +2092,7 @@ def _render_bulk_operations_sidebar() -> None:
     if st.sidebar.button(
         "Удалить пустые параграфы",
         key="bulk_remove_empty",
-        help="Из всех разделов выбрасывает блоки kind='paragraph' "
-        "с пустым text/runs.",
+        help="Из всех разделов выбрасывает блоки kind='paragraph' с пустым text/runs.",
     ):
         removed = _bulk_remove_empty_paragraphs(state)
         if removed > 0:
@@ -2188,9 +2173,7 @@ def _remove_empty_in_blocks(blocks: list[dict[str, Any]]) -> int:
             continue
         text = b.get("text", "")
         if not text and b.get("runs"):
-            text = "".join(
-                r.get("text", "") for r in b["runs"] if r.get("kind") == "text"
-            )
+            text = "".join(r.get("text", "") for r in b["runs"] if r.get("kind") == "text")
         if not text.strip():
             blocks.pop(i)
             removed += 1
@@ -2325,9 +2308,7 @@ def _bulk_auto_number_headings(state: dict[str, Any]) -> int:
             sub_base = _strip_existing_number(sub.get("heading", ""))
             sub["heading"] = f"{top_idx}.{s_idx} {sub_base}"
             counter += 1
-            for ss_idx, subsub in enumerate(
-                sub.get("subsections") or [], start=1
-            ):
+            for ss_idx, subsub in enumerate(sub.get("subsections") or [], start=1):
                 ss_base = _strip_existing_number(subsub.get("heading", ""))
                 subsub["heading"] = f"{top_idx}.{s_idx}.{ss_idx} {ss_base}"
                 counter += 1
@@ -2344,9 +2325,7 @@ def _bulk_reset_disabled_checks(state: dict[str, Any]) -> int:
     return reset
 
 
-def _bulk_find_replace(
-    state: dict[str, Any], find: str, replace: str
-) -> int:
+def _bulk_find_replace(state: dict[str, Any], find: str, replace: str) -> int:
     """Заменить все вхождения ``find`` на ``replace`` во всём документе.
 
     Проходит по заголовкам разделов, текстам параграфов (text и runs),
@@ -2538,9 +2517,7 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
     user_selected_profile = current_state.get("profile_id")
 
     try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".docx", delete=False
-        ) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
             tmp.write(data)
             tmp_path = Path(tmp.name)
         document = parse_docx(tmp_path)
@@ -2550,10 +2527,8 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
         # Без этого при повторной генерации картинки терялись
         # (source_docx уже не доступен).
         import time  # noqa: PLC0415
-        images_dir = (
-            Path.home() / ".gostforge" / "imports" /
-            f"{filename}-{int(time.time())}"
-        )
+
+        images_dir = Path.home() / ".gostforge" / "imports" / f"{filename}-{int(time.time())}"
         rid_to_path = extract_embedded_images(tmp_path, images_dir)
         if rid_to_path:
             remap_embedded_image_paths_in_state(new_state, rid_to_path)
@@ -2610,9 +2585,7 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
     st.rerun()
 
 
-def _compute_import_violations_summary(
-    document: Any, profile_id: str
-) -> dict[str, Any]:
+def _compute_import_violations_summary(document: Any, profile_id: str) -> dict[str, Any]:
     """Прогон нормоконтроля для импортируемого документа.
 
     Возвращает {'total', 'by_severity', 'top_codes'} — компактный
@@ -2672,9 +2645,7 @@ def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
                 sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))
                 _apply_blocks(sub_builder, sub.get("blocks") or [])
                 for subsub in sub.get("subsections") or []:
-                    subsub_builder = sub_builder.subsection(
-                        subsub.get("heading", "Подраздел")
-                    )
+                    subsub_builder = sub_builder.subsection(subsub.get("heading", "Подраздел"))
                     _apply_blocks(subsub_builder, subsub.get("blocks") or [])
             if sec.get("is_bibliography"):
                 for ref in sec.get("references") or []:
@@ -2772,9 +2743,7 @@ def _render_live_validation_panel() -> None:
         )
     with st.expander(label, expanded=False):
         if total == 0:
-            st.success(
-                "Все проверки пройдены. Можно генерировать .docx."
-            )
+            st.success("Все проверки пройдены. Можно генерировать .docx.")
             return
         cols = st.columns(3)
         by_sev = summary["by_severity"]
@@ -2816,11 +2785,7 @@ def _compute_progress_metrics(state: dict[str, Any]) -> dict[str, Any]:
     def block_text(b: dict[str, Any]) -> str:
         text = b.get("text", "")
         if not text and b.get("runs"):
-            text = "".join(
-                r.get("text", "")
-                for r in b["runs"]
-                if r.get("kind") == "text"
-            )
+            text = "".join(r.get("text", "") for r in b["runs"] if r.get("kind") == "text")
         return text
 
     def walk_section(sec: dict[str, Any]) -> bool:
@@ -2884,8 +2849,7 @@ def _render_progress_panel() -> None:
         progress = 0.0
 
     with st.expander(
-        f"Прогресс работы — {filled}/{total} разделов заполнено "
-        f"({metrics['total_words']} слов)",
+        f"Прогресс работы — {filled}/{total} разделов заполнено ({metrics['total_words']} слов)",
         expanded=False,
     ):
         st.progress(progress)
@@ -2917,8 +2881,7 @@ def _render_imported_comments_panel() -> None:
     if not comments:
         return
     with st.expander(
-        f"Комментарии рецензента из импортированной работы — "
-        f"{len(comments)} шт.",
+        f"Комментарии рецензента из импортированной работы — {len(comments)} шт.",
         expanded=False,
     ):
         for c in comments:
@@ -2946,17 +2909,14 @@ def _render_import_violations_panel() -> None:
         return
     total = summary.get("total", 0)
     if total == 0:
-        st.success(
-            f"Импорт «{summary['filename']}» прошёл без нарушений нормоконтроля."
-        )
+        st.success(f"Импорт «{summary['filename']}» прошёл без нарушений нормоконтроля.")
         if st.button("Скрыть сводку импорта", key="dismiss_import_summary"):
             del st.session_state["last_import_summary"]
             st.rerun()
         return
 
     with st.expander(
-        f"Нормоконтроль импортированной работы «{summary['filename']}» — "
-        f"{total} нарушений",
+        f"Нормоконтроль импортированной работы «{summary['filename']}» — {total} нарушений",
         expanded=True,
     ):
         by_sev = summary.get("by_severity", {})
@@ -2976,9 +2936,7 @@ def _render_import_violations_panel() -> None:
         # под найденные нарушения.
         from gostforge.fixer.engine import registered_fixers  # noqa: PLC0415
 
-        fixable_codes = set(registered_fixers()) & {
-            e["code"] for e in top
-        }
+        fixable_codes = set(registered_fixers()) & {e["code"] for e in top}
         if fixable_codes:
             st.markdown("---")
             st.caption(
@@ -3170,9 +3128,7 @@ def _list_available_check_codes() -> list[str]:
     return registered_checks()
 
 
-def _render_section_validation_panel(
-    section: dict[str, Any], idx: int
-) -> None:
+def _render_section_validation_panel(section: dict[str, Any], idx: int) -> None:
     """Панель «Нормоконтроль раздела» — отключение проверок для конкретного раздела.
 
     Студент может пометить раздел (титульный, реферат, приложения) как
@@ -3218,9 +3174,7 @@ def _render_section_validation_panel(
             prefix = code[:2]  # "F.", "T.", ...
             groups.setdefault(prefix, []).append(code)
 
-        st.caption(
-            "Или выберите конкретные проверки для отключения:"
-        )
+        st.caption("Или выберите конкретные проверки для отключения:")
         new_selected: list[str] = []
         for prefix, codes in groups.items():
             label = _CHECK_CATEGORIES.get(prefix, prefix)
@@ -3296,9 +3250,7 @@ def _render_active_section_editor() -> None:
     _render_single_section_pdf_preview(section, idx)
 
 
-def _render_single_section_pdf_preview(
-    section: dict[str, Any], idx: int
-) -> None:
+def _render_single_section_pdf_preview(section: dict[str, Any], idx: int) -> None:
     """Live-preview только активного раздела в PDF.
 
     Быстрее, чем превью всего документа (LibreOffice конвертирует один
@@ -3323,9 +3275,7 @@ def _render_single_section_pdf_preview(
                 "title": (full_state.get("title") or "Предпросмотр"),
                 "author": full_state.get("author", ""),
                 "year": full_state.get("year", 2026),
-                "profile_id": full_state.get(
-                    "profile_id", "gost-7.32-2017"
-                ),
+                "profile_id": full_state.get("profile_id", "gost-7.32-2017"),
                 "sections": [section],
                 "style_overrides": full_state.get("style_overrides") or {},
             }
@@ -3377,11 +3327,7 @@ def _extract_non_text_runs(block: dict[str, Any]) -> list[dict[str, Any]]:
     runs = block.get("runs")
     if not isinstance(runs, list):
         return []
-    return [
-        r
-        for r in runs
-        if isinstance(r, dict) and r.get("kind", "text") != "text"
-    ]
+    return [r for r in runs if isinstance(r, dict) and r.get("kind", "text") != "text"]
 
 
 def _paragraph_preview_text(block: dict[str, Any]) -> str:
@@ -3781,9 +3727,7 @@ def _render_add_block_buttons(blocks: list[dict[str, Any]], *, key_prefix: str) 
             format_func=lambda k: _BLOCK_TEMPLATES[k][0],
             key=f"{key_prefix}_block_template",
         )
-        if st.button(
-            "Вставить шаблон", key=f"{key_prefix}_insert_block_template"
-        ):
+        if st.button("Вставить шаблон", key=f"{key_prefix}_insert_block_template"):
             _label, factory = _BLOCK_TEMPLATES[sel]
             new_blocks = factory()
             # Шаблон может возвращать один блок или список блоков.
@@ -3945,9 +3889,7 @@ def _render_subsections_editor(section: dict[str, Any], sec_idx: int) -> None:
         st.rerun()
 
 
-def _render_subsubsections_editor(
-    sub: dict[str, Any], sec_idx: int, s_idx: int
-) -> None:
+def _render_subsubsections_editor(sub: dict[str, Any], sec_idx: int, s_idx: int) -> None:
     """Список пунктов 3-го уровня (например 1.1.1, 1.1.2)."""
     subsubs = sub.setdefault("subsections", [])
     st.markdown("**Пункты**")
@@ -3955,8 +3897,7 @@ def _render_subsubsections_editor(
         st.caption("Пунктов нет.")
     for ss_idx, subsub in enumerate(subsubs):
         with st.expander(
-            f"{sec_idx + 1}.{s_idx + 1}.{ss_idx + 1} "
-            f"{subsub.get('heading') or '(без названия)'}",
+            f"{sec_idx + 1}.{s_idx + 1}.{ss_idx + 1} {subsub.get('heading') or '(без названия)'}",
             expanded=False,
         ):
             subsub["heading"] = st.text_input(

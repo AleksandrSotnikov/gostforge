@@ -416,9 +416,7 @@ def _write_hyperlink(docx_paragraph: DocxParagraph, element: Hyperlink) -> None:
     t.text = element.text
 
 
-def _write_footnote_ref(
-    docx_paragraph: DocxParagraph, element: FootnoteRef
-) -> None:
+def _write_footnote_ref(docx_paragraph: DocxParagraph, element: FootnoteRef) -> None:
     """Записать ссылку на footnote: <w:footnoteReference w:id="N"/>.
 
     Сам текст сноски должен лежать в word/footnotes.xml — экспортёр
@@ -552,9 +550,7 @@ def _write_logical_section(doc: DocxDocument, section: LogicalSection) -> None:
     Применяет UPPERCASE если профиль это требует для текущего уровня
     (по умолчанию — для heading_1 в ГОСТ 7.32).
     """
-    heading_text = "".join(
-        el.text for el in section.heading if isinstance(el, TextRun)
-    )
+    heading_text = "".join(el.text for el in section.heading if isinstance(el, TextRun))
     level = max(0, min(section.level, 4))  # docx supports 0..9, мы — 1..4
     # Профиль-конфиг уровня: heading_1..heading_4 → uppercase, прочее.
     if _current_profile is not None and 1 <= level <= 4:
@@ -633,11 +629,7 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
     docx_table = doc.add_table(rows=rows_total, cols=column_count)
 
     # Применяем стиль таблицы (рамки + шрифт ячеек) из профиля.
-    cfg = (
-        _current_profile.styles.table
-        if _current_profile is not None
-        else None
-    )
+    cfg = _current_profile.styles.table if _current_profile is not None else None
     if cfg is not None:
         _apply_table_borders(docx_table, cfg)
 
@@ -648,9 +640,7 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
             cell = docx_table.rows[row_idx].cells[col_idx]
             cell.text = ""
             _write_runs(cell.paragraphs[0], cell_content)
-            _apply_cell_paragraph_format(
-                cell, cfg, is_header=True
-            )
+            _apply_cell_paragraph_format(cell, cfg, is_header=True)
             _apply_cell_font(cell, cfg)
             if header_bold:
                 for run in cell.paragraphs[0].runs:
@@ -733,9 +723,7 @@ def _apply_cell_merges(docx_table: Any, merges: list) -> None:  # type: ignore[n
                 etree.SubElement(next_tcPr, f"{{{W_NS}}}vMerge")
 
 
-def _apply_cell_paragraph_format(
-    cell: Any, cfg: Any, *, is_header: bool
-) -> None:
+def _apply_cell_paragraph_format(cell: Any, cfg: Any, *, is_header: bool) -> None:
     """Применить параграф-формат к ячейке таблицы.
 
     Без этого ячейки наследуют стиль Normal (justify + красная строка
@@ -822,7 +810,7 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
 
     # Случай 1: embedded:rIdN с открытым source_docx.
     if path.startswith("embedded:") and _current_source_docx is not None:
-        rid = path[len("embedded:"):]
+        rid = path[len("embedded:") :]
         if _try_write_embedded_picture(doc, _current_source_docx, rid, figure):
             return
 
@@ -960,9 +948,9 @@ def _try_write_embedded_picture(
 # Не пытается удалять маркер посреди текста — только в самом начале.
 _LEADING_MARKER_RE = re.compile(
     r"^("
-    r"[-–—•*◦]"                  # bullet-маркеры
-    r"|\d{1,3}[\.\)]"             # '1.', '12)'
-    r"|[a-zа-яёA-ZА-ЯЁ][\.\)]"   # 'a)', 'б.', 'A.', 'Б)'
+    r"[-–—•*◦]"  # bullet-маркеры
+    r"|\d{1,3}[\.\)]"  # '1.', '12)'
+    r"|[a-zа-яёA-ZА-ЯЁ][\.\)]"  # 'a)', 'б.', 'A.', 'Б)'
     r")[\s\t]+"
 )
 
@@ -1030,9 +1018,7 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
     поведение списка при редактировании в Word (Enter → новый bullet),
     и парсер видит ``<w:numPr>`` → ListBlock без эвристик.
     """
-    cfg = (
-        _current_profile.styles.lists if _current_profile is not None else None
-    )
+    cfg = _current_profile.styles.lists if _current_profile is not None else None
     bullet = cfg.bullet_char if cfg is not None else "–"
     ordered_fmt = cfg.ordered_format if cfg is not None else "{n})"
     left_indent_cm = cfg.left_indent_cm if cfg is not None else 1.25
@@ -1049,7 +1035,9 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
     levels = list(list_block.item_levels) if list_block.item_levels else []
     max_level = max(levels) if levels else 0
     num_id = _ensure_list_num_in_numbering(
-        doc, ordered=list_block.ordered, lvl_text=lvl_text,
+        doc,
+        ordered=list_block.ordered,
+        lvl_text=lvl_text,
         left_twips=int(Cm(left_indent_cm).twips),
         hanging_twips=int(Cm(hanging_indent_cm).twips),
         max_level=max_level,
@@ -1146,9 +1134,7 @@ def _ensure_list_num_in_numbering(
     max_anid = -1
     for an in num_elem.findall(f"{{{W_NS}}}abstractNum"):
         try:
-            max_anid = max(
-                max_anid, int(an.get(f"{{{W_NS}}}abstractNumId") or "-1")
-            )
+            max_anid = max(max_anid, int(an.get(f"{{{W_NS}}}abstractNumId") or "-1"))
         except ValueError:
             pass
     max_nid = 0
@@ -1174,11 +1160,7 @@ def _ensure_list_num_in_numbering(
             an,
             ilvl=_ilvl,
             ordered=ordered,
-            lvl_text=(
-                lvl_text
-                if _ilvl == 0
-                else _nested_lvl_text(ordered, _ilvl, lvl_text)
-            ),
+            lvl_text=(lvl_text if _ilvl == 0 else _nested_lvl_text(ordered, _ilvl, lvl_text)),
             left_twips=left_twips + _ilvl * 720,
             hanging_twips=hanging_twips,
             font_for_bullet=(
@@ -1300,9 +1282,7 @@ def _write_template_into_footer_paragraph(
 def _has_text(items: Sequence[InlineElement] | None) -> bool:
     if not items:
         return False
-    return any(
-        isinstance(el, TextRun) and el.text and el.text.strip() for el in items
-    )
+    return any(isinstance(el, TextRun) and el.text and el.text.strip() for el in items)
 
 
 def _write_footer(doc: DocxDocument, footer_template: ContentTemplate) -> None:
@@ -1350,9 +1330,7 @@ _PAGE_FMT_OOXML = {
 }
 
 
-def _sync_page_section_with_profile(
-    page_section: PageSection, profile: Profile
-) -> None:
+def _sync_page_section_with_profile(page_section: PageSection, profile: Profile) -> None:
     """Применить параметры профиля к модели page_section перед записью.
 
     Согласует:
@@ -1380,9 +1358,7 @@ def _sync_page_section_with_profile(
         and page_section.page_numbering.start_mode == "start_at"
     ):
         try:
-            page_section.page_numbering.start_value = int(
-                f06.params["start_value"]
-            )
+            page_section.page_numbering.start_value = int(f06.params["start_value"])
         except (TypeError, ValueError):
             pass
 
@@ -1479,7 +1455,11 @@ def export_docx(
         достанет соответствующий media-blob из source_docx и вставит как
         реальное изображение. Иначе на месте картинки будет placeholder.
     """
-    global _current_source_docx, _current_bibliography_index, _current_profile, _current_list_numbering
+    global \
+        _current_source_docx, \
+        _current_bibliography_index, \
+        _current_profile, \
+        _current_list_numbering
     output_path = Path(output_path)
     doc = docx.Document()
 
@@ -1521,9 +1501,7 @@ def export_docx(
         if document.metadata.year:
             from datetime import datetime, timezone  # noqa: PLC0415
 
-            core.created = datetime(
-                document.metadata.year, 1, 1, tzinfo=timezone.utc
-            )
+            core.created = datetime(document.metadata.year, 1, 1, tzinfo=timezone.utc)
 
         if document.page_sections:
             first = document.page_sections[0]
@@ -1565,11 +1543,13 @@ def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
     """Прописать/удалить <w:autoHyphenation/> в word/settings.xml внутри docx-zip."""
     import shutil
     import zipfile
+
     settings_path = "word/settings.xml"
     tmp_path = docx_path.with_suffix(".docx.tmp")
-    with zipfile.ZipFile(docx_path, "r") as zin, zipfile.ZipFile(
-        tmp_path, "w", zipfile.ZIP_DEFLATED
-    ) as zout:
+    with (
+        zipfile.ZipFile(docx_path, "r") as zin,
+        zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout,
+    ):
         names = zin.namelist()
         if settings_path not in names:
             settings_xml = (
@@ -1587,9 +1567,7 @@ def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
             if value:
                 elem = etree.SubElement(root, f"{{{W_NS}}}autoHyphenation")
                 root.insert(0, elem)
-            new_xml = etree.tostring(
-                root, xml_declaration=True, encoding="UTF-8", standalone=True
-            )
+            new_xml = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
         except Exception:  # noqa: BLE001
             new_xml = settings_xml
 

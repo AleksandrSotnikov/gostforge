@@ -37,9 +37,7 @@ def test_f06_fixer_sets_start_value() -> None:
         name="N",
         type="main",
         page=PageGeometry(),
-        page_numbering=PageNumberingConfig(
-            visible=True, start_mode="start_at", start_value=1
-        ),
+        page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=1),
     )
     doc.page_sections.append(ps)
     profile = load_profile("gost-r-2.105-2019")  # F.06.start_value = 2
@@ -52,7 +50,9 @@ def test_f06_fixer_skips_invisible_numbering() -> None:
     doc = Document(metadata=DocumentMetadata(title="X"))
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="title",
+            id="m",
+            name="N",
+            type="title",
             page=PageGeometry(),
             page_numbering=PageNumberingConfig(visible=False),
         )
@@ -65,10 +65,14 @@ def test_f06_fixer_skips_invisible_numbering() -> None:
 def test_f06_fixer_idempotent() -> None:
     doc = Document(metadata=DocumentMetadata(title="X"))
     ps = PageSection(
-        id="m", name="N", type="main",
+        id="m",
+        name="N",
+        type="main",
         page=PageGeometry(),
         page_numbering=PageNumberingConfig(
-            visible=True, start_mode="start_at", start_value=2,
+            visible=True,
+            start_mode="start_at",
+            start_value=2,
         ),
     )
     doc.page_sections.append(ps)
@@ -83,7 +87,9 @@ def test_f06_fixer_idempotent() -> None:
 def test_f04_fixer_places_page_in_bottom_center() -> None:
     doc = Document(metadata=DocumentMetadata(title="X"))
     ps = PageSection(
-        id="m", name="N", type="main",
+        id="m",
+        name="N",
+        type="main",
         page=PageGeometry(),
         page_numbering=PageNumberingConfig(visible=True),
         footer=HeaderConfig(default=ContentTemplate()),
@@ -101,7 +107,9 @@ def test_f04_fixer_moves_page_from_left_to_center() -> None:
     """Если {page} был в left — переносим в center."""
     doc = Document(metadata=DocumentMetadata(title="X"))
     ps = PageSection(
-        id="m", name="N", type="main",
+        id="m",
+        name="N",
+        type="main",
         page=PageGeometry(),
         page_numbering=PageNumberingConfig(visible=True),
         footer=HeaderConfig(default=ContentTemplate(left=[TextRun(text="{page}")])),
@@ -112,12 +120,10 @@ def test_f04_fixer_moves_page_from_left_to_center() -> None:
     assert len(applied) == 1
     # Левый слот пуст, центр имеет {page}.
     assert not any(
-        isinstance(el, TextRun) and el.text == "{page}"
-        for el in (ps.footer.default.left or [])
+        isinstance(el, TextRun) and el.text == "{page}" for el in (ps.footer.default.left or [])
     )
     assert any(
-        isinstance(el, TextRun) and el.text == "{page}"
-        for el in (ps.footer.default.center or [])
+        isinstance(el, TextRun) and el.text == "{page}" for el in (ps.footer.default.center or [])
     )
 
 
@@ -125,12 +131,12 @@ def test_f04_fixer_idempotent() -> None:
     """Если {page} уже в нужном слоте — no-op."""
     doc = Document(metadata=DocumentMetadata(title="X"))
     ps = PageSection(
-        id="m", name="N", type="main",
+        id="m",
+        name="N",
+        type="main",
         page=PageGeometry(),
         page_numbering=PageNumberingConfig(visible=True),
-        footer=HeaderConfig(
-            default=ContentTemplate(center=[TextRun(text="{page}")])
-        ),
+        footer=HeaderConfig(default=ContentTemplate(center=[TextRun(text="{page}")])),
     )
     doc.page_sections.append(ps)
     profile = load_profile("gost-7.32-2017")
@@ -156,12 +162,8 @@ def _make_doc_with_chapters() -> Document:
         level=2,
     )
     sec2.children = [sub21, sub22]
-    sec3 = LogicalSection(
-        id="s3", heading=[TextRun(text="Проектирование")], level=1
-    )
-    sec4 = LogicalSection(
-        id="s4", heading=[TextRun(text="Заключение")], level=1
-    )
+    sec3 = LogicalSection(id="s3", heading=[TextRun(text="Проектирование")], level=1)
+    sec4 = LogicalSection(id="s4", heading=[TextRun(text="Заключение")], level=1)
     doc.page_sections.append(
         PageSection(
             id="m",

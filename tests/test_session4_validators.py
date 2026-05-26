@@ -39,7 +39,9 @@ def _doc_with_paragraph(text: str) -> Document:
     )
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
+            id="m",
+            name="N",
+            type="main",
             page=PageGeometry(),
             page_numbering=PageNumberingConfig(),
             content=[sec],
@@ -95,9 +97,7 @@ def test_x05_only_canonical_no_violation() -> None:
     """Используется только canonical — нет нарушений."""
     doc = _doc_with_paragraph("База данных оптимизирована для скорости.")
     profile = load_profile("gost-7.32-2017").model_copy(deep=True)
-    profile.checks["X.05"].params = {
-        "terms": [{"canonical": "база данных", "aliases": ["БД"]}]
-    }
+    profile.checks["X.05"].params = {"terms": [{"canonical": "база данных", "aliases": ["БД"]}]}
     v = validate(doc, profile)
     x05 = [x for x in v if x.check_code == "X.05"]
     assert x05 == []
@@ -105,9 +105,7 @@ def test_x05_only_canonical_no_violation() -> None:
 
 def test_x05_multiple_terms() -> None:
     """Несколько терминов проверяются независимо."""
-    doc = _doc_with_paragraph(
-        "Используем БД и ПО для разработки. База данных и ПО."
-    )
+    doc = _doc_with_paragraph("Используем БД и ПО для разработки. База данных и ПО.")
     profile = load_profile("gost-7.32-2017").model_copy(deep=True)
     profile.checks["X.05"].params = {
         "terms": [
@@ -125,9 +123,7 @@ def test_x05_case_insensitive() -> None:
     """Проверка регистронезависима: «бд» = «БД» = «Бд»."""
     doc = _doc_with_paragraph("В системе бд оптимизирована.")
     profile = load_profile("gost-7.32-2017").model_copy(deep=True)
-    profile.checks["X.05"].params = {
-        "terms": [{"canonical": "база данных", "aliases": ["БД"]}]
-    }
+    profile.checks["X.05"].params = {"terms": [{"canonical": "база данных", "aliases": ["БД"]}]}
     v = validate(doc, profile)
     x05 = [x for x in v if x.check_code == "X.05"]
     assert len(x05) == 1
@@ -163,7 +159,9 @@ def _doc_with_table(table: Table) -> Document:
     )
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
+            id="m",
+            name="N",
+            type="main",
             page=PageGeometry(),
             page_numbering=PageNumberingConfig(),
             content=[sec],

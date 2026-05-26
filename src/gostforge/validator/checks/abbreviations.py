@@ -25,9 +25,7 @@ _ABBR_RE = re.compile(r"\b([A-ZА-ЯЁ]{2,10})\b")
 
 # Расширенный паттерн — допускает точки между заглавными буквами
 # («В.К.Р.» / «В. К. Р.» / «ВКР»). Используется в A.03 для группировки.
-_ABBR_DOTTED_RE = re.compile(
-    r"\b(?:[A-ZА-ЯЁ]{2,10}|(?:[A-ZА-ЯЁ]\.\s?){2,10})"
-)
+_ABBR_DOTTED_RE = re.compile(r"\b(?:[A-ZА-ЯЁ]{2,10}|(?:[A-ZА-ЯЁ]\.\s?){2,10})")
 
 # Общеизвестные аббревиатуры, не требующие расшифровки. Можно расширять
 # через `checks.A.01.params.known_abbreviations` в профиле.
@@ -378,10 +376,7 @@ def check_abbreviation_consistent_form(
                     f"написаниях: " + ", ".join(f"«{f}»" for f in forms_sorted)
                 ),
                 location="document",
-                suggestion=(
-                    f"Привести все упоминания к единому написанию "
-                    f"«{canonical}»"
-                ),
+                suggestion=(f"Привести все упоминания к единому написанию «{canonical}»"),
                 details={
                     "abbreviation": canonical,
                     "forms": "; ".join(forms_sorted),

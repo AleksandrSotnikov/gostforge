@@ -42,14 +42,11 @@ def test_normal_style_has_justify_alignment(tmp_path: Path) -> None:
     out = tmp_path / "out.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     styles = _docx_xml(out, "word/styles.xml")
-    normal_block = re.search(
-        r'styleId="Normal".*?</w:style>', styles, re.DOTALL
-    )
+    normal_block = re.search(r'styleId="Normal".*?</w:style>', styles, re.DOTALL)
     assert normal_block is not None
     # OOXML 'both' = justify (по ширине).
     assert 'w:val="both"' in normal_block.group(0), (
-        "Стиль Normal не имеет alignment=justify; основной текст "
-        "будет рваный по правому краю."
+        "Стиль Normal не имеет alignment=justify; основной текст будет рваный по правому краю."
     )
 
 
@@ -62,9 +59,7 @@ def test_normal_style_alignment_follows_profile(tmp_path: Path) -> None:
     out = tmp_path / "left.docx"
     export_docx(b.build(), profile, out)
     styles = _docx_xml(out, "word/styles.xml")
-    normal_block = re.search(
-        r'styleId="Normal".*?</w:style>', styles, re.DOTALL
-    )
+    normal_block = re.search(r'styleId="Normal".*?</w:style>', styles, re.DOTALL)
     assert normal_block is not None
     assert 'w:val="left"' in normal_block.group(0)
 
@@ -138,9 +133,7 @@ def test_heading_1_style_has_page_break_before(tmp_path: Path) -> None:
     out = tmp_path / "h1pb.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     styles = _docx_xml(out, "word/styles.xml")
-    h1_block = re.search(
-        r'styleId="Heading1".*?</w:style>', styles, re.DOTALL
-    )
+    h1_block = re.search(r'styleId="Heading1".*?</w:style>', styles, re.DOTALL)
     assert h1_block is not None
     assert "<w:pageBreakBefore/>" in h1_block.group(0)
 
@@ -153,16 +146,18 @@ def test_list_paragraph_has_explicit_left(tmp_path: Path) -> None:
     переопределяющий первый отступ из стиля Normal. По ГОСТ
     7.32-2017 — left = 1.25 см (709 twips), hanging = 0 (маркер
     ровно на абзацном отступе)."""
-    b = work("X", year=2026).section("Введение").list(
-        ["короткий", "длинный элемент списка, который точно перенесётся"],
-        ordered=False,
+    b = (
+        work("X", year=2026)
+        .section("Введение")
+        .list(
+            ["короткий", "длинный элемент списка, который точно перенесётся"],
+            ordered=False,
+        )
     )
     out = tmp_path / "list.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     doc_xml = _docx_xml(out, "word/document.xml")
-    list_pprs = re.findall(
-        r"<w:pPr>(?:(?!</w:pPr>).)*<w:numPr>.*?</w:pPr>", doc_xml, re.DOTALL
-    )
+    list_pprs = re.findall(r"<w:pPr>(?:(?!</w:pPr>).)*<w:numPr>.*?</w:pPr>", doc_xml, re.DOTALL)
     assert list_pprs, "Параграфов списка с numPr не найдено"
     for ppr in list_pprs:
         ind_match = re.search(r"<w:ind\b[^/]*/>", ppr)
@@ -171,10 +166,9 @@ def test_list_paragraph_has_explicit_left(tmp_path: Path) -> None:
         assert 'w:left="' in ind, f"<w:ind> без w:left: {ind}"
         # Либо hanging (если > 0), либо firstLine="0" (если hanging=0).
         # Главное — не должно быть пустого <w:ind> или firstLine > 0.
-        assert (
-            'w:hanging="' in ind
-            or 'w:firstLine="0"' in ind
-        ), f"<w:ind> без hanging И без firstLine=0: {ind}"
+        assert 'w:hanging="' in ind or 'w:firstLine="0"' in ind, (
+            f"<w:ind> без hanging И без firstLine=0: {ind}"
+        )
 
 
 def test_list_marker_at_1_25cm_by_default(tmp_path: Path) -> None:
@@ -194,9 +188,7 @@ def test_list_marker_at_1_25cm_by_default(tmp_path: Path) -> None:
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
 
     numbering = _docx_xml(out, "word/numbering.xml")
-    last_lvl = re.findall(
-        r'<w:lvl w:ilvl="0">.*?</w:lvl>', numbering, re.DOTALL
-    )[-1]
+    last_lvl = re.findall(r'<w:lvl w:ilvl="0">.*?</w:lvl>', numbering, re.DOTALL)[-1]
     nb_ind = re.search(r"<w:ind\b[^/]*/>", last_lvl).group(0)
     # left - hanging должно дать 709 twips (1.25 cm) — позиция маркера.
     left_match = re.search(r'w:left="(\d+)"', nb_ind)
@@ -221,9 +213,7 @@ def test_list_paragraph_overrides_normal_first_line_indent(
     out = tmp_path / "ord.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     doc_xml = _docx_xml(out, "word/document.xml")
-    list_pprs = re.findall(
-        r"<w:pPr>(?:(?!</w:pPr>).)*<w:numPr>.*?</w:pPr>", doc_xml, re.DOTALL
-    )
+    list_pprs = re.findall(r"<w:pPr>(?:(?!</w:pPr>).)*<w:numPr>.*?</w:pPr>", doc_xml, re.DOTALL)
     for ppr in list_pprs:
         ind_match = re.search(r"<w:ind\b[^/]*/>", ppr)
         assert ind_match
@@ -232,6 +222,4 @@ def test_list_paragraph_overrides_normal_first_line_indent(
         # на параграфе списка — не по ГОСТу).
         firstLine_match = re.search(r'w:firstLine="(\d+)"', ind)
         if firstLine_match:
-            assert int(firstLine_match.group(1)) == 0, (
-                f"firstLine > 0 в параграфе списка: {ind}"
-            )
+            assert int(firstLine_match.group(1)) == 0, f"firstLine > 0 в параграфе списка: {ind}"

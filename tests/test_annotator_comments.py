@@ -43,22 +43,16 @@ def bad_margins_docx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 id="main",
                 name="Основная часть",
                 type="main",
-                page=PageGeometry(
-                    margins_mm={"top": 25, "right": 15, "bottom": 20, "left": 30}
-                ),
+                page=PageGeometry(margins_mm={"top": 25, "right": 15, "bottom": 20, "left": 30}),
             )
         )
         return doc
 
-    monkeypatch.setattr(
-        "gostforge.annotator.docx_annotator.parse_docx", fake_parse
-    )
+    monkeypatch.setattr("gostforge.annotator.docx_annotator.parse_docx", fake_parse)
     return p
 
 
-def test_annotate_comments_creates_comments_part(
-    bad_margins_docx: Path, tmp_path: Path
-) -> None:
+def test_annotate_comments_creates_comments_part(bad_margins_docx: Path, tmp_path: Path) -> None:
     """После annotate_docx со style='comments' в .docx-архиве есть word/comments.xml."""
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
@@ -66,9 +60,7 @@ def test_annotate_comments_creates_comments_part(
 
     with zipfile.ZipFile(out, "r") as z:
         names = z.namelist()
-    assert "word/comments.xml" in names, (
-        f"В аннотированном .docx нет word/comments.xml: {names}"
-    )
+    assert "word/comments.xml" in names, f"В аннотированном .docx нет word/comments.xml: {names}"
 
 
 def test_annotate_comments_content_has_violation_text(
@@ -86,12 +78,8 @@ def test_annotate_comments_content_has_violation_text(
     comments = root.findall(f"{{{_W_NS}}}comment")
     assert len(comments) > 0, "В comments.xml нет ни одного <w:comment>"
 
-    all_text = "".join(
-        t.text or "" for t in root.findall(f".//{{{_W_NS}}}t")
-    )
-    assert "F.01" in all_text, (
-        f"В тексте комментариев не найден код F.01: {all_text!r}"
-    )
+    all_text = "".join(t.text or "" for t in root.findall(f".//{{{_W_NS}}}t"))
+    assert "F.01" in all_text, f"В тексте комментариев не найден код F.01: {all_text!r}"
 
 
 def test_annotate_comments_inserts_reference_in_document(
@@ -119,9 +107,7 @@ def test_annotate_comments_inserts_reference_in_document(
     )
 
 
-def test_annotate_comments_updates_content_types(
-    bad_margins_docx: Path, tmp_path: Path
-) -> None:
+def test_annotate_comments_updates_content_types(bad_margins_docx: Path, tmp_path: Path) -> None:
     """[Content_Types].xml содержит Override для /word/comments.xml."""
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
@@ -139,9 +125,7 @@ def test_annotate_comments_updates_content_types(
     )
 
 
-def test_annotate_comments_updates_document_rels(
-    bad_margins_docx: Path, tmp_path: Path
-) -> None:
+def test_annotate_comments_updates_document_rels(bad_margins_docx: Path, tmp_path: Path) -> None:
     """word/_rels/document.xml.rels содержит relationship типа comments."""
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
@@ -157,9 +141,7 @@ def test_annotate_comments_updates_document_rels(
     )
     rels = root.findall(f"{{{rel_ns}}}Relationship")
     types = [r.get("Type") for r in rels]
-    assert comments_rel_type in types, (
-        f"Relationship на comments.xml не найден: {types}"
-    )
+    assert comments_rel_type in types, f"Relationship на comments.xml не найден: {types}"
 
 
 def test_annotate_inline_does_not_create_comments_part(
@@ -175,9 +157,7 @@ def test_annotate_inline_does_not_create_comments_part(
     assert "word/comments.xml" not in names
 
 
-def test_annotate_count_returns_number_of_comments(
-    bad_margins_docx: Path, tmp_path: Path
-) -> None:
+def test_annotate_count_returns_number_of_comments(bad_margins_docx: Path, tmp_path: Path) -> None:
     """annotate_docx возвращает число вставленных комментариев = число <w:comment>."""
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
@@ -191,9 +171,7 @@ def test_annotate_count_returns_number_of_comments(
     assert n > 0
 
 
-def test_annotate_comments_default_style(
-    bad_margins_docx: Path, tmp_path: Path
-) -> None:
+def test_annotate_comments_default_style(bad_margins_docx: Path, tmp_path: Path) -> None:
     """Без явного style — используется 'comments' (создаётся comments.xml)."""
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
@@ -215,13 +193,9 @@ def test_annotate_comments_zero_violations_copies_input(
     def fake_parse(_: object) -> Document:
         return Document()
 
-    monkeypatch.setattr(
-        "gostforge.annotator.docx_annotator.parse_docx", fake_parse
-    )
+    monkeypatch.setattr("gostforge.annotator.docx_annotator.parse_docx", fake_parse)
     # И validate возвращает пустой список.
-    monkeypatch.setattr(
-        "gostforge.annotator.docx_annotator.validate", lambda _doc, _prof: []
-    )
+    monkeypatch.setattr("gostforge.annotator.docx_annotator.validate", lambda _doc, _prof: [])
 
     out = tmp_path / "out.docx"
     profile = load_profile("gost-7.32-2017")
@@ -233,9 +207,7 @@ def test_annotate_comments_zero_violations_copies_input(
         assert "word/comments.xml" not in z.namelist()
 
 
-def test_annotate_unknown_style_raises(
-    bad_margins_docx: Path, tmp_path: Path
-) -> None:
+def test_annotate_unknown_style_raises(bad_margins_docx: Path, tmp_path: Path) -> None:
     """Неизвестный style → ValueError."""
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
@@ -266,9 +238,7 @@ def test_annotate_comments_reference_inside_paragraph(
         )
 
 
-def test_annotate_comments_unique_ids(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_annotate_comments_unique_ids(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """ID комментариев должны быть уникальны, даже если нарушений много."""
     p = tmp_path / "many.docx"
     _make_minimal_docx(p)
@@ -294,9 +264,7 @@ def test_annotate_comments_unique_ids(
             )
         return doc
 
-    monkeypatch.setattr(
-        "gostforge.annotator.docx_annotator.parse_docx", fake_parse
-    )
+    monkeypatch.setattr("gostforge.annotator.docx_annotator.parse_docx", fake_parse)
 
     out = tmp_path / "out.docx"
     profile = load_profile("gost-7.32-2017")

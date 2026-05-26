@@ -87,9 +87,7 @@ def test_strip_does_not_touch_marker_in_middle() -> None:
 
 def test_strip_preserves_run_formatting() -> None:
     """Bold/italic/font у TextRun должны сохраниться после очистки."""
-    runs = [
-        TextRun(text="– жирный", bold=True, italic=True, font="Calibri")
-    ]
+    runs = [TextRun(text="– жирный", bold=True, italic=True, font="Calibri")]
     result = _strip_leading_marker_from_inline(runs)
     assert result[0].text == "жирный"
     assert result[0].bold is True
@@ -168,18 +166,13 @@ def test_exported_list_has_no_duplicate_markers(tmp_path: Path) -> None:
         assert "NET Framework" in doc_xml
         if pattern in doc_xml:
             pytest.fail(
-                f"Найден дубль-маркер в тексте: {pattern!r} — "
-                "автоматическая очистка не сработала."
+                f"Найден дубль-маркер в тексте: {pattern!r} — автоматическая очистка не сработала."
             )
 
 
 def test_clean_text_appears_after_strip(tmp_path: Path) -> None:
     """После очистки текст элемента списка идёт без маркера."""
-    b = (
-        work("X", year=2026)
-        .section("Введение")
-        .list(["-\tNET Framework 4.8"], ordered=False)
-    )
+    b = work("X", year=2026).section("Введение").list(["-\tNET Framework 4.8"], ordered=False)
     out = tmp_path / "clean.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     doc_xml = _docx_xml(out, "word/document.xml")
@@ -189,9 +182,5 @@ def test_clean_text_appears_after_strip(tmp_path: Path) -> None:
     # Найдём run-текст параграфа списка с «NET Framework».
     runs = re.findall(r"<w:t[^>]*>([^<]+NET Framework[^<]*)</w:t>", doc_xml)
     for run_text in runs:
-        assert not run_text.startswith("-"), (
-            f"Run-текст начинается с дефиса: {run_text!r}"
-        )
-        assert not run_text.startswith("\t"), (
-            f"Run-текст начинается с таба: {run_text!r}"
-        )
+        assert not run_text.startswith("-"), f"Run-текст начинается с дефиса: {run_text!r}"
+        assert not run_text.startswith("\t"), f"Run-текст начинается с таба: {run_text!r}"

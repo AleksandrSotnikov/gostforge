@@ -94,12 +94,7 @@ def test_state_with_specific_disabled_codes() -> None:
 
     # Промежуточный smoke — собираем напрямую через builder API,
     # сверяем что disabled_checks попадает в LogicalSection.
-    b = (
-        work("X", year=2026)
-        .section("Титул")
-        .paragraph("p")
-        .skip_checks("T.01", "H.01")
-    )
+    b = work("X", year=2026).section("Титул").paragraph("p").skip_checks("T.01", "H.01")
     doc = b.build()
     sec = doc.page_sections[0].content[0]
     assert hasattr(sec, "disabled_checks")

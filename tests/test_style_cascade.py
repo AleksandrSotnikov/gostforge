@@ -92,17 +92,13 @@ def _make_docx_with_heading_style(
     # Добавим явный цвет через XML (python-docx не имеет нормального API).
     from lxml import etree
 
-    rPr = h1.element.find(
-        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr"
-    )
+    rPr = h1.element.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr")
     if rPr is None:
         rPr = etree.SubElement(
             h1.element,
             "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}rPr",
         )
-    color = rPr.find(
-        "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color"
-    )
+    color = rPr.find("{http://schemas.openxmlformats.org/wordprocessingml/2006/main}color")
     if color is None:
         color = etree.SubElement(
             rPr,
@@ -128,9 +124,7 @@ def test_parser_inherits_color_from_heading_style(tmp_path: Path) -> None:
     parsed = parse_docx(path)
     sections = all_logical_sections(parsed)
     assert sections, "Заголовок не распознан"
-    heading_runs = [
-        el for el in sections[0].heading if hasattr(el, "color_hex")
-    ]
+    heading_runs = [el for el in sections[0].heading if hasattr(el, "color_hex")]
     assert heading_runs
     assert heading_runs[0].color_hex == "#365F91"
 
@@ -158,9 +152,7 @@ def test_parser_inherits_font_from_heading_style(tmp_path: Path) -> None:
 
 def test_h01_detects_blue_heading_from_default_template(tmp_path: Path) -> None:
     """Документ с синим Heading 1 (как дефолтный шаблон Word) даёт H.01."""
-    path = _make_docx_with_heading_style(
-        tmp_path, heading_color="365F91", heading_font="Cambria"
-    )
+    path = _make_docx_with_heading_style(tmp_path, heading_color="365F91", heading_font="Cambria")
     parsed = parse_docx(path)
     parsed.profile_id = "gost-7.32-2017"
     profile = load_profile("gost-7.32-2017")
@@ -185,16 +177,8 @@ def test_h01_passes_when_heading_style_is_correct(tmp_path: Path) -> None:
     parsed.profile_id = "gost-7.32-2017"
     profile = load_profile("gost-7.32-2017")
     violations = validate(parsed, profile)
-    h01_color = [
-        v
-        for v in violations
-        if v.check_code == "H.01" and "цвет" in v.message.lower()
-    ]
-    h01_font = [
-        v
-        for v in violations
-        if v.check_code == "H.01" and "шрифт" in v.message.lower()
-    ]
+    h01_color = [v for v in violations if v.check_code == "H.01" and "цвет" in v.message.lower()]
+    h01_font = [v for v in violations if v.check_code == "H.01" and "шрифт" in v.message.lower()]
     assert not h01_color, f"H.01 ложно сработал на color: {h01_color}"
     assert not h01_font, f"H.01 ложно сработал на font: {h01_font}"
 
@@ -227,11 +211,5 @@ def test_builder_export_has_no_h01_color_violation(tmp_path: Path) -> None:
     parsed = parse_docx(out)
     parsed.profile_id = "gost-7.32-2017"
     violations = validate(parsed, profile)
-    h01_color = [
-        v
-        for v in violations
-        if v.check_code == "H.01" and "цвет" in v.message.lower()
-    ]
-    assert not h01_color, (
-        f"H.01 нашёл цветовое нарушение в сгенерированном docx: {h01_color}"
-    )
+    h01_color = [v for v in violations if v.check_code == "H.01" and "цвет" in v.message.lower()]
+    assert not h01_color, f"H.01 нашёл цветовое нарушение в сгенерированном docx: {h01_color}"

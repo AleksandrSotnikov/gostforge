@@ -17,9 +17,7 @@ from gostforge.cli import _compare_sections, _state_diff_summary
 def test_identical_states_no_diff() -> None:
     state = {
         "title": "X",
-        "sections": [
-            {"heading": "Введение", "blocks": [{"kind": "paragraph", "text": "T"}]}
-        ],
+        "sections": [{"heading": "Введение", "blocks": [{"kind": "paragraph", "text": "T"}]}],
     }
     out = _state_diff_summary(state, state)
     assert not any(out.values())
@@ -67,9 +65,7 @@ def test_section_modified_blocks() -> None:
     }
     b = {
         "title": "X",
-        "sections": [
-            {"heading": "Введение", "blocks": [{"kind": "paragraph", "text": "p"}]}
-        ],
+        "sections": [{"heading": "Введение", "blocks": [{"kind": "paragraph", "text": "p"}]}],
     }
     out = _state_diff_summary(a, b)
     assert len(out["sections_modified"]) == 1
@@ -149,9 +145,12 @@ def test_cli_diff_state_unified_mode(tmp_path: Path) -> None:
 
     r = subprocess.run(
         [
-            "gostforge", "diff-state",
-            str(a_path), str(b_path),
-            "--mode", "unified",
+            "gostforge",
+            "diff-state",
+            str(a_path),
+            str(b_path),
+            "--mode",
+            "unified",
         ],
         capture_output=True,
         text=True,

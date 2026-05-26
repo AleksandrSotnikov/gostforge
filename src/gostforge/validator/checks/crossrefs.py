@@ -508,9 +508,7 @@ def check_formula_references_resolve(
                         f"не находит соответствующей формулы"
                     ),
                     location=f"paragraph[{paragraph.id}]",
-                    suggestion=(
-                        f"Проверить номер: формулы {num} в документе нет"
-                    ),
+                    suggestion=(f"Проверить номер: формулы {num} в документе нет"),
                     details={"paragraph_id": paragraph.id, "number": str(num)},
                 )
             )
@@ -550,9 +548,7 @@ def _existing_appendix_letters(document: Document) -> set[str]:
         for section in _iter_logical_sections(ps.content):
             if section.level != 1:
                 continue
-            heading = "".join(
-                el.text for el in section.heading if isinstance(el, TextRun)
-            )
+            heading = "".join(el.text for el in section.heading if isinstance(el, TextRun))
             match = _APPENDIX_HEADING_RE.match(heading)
             if match:
                 letters.add(match.group(1).upper())

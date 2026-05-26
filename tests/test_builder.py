@@ -101,14 +101,7 @@ def test_subsection_nests_under_current_section() -> None:
 
 
 def test_new_section_resets_paragraphs_target() -> None:
-    doc = (
-        work("T")
-        .section("A")
-        .paragraph("x")
-        .section("B")
-        .paragraph("y")
-        .build()
-    )
+    doc = work("T").section("A").paragraph("x").section("B").paragraph("y").build()
     sections = _top_level_sections(doc)
     assert [_heading_text(s) for s in sections] == ["A", "B"]
     a_paras = [c for c in sections[0].children if isinstance(c, Paragraph)]
@@ -303,12 +296,8 @@ def test_work_factory_returns_work_builder() -> None:
 def test_section_image_creates_figure_with_auto_caption() -> None:
     """`image()` создаёт Figure с автонумерованной подписью."""
     from gostforge.model import Figure
-    doc = (
-        work("Test")
-        .section("Глава")
-        .image("/tmp/x.png", "Схема архитектуры")
-        .build()
-    )
+
+    doc = work("Test").section("Глава").image("/tmp/x.png", "Схема архитектуры").build()
     section = doc.page_sections[0].content[0]
     figs = [c for c in section.children if isinstance(c, Figure)]
     assert len(figs) == 1
@@ -321,12 +310,8 @@ def test_section_image_creates_figure_with_auto_caption() -> None:
 def test_section_list_ordered() -> None:
     """`list(items, ordered=True)` создаёт ListBlock с ordered=True."""
     from gostforge.model import ListBlock
-    doc = (
-        work("Test")
-        .section("Глава")
-        .list(["один", "два", "три"], ordered=True)
-        .build()
-    )
+
+    doc = work("Test").section("Глава").list(["один", "два", "три"], ordered=True).build()
     section = doc.page_sections[0].content[0]
     lists = [c for c in section.children if isinstance(c, ListBlock)]
     assert len(lists) == 1
@@ -336,12 +321,8 @@ def test_section_list_ordered() -> None:
 
 def test_section_list_bulleted() -> None:
     from gostforge.model import ListBlock
-    doc = (
-        work("Test")
-        .section("Глава")
-        .list(["A", "B"])
-        .build()
-    )
+
+    doc = work("Test").section("Глава").list(["A", "B"]).build()
     section = doc.page_sections[0].content[0]
     lists = [c for c in section.children if isinstance(c, ListBlock)]
     assert len(lists) == 1

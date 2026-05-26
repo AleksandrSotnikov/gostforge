@@ -74,12 +74,7 @@ def test_rich_paragraph_supports_cross_ref_with_prefix() -> None:
 
 def test_paragraph_delegates_to_rich_paragraph() -> None:
     """.paragraph(text) остаётся обёрткой над .rich_paragraph и работает как раньше."""
-    doc = (
-        work("T")
-        .section("Введение")
-        .paragraph("Простой текст", bold=True)
-        .build()
-    )
+    doc = work("T").section("Введение").paragraph("Простой текст", bold=True).build()
     para = _first_paragraph(doc)
     assert len(para.content) == 1
     run = para.content[0]
@@ -108,21 +103,13 @@ def test_rich_paragraph_returns_self_for_chaining() -> None:
     assert section is not None
     paragraphs = [c for c in section.children if isinstance(c, Paragraph)]
     assert len(paragraphs) == 3
-    texts = [
-        "".join(el.text for el in p.content if isinstance(el, TextRun))
-        for p in paragraphs
-    ]
+    texts = ["".join(el.text for el in p.content if isinstance(el, TextRun)) for p in paragraphs]
     assert texts == ["Один", "Два", "Три"]
 
 
 def test_rich_paragraph_accepts_empty_list() -> None:
     """Пустой список валиден — параграф будет пустым."""
-    doc = (
-        work("T")
-        .section("Введение")
-        .rich_paragraph([])
-        .build()
-    )
+    doc = work("T").section("Введение").rich_paragraph([]).build()
     para = _first_paragraph(doc)
     assert para.content == []
 
@@ -134,12 +121,7 @@ def test_rich_paragraph_does_not_mutate_input() -> None:
     отразиться на содержимом параграфа в модели.
     """
     elements = [TextRun(text="изначальный")]
-    doc = (
-        work("T")
-        .section("Введение")
-        .rich_paragraph(elements)
-        .build()
-    )
+    doc = work("T").section("Введение").rich_paragraph(elements).build()
     elements.append(TextRun(text="лишний"))  # мутация после билда
     para = _first_paragraph(doc)
     assert len(para.content) == 1

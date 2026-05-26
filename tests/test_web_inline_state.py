@@ -162,9 +162,7 @@ def test_round_trip_mixed_inline_elements() -> None:
     runs = _runs_from_inline(original)
     restored = _runs_to_inline(runs)
     # Длина и порядок типов совпадают.
-    assert [type(x).__name__ for x in restored] == [
-        type(x).__name__ for x in original
-    ]
+    assert [type(x).__name__ for x in restored] == [type(x).__name__ for x in original]
     # Текст / ключевые поля совпадают.
     assert restored[0] == TextRun(text="Энергия ", bold=False)
     assert restored[1] == InlineFormula(latex=r"E = h\nu")

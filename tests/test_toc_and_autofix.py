@@ -29,8 +29,10 @@ def test_builder_table_of_contents(tmp_path: Path) -> None:
     """SectionBuilder.table_of_contents() добавляет TableOfContents-блок."""
     b = (
         work("X", year=2026)
-        .section("Содержание").table_of_contents()
-        .section("Введение").paragraph("p")
+        .section("Содержание")
+        .table_of_contents()
+        .section("Введение")
+        .paragraph("p")
     )
     doc = b.build()
     sec = doc.page_sections[0].content[0]
@@ -44,28 +46,32 @@ def test_toc_writes_field_in_docx(tmp_path: Path) -> None:
     """Экспортёр пишет <w:fldSimple w:instr="TOC..."/> в document.xml."""
     b = (
         work("X", year=2026)
-        .section("Содержание").table_of_contents()
-        .section("Введение").paragraph("p")
+        .section("Содержание")
+        .table_of_contents()
+        .section("Введение")
+        .paragraph("p")
     )
     out = tmp_path / "toc.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     doc_xml = _docx_xml(out, "word/document.xml")
     assert '<w:fldSimple w:instr=" TOC' in doc_xml
     # По дефолту уровни 1-3 (кавычки в XML-атрибутах экранированы как &quot;).
-    assert '\\o &quot;1-3&quot;' in doc_xml or '\\o "1-3"' in doc_xml
+    assert "\\o &quot;1-3&quot;" in doc_xml or '\\o "1-3"' in doc_xml
 
 
 def test_toc_with_custom_levels(tmp_path: Path) -> None:
     """min_level/max_level из builder API попадают в TOC-instr."""
     b = (
         work("X", year=2026)
-        .section("Содержание").table_of_contents(min_level=1, max_level=2)
-        .section("Введение").paragraph("p")
+        .section("Содержание")
+        .table_of_contents(min_level=1, max_level=2)
+        .section("Введение")
+        .paragraph("p")
     )
     out = tmp_path / "toc2.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     doc_xml = _docx_xml(out, "word/document.xml")
-    assert '\\o &quot;1-2&quot;' in doc_xml or '\\o "1-2"' in doc_xml
+    assert "\\o &quot;1-2&quot;" in doc_xml or '\\o "1-2"' in doc_xml
 
 
 # --- TOC через state (UI / CLI) ---
@@ -196,12 +202,18 @@ def test_l04_fixer_idempotent(tmp_path: Path) -> None:
         items=[[TR(text="первый;")], [TR(text="второй.")]],
     )
     sec = LogicalSection(
-        id="s", heading=[TR(text="X")], level=1, children=[lb],
+        id="s",
+        heading=[TR(text="X")],
+        level=1,
+        children=[lb],
     )
     doc.page_sections.append(
         PageSection(
-            id="m", name="N", type="main",
-            page=PageGeometry(), page_numbering=PageNumberingConfig(),
+            id="m",
+            name="N",
+            type="main",
+            page=PageGeometry(),
+            page_numbering=PageNumberingConfig(),
             content=[sec],
         )
     )
@@ -236,10 +248,7 @@ def test_parser_builds_section_hierarchy(tmp_path: Path) -> None:
     assert chapters, "Глав level=1 не найдено"
     chap = chapters[0]
     # У главы должны быть child-секции с level=2.
-    sub_sections = [
-        c for c in chap.children
-        if isinstance(c, LogicalSection) and c.level == 2
-    ]
+    sub_sections = [c for c in chap.children if isinstance(c, LogicalSection) and c.level == 2]
     assert sub_sections, (
         f"Подразделы не попали в children главы. Children: "
         f"{[type(c).__name__ for c in chap.children]}"

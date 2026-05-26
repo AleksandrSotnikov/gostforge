@@ -57,9 +57,7 @@ def _ensure_state() -> None:
     if "history_default_author" not in ss:
         import os
 
-        ss["history_default_author"] = os.environ.get(
-            "GOSTFORGE_DEFAULT_AUTHOR", ""
-        )
+        ss["history_default_author"] = os.environ.get("GOSTFORGE_DEFAULT_AUTHOR", "")
     if "history_default_role" not in ss:
         ss["history_default_role"] = "anonymous"
     if "history_selected_id" not in ss:
@@ -69,9 +67,7 @@ def _ensure_state() -> None:
 # --- DB-helpers (тонкие обёртки для UI с graceful fallback) ----------------
 
 
-def _try_list_submissions(
-    *, filename: str | None, limit: int = 100
-) -> list[Any]:
+def _try_list_submissions(*, filename: str | None, limit: int = 100) -> list[Any]:
     """Безопасный list_submissions. На ошибках возвращает []."""
     try:
         from gostforge.db import get_connection, list_submissions
@@ -93,9 +89,7 @@ def _try_get_submission(submission_id: int) -> Any | None:
         return None
 
 
-def _try_list_comments(
-    submission_id: int, *, include_resolved: bool = True
-) -> list[Any]:
+def _try_list_comments(submission_id: int, *, include_resolved: bool = True) -> list[Any]:
     """Безопасный list_comments."""
     try:
         from gostforge.db import get_connection, list_comments
@@ -194,9 +188,7 @@ def _render_sidebar() -> None:
             "по умолчанию."
         ),
     )
-    role_index = list(_ROLE_OPTIONS).index(
-        st.session_state["history_default_role"]
-    )
+    role_index = list(_ROLE_OPTIONS).index(st.session_state["history_default_role"])
     st.session_state["history_default_role"] = st.sidebar.selectbox(
         "Роль",
         options=list(_ROLE_OPTIONS),
@@ -224,9 +216,7 @@ def _render_submissions_list() -> None:
 
     for sub in items:
         unresolved = _try_unresolved_count(sub.id)
-        badge = (
-            f"  :red-background[{unresolved} открытых]" if unresolved > 0 else ""
-        )
+        badge = f"  :red-background[{unresolved} открытых]" if unresolved > 0 else ""
         title = (
             f"#{sub.id}  ·  {sub.filename}  ·  "
             f":red[{sub.error_count}e] / "
@@ -242,9 +232,7 @@ def _render_submission_panel(sub: Any) -> None:
     """Подробности одного submission: violations + обсуждение."""
     st.caption(f"Профиль: `{sub.profile_id}`")
 
-    tab_v, tab_c = st.tabs(
-        ["Нарушения", f"Обсуждение ({_try_unresolved_count(sub.id)} открыто)"]
-    )
+    tab_v, tab_c = st.tabs(["Нарушения", f"Обсуждение ({_try_unresolved_count(sub.id)} открыто)"])
     with tab_v:
         _render_violations(sub.id)
     with tab_c:
@@ -260,10 +248,7 @@ def _render_violations(submission_id: int) -> None:
     severity_color = {"error": "red", "warning": "orange", "info": "blue"}
     for v in sub.violations:
         color = severity_color.get(v.severity, "gray")
-        st.markdown(
-            f":{color}[**{v.severity.upper()}**]  "
-            f"`{v.code}`  —  {v.message}"
-        )
+        st.markdown(f":{color}[**{v.severity.upper()}**]  `{v.code}`  —  {v.message}")
         if v.location:
             st.caption(v.location)
         if v.suggestion:
@@ -330,9 +315,7 @@ def _render_add_comment_form(submission_id: int) -> None:
             "Автор",
             value=st.session_state["history_default_author"],
         )
-        role_idx = list(_ROLE_OPTIONS).index(
-            st.session_state["history_default_role"]
-        )
+        role_idx = list(_ROLE_OPTIONS).index(st.session_state["history_default_role"])
         role = cols[1].selectbox(
             "Роль",
             options=list(_ROLE_OPTIONS),
@@ -362,10 +345,7 @@ def _escape_html(text: str) -> str:
     но содержимое комментария должно идти как plain text.
     """
     return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace("\n", "<br>")
+        text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
     )
 
 

@@ -61,7 +61,8 @@ def test_stats_state_text_output(tmp_path: Path) -> None:
     p = _make_state(tmp_path)
     r = subprocess.run(
         ["gostforge", "stats-state", str(p)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0, r.stderr
     out = r.stdout
@@ -75,7 +76,8 @@ def test_stats_state_json_output(tmp_path: Path) -> None:
     p = _make_state(tmp_path)
     r = subprocess.run(
         ["gostforge", "stats-state", str(p), "--json"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode == 0
     data = json.loads(r.stdout)
@@ -89,7 +91,8 @@ def test_stats_state_invalid_json(tmp_path: Path) -> None:
     bad.write_text("не JSON", encoding="utf-8")
     r = subprocess.run(
         ["gostforge", "stats-state", str(bad)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode != 0
     assert "JSON" in r.stderr
@@ -100,7 +103,8 @@ def test_stats_state_missing_sections(tmp_path: Path) -> None:
     bad.write_text(json.dumps({"title": "X"}), encoding="utf-8")
     r = subprocess.run(
         ["gostforge", "stats-state", str(bad)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     assert r.returncode != 0
 
@@ -112,7 +116,8 @@ def test_check_state_text_output(tmp_path: Path) -> None:
     p = _make_state(tmp_path)
     r = subprocess.run(
         ["gostforge", "check-state", str(p)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     # Минимальный state даёт ошибки структуры (S.04, V.* и т. п.) →
     # exit 1, но stdout валидный.
@@ -124,7 +129,8 @@ def test_check_state_json_output(tmp_path: Path) -> None:
     p = _make_state(tmp_path)
     r = subprocess.run(
         ["gostforge", "check-state", str(p), "--json"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     data = json.loads(r.stdout)
     assert "total" in data
@@ -137,10 +143,14 @@ def test_check_state_profile_override(tmp_path: Path) -> None:
     p = _make_state(tmp_path, profile="gost-7.32-2017")
     r = subprocess.run(
         [
-            "gostforge", "check-state", str(p),
-            "--profile", "gost-r-2.105-2019",
+            "gostforge",
+            "check-state",
+            str(p),
+            "--profile",
+            "gost-r-2.105-2019",
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     out = r.stdout
     assert "gost-r-2.105-2019" in out
@@ -151,7 +161,8 @@ def test_check_state_exits_1_on_errors(tmp_path: Path) -> None:
     p = _make_state(tmp_path)
     r = subprocess.run(
         ["gostforge", "check-state", str(p)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     # Минимальный state даёт error-нарушения (S.04, K.01 и т.д.).
     assert r.returncode == 1
@@ -166,31 +177,37 @@ def test_check_state_perfect_doc_exits_0(tmp_path: Path) -> None:
         "year": 2026,
         "profile_id": "gost-7.32-2017",
         "sections": [
-            {"heading": "Реферат", "blocks": [
-                {"kind": "paragraph", "text": "Работа объёмом 25 страниц."}
-            ]},
-            {"heading": "Содержание", "blocks": [
-                {"kind": "paragraph", "text": "Введение ... 3"}
-            ]},
-            {"heading": "Введение", "blocks": [
-                {"kind": "paragraph", "text": "Актуальность темы."},
-                {"kind": "paragraph", "text": "Цель работы."},
-            ]},
-            {"heading": "Заключение", "blocks": [
-                {"kind": "paragraph", "text": "Результаты получены."}
-            ]},
-            {"heading": "Список использованных источников",
-             "is_bibliography": True,
-             "references": [
-                 "Кнут Д. — М. : Вильямс, 2007. — 832 с.",
-             ]},
+            {
+                "heading": "Реферат",
+                "blocks": [{"kind": "paragraph", "text": "Работа объёмом 25 страниц."}],
+            },
+            {"heading": "Содержание", "blocks": [{"kind": "paragraph", "text": "Введение ... 3"}]},
+            {
+                "heading": "Введение",
+                "blocks": [
+                    {"kind": "paragraph", "text": "Актуальность темы."},
+                    {"kind": "paragraph", "text": "Цель работы."},
+                ],
+            },
+            {
+                "heading": "Заключение",
+                "blocks": [{"kind": "paragraph", "text": "Результаты получены."}],
+            },
+            {
+                "heading": "Список использованных источников",
+                "is_bibliography": True,
+                "references": [
+                    "Кнут Д. — М. : Вильямс, 2007. — 832 с.",
+                ],
+            },
         ],
     }
     p = tmp_path / "good.json"
     p.write_text(json.dumps(state, ensure_ascii=False), encoding="utf-8")
     r = subprocess.run(
         ["gostforge", "check-state", str(p)],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     # Может быть warnings/info — но не error.
     # exit 0 = 0 ошибок; exit 1 = есть.

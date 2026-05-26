@@ -18,11 +18,16 @@ def test_new_state_creates_valid_json(tmp_path: Path, template: str) -> None:
     out_path = tmp_path / f"state_{template}.json"
     result = subprocess.run(
         [
-            "gostforge", "new-state",
-            "--template", template,
-            "--title", f"Test {template}",
-            "--year", "2026",
-            "-o", str(out_path),
+            "gostforge",
+            "new-state",
+            "--template",
+            template,
+            "--title",
+            f"Test {template}",
+            "--year",
+            "2026",
+            "-o",
+            str(out_path),
         ],
         capture_output=True,
         text=True,
@@ -52,10 +57,14 @@ def test_new_state_with_profile_override(tmp_path: Path) -> None:
     out_path = tmp_path / "state.json"
     subprocess.run(
         [
-            "gostforge", "new-state",
-            "--template", "empty",
-            "--profile", "gost-r-2.105-2019",
-            "-o", str(out_path),
+            "gostforge",
+            "new-state",
+            "--template",
+            "empty",
+            "--profile",
+            "gost-r-2.105-2019",
+            "-o",
+            str(out_path),
         ],
         check=True,
     )
@@ -70,10 +79,14 @@ def test_new_state_then_generate_full_cycle(tmp_path: Path) -> None:
 
     r1 = subprocess.run(
         [
-            "gostforge", "new-state",
-            "--template", "coursework",
-            "--title", "Цикл",
-            "-o", str(state_path),
+            "gostforge",
+            "new-state",
+            "--template",
+            "coursework",
+            "--title",
+            "Цикл",
+            "-o",
+            str(state_path),
         ],
         capture_output=True,
         text=True,
@@ -130,9 +143,7 @@ def test_bulk_remove_empty_paragraphs() -> None:
     assert removed == 2
     blocks = state["sections"][0]["blocks"]
     assert len(blocks) == 2
-    assert all(
-        (b.get("text") or "").strip() for b in blocks if b.get("kind") == "paragraph"
-    )
+    assert all((b.get("text") or "").strip() for b in blocks if b.get("kind") == "paragraph")
 
 
 def test_bulk_remove_empty_in_subsections() -> None:

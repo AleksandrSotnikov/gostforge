@@ -106,9 +106,7 @@ def test_post_check_happy_path(client: TestClient, docx_bytes: bytes) -> None:
     assert {"error", "warning", "info"} <= set(body["summary"])
 
 
-def test_post_check_default_profile_when_omitted(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_post_check_default_profile_when_omitted(client: TestClient, docx_bytes: bytes) -> None:
     """Если profile_id не передан — берётся gost-7.32-2017 по умолчанию."""
     files = {"file": ("sample.docx", docx_bytes, "application/octet-stream")}
     r = client.post("/check", files=files)
@@ -135,17 +133,13 @@ def test_post_check_rejects_corrupt_docx(client: TestClient) -> None:
     assert r.status_code == 400
 
 
-def test_post_check_unknown_profile_returns_404(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_post_check_unknown_profile_returns_404(client: TestClient, docx_bytes: bytes) -> None:
     files = {"file": ("sample.docx", docx_bytes, "application/octet-stream")}
     r = client.post("/check", files=files, data={"profile_id": "does-not-exist"})
     assert r.status_code == 404
 
 
-def test_post_check_finds_margin_violation(
-    client: TestClient, tmp_path: Path
-) -> None:
+def test_post_check_finds_margin_violation(client: TestClient, tmp_path: Path) -> None:
     """Документ с неправильными полями должен дать violation F.01."""
     p = tmp_path / "bad.docx"
     make_docx(
@@ -200,9 +194,7 @@ def test_post_fix_rejects_non_docx(client: TestClient) -> None:
 # --- /annotate -------------------------------------------------------------
 
 
-def test_post_annotate_default_comments_style(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_post_annotate_default_comments_style(client: TestClient, docx_bytes: bytes) -> None:
     r = client.post(
         "/annotate",
         files={"file": ("sample.docx", docx_bytes, "application/octet-stream")},
@@ -221,9 +213,7 @@ def test_post_annotate_inline_style(client: TestClient, docx_bytes: bytes) -> No
     assert r.content.startswith(b"PK")
 
 
-def test_post_annotate_rejects_invalid_style(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_post_annotate_rejects_invalid_style(client: TestClient, docx_bytes: bytes) -> None:
     r = client.post(
         "/annotate",
         files={"file": ("sample.docx", docx_bytes, "application/octet-stream")},

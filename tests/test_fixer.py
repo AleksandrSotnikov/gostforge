@@ -182,7 +182,7 @@ def test_t10_skips_multi_run_paragraph() -> None:
 
 
 def test_t11_hyphen_to_em_dash() -> None:
-    """ « - » → « — » в одном TextRun-е."""
+    """« - » → « — » в одном TextRun-е."""
     paragraph = Paragraph(
         id="p1",
         content=[TextRun(text="a - b")],
@@ -220,7 +220,7 @@ def test_t12_registered() -> None:
 
 
 def test_t12_inserts_nbsp_between_number_and_unit() -> None:
-    """ «5 кг» → «5<NBSP>кг»."""
+    """«5 кг» → «5<NBSP>кг»."""
     paragraph = Paragraph(
         id="p1",
         content=[TextRun(text="вес 5 кг и длина 10 м")],
@@ -274,7 +274,7 @@ def test_t13_registered() -> None:
 
 
 def test_t13_inserts_nbsp_between_initials_and_surname() -> None:
-    """ «И. И. Иванов» → «И.<NBSP>И.<NBSP>Иванов»."""
+    """«И. И. Иванов» → «И.<NBSP>И.<NBSP>Иванов»."""
     paragraph = Paragraph(
         id="p1",
         content=[TextRun(text="автор: И. И. Иванов и А. Б. Петров")],
@@ -287,10 +287,7 @@ def test_t13_inserts_nbsp_between_initials_and_surname() -> None:
     assert applied[0].fixer_code == "T.13"
     assert isinstance(applied[0], FixApplied)
     text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
-    assert (
-        text_runs[0].text
-        == "автор: И. И. Иванов и А. Б. Петров"
-    )
+    assert text_runs[0].text == "автор: И. И. Иванов и А. Б. Петров"
 
 
 def test_t13_no_change_when_already_nbsp() -> None:
@@ -325,7 +322,7 @@ def test_t13_no_change_without_pattern() -> None:
 
 
 def test_h03_removes_dot_after_number() -> None:
-    """ «1. Введение» → «1 Введение»."""
+    """«1. Введение» → «1 Введение»."""
     section = LogicalSection(
         id="s1",
         heading=[TextRun(text="1. Введение")],
@@ -344,7 +341,7 @@ def test_h03_removes_dot_after_number() -> None:
 
 
 def test_h08_removes_trailing_dot() -> None:
-    """ «Введение.» → «Введение»."""
+    """«Введение.» → «Введение»."""
     section = LogicalSection(
         id="s1",
         heading=[TextRun(text="Введение.")],
@@ -427,6 +424,7 @@ def test_fix_with_codes_filter() -> None:
 def test_t07_fix_registered() -> None:
     """T.07 фиксер зарегистрирован в реестре."""
     from gostforge.fixer.engine import registered_fixers
+
     assert "T.07" in registered_fixers()
 
 
@@ -439,7 +437,9 @@ def test_t07_removes_extra_empty_paragraphs() -> None:
     doc = Document()
     doc.page_sections.append(
         PageSection(
-            id="main", name="m", type="main",
+            id="main",
+            name="m",
+            type="main",
             content=[
                 Paragraph(id="p1", content=[TextRun(text="Раздел 1")]),
                 Paragraph(id="p2", content=[]),
@@ -466,7 +466,9 @@ def test_t07_keeps_single_empty_paragraph() -> None:
     doc = Document()
     doc.page_sections.append(
         PageSection(
-            id="main", name="m", type="main",
+            id="main",
+            name="m",
+            type="main",
             content=[
                 Paragraph(id="p1", content=[TextRun(text="A")]),
                 Paragraph(id="p2", content=[]),
@@ -484,6 +486,7 @@ def test_t07_keeps_single_empty_paragraph() -> None:
 
 def test_t06_fix_registered() -> None:
     from gostforge.fixer.engine import registered_fixers
+
     assert "T.06" in registered_fixers()
 
 
@@ -543,6 +546,7 @@ def test_export_writes_auto_hyphenation_setting(tmp_path: Path) -> None:
 
 def test_t03_fix_registered() -> None:
     from gostforge.fixer.engine import registered_fixers
+
     assert "T.03" in registered_fixers()
 
 
@@ -565,7 +569,9 @@ def test_t03_skips_heading() -> None:
     from gostforge.model import Document, PageSection, Paragraph, TextRun
     from gostforge.profile import load_profile
 
-    p = Paragraph(id="p1", content=[TextRun(text="Заголовок")], style_name="Heading 1", line_spacing=1.0)
+    p = Paragraph(
+        id="p1", content=[TextRun(text="Заголовок")], style_name="Heading 1", line_spacing=1.0
+    )
     doc = Document()
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
     profile = load_profile("gost-7.32-2017")
@@ -577,7 +583,9 @@ def test_t04_corrects_first_line_indent() -> None:
     from gostforge.model import Document, PageSection, Paragraph, TextRun
     from gostforge.profile import load_profile
 
-    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=0.0)
+    p = Paragraph(
+        id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=0.0
+    )
     doc = Document()
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
     profile = load_profile("gost-7.32-2017")
@@ -605,7 +613,9 @@ def test_t04_noop_when_already_correct() -> None:
     from gostforge.model import Document, PageSection, Paragraph, TextRun
     from gostforge.profile import load_profile
 
-    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=1.25)
+    p = Paragraph(
+        id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=1.25
+    )
     doc = Document()
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
     profile = load_profile("gost-7.32-2017")

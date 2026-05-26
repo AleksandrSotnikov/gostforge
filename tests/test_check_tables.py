@@ -70,9 +70,7 @@ def test_b01_table_with_empty_text_caption_violation() -> None:
 
 def test_b01_tables_in_logical_sections() -> None:
     """Таблицы внутри LogicalSection.children тоже проверяются."""
-    table_ok = Table(
-        id="t-a", caption=[TextRun(text="Таблица A")]
-    )
+    table_ok = Table(id="t-a", caption=[TextRun(text="Таблица A")])
     table_bad = Table(id="t-b", caption=[])
     section = LogicalSection(
         id="sec-1",
@@ -226,8 +224,7 @@ def test_b09_registered() -> None:
 def test_b09_continuous_numbering_no_violation() -> None:
     """Таблицы 1, 2, 3 — нарушения нет."""
     tables = [
-        Table(id=f"t-{i}", caption=[TextRun(text=f"Таблица {i} — Имя {i}")])
-        for i in (1, 2, 3)
+        Table(id=f"t-{i}", caption=[TextRun(text=f"Таблица {i} — Имя {i}")]) for i in (1, 2, 3)
     ]
     doc = _doc_with_content(list(tables))
     profile = load_profile("gost-7.32-2017")
@@ -292,9 +289,7 @@ def test_b09_nested_logical_sections() -> None:
     """Таблицы во вложенных секциях тоже участвуют в сквозной нумерации."""
     t1 = Table(id="t-1", caption=[TextRun(text="Таблица 1 — A")])
     t3 = Table(id="t-3", caption=[TextRun(text="Таблица 3 — C")])
-    inner = LogicalSection(
-        id="sec-2", level=2, heading=[TextRun(text="Sub")], children=[t3]
-    )
+    inner = LogicalSection(id="sec-2", level=2, heading=[TextRun(text="Sub")], children=[t3])
     outer = LogicalSection(
         id="sec-1", level=1, heading=[TextRun(text="Main")], children=[t1, inner]
     )

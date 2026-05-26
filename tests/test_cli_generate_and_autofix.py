@@ -95,9 +95,13 @@ def test_generate_profile_override(tmp_path: Path) -> None:
 
     result = subprocess.run(
         [
-            "gostforge", "generate", str(state_path),
-            "-o", str(out_path),
-            "--profile", "gost-r-2.105-2019",
+            "gostforge",
+            "generate",
+            str(state_path),
+            "-o",
+            str(out_path),
+            "--profile",
+            "gost-r-2.105-2019",
         ],
         capture_output=True,
         text=True,
@@ -115,8 +119,10 @@ def test_full_cli_cycle_import_then_generate(tmp_path: Path) -> None:
     # Шаг 0: оригинальный docx.
     b = (
         work("Цикл", author="A", year=2025)
-        .section("Введение").paragraph("текст один")
-        .section("Список использованных источников").reference("Кнут. — М., 2007.")
+        .section("Введение")
+        .paragraph("текст один")
+        .section("Список использованных источников")
+        .reference("Кнут. — М., 2007.")
     )
     doc = b.build()
     out1 = tmp_path / "step1.docx"
@@ -201,11 +207,7 @@ def test_apply_autofixes_with_fixable_violations() -> None:
     for p in paragraphs:
         text = p.get("text", "")
         if not text and p.get("runs"):
-            text = "".join(
-                r.get("text", "")
-                for r in p["runs"]
-                if r.get("kind") == "text"
-            )
+            text = "".join(r.get("text", "") for r in p["runs"] if r.get("kind") == "text")
         assert "  " not in text, f"Двойные пробелы остались: {text!r}"
 
 
@@ -219,9 +221,7 @@ def test_apply_autofixes_updates_summary() -> None:
         "sections": [
             {
                 "heading": "Введение",
-                "blocks": [
-                    {"kind": "paragraph", "text": "Двойные  пробелы  тут."}
-                ],
+                "blocks": [{"kind": "paragraph", "text": "Двойные  пробелы  тут."}],
             },
             {
                 "heading": "Список использованных источников",

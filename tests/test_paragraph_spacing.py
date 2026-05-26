@@ -66,11 +66,7 @@ def test_normal_style_uses_profile_spacing(tmp_path: Path) -> None:
     profile.styles.body.space_before_pt = 6
     profile.styles.body.space_after_pt = 6
 
-    b = (
-        work("X", year=2026)
-        .section("Введение")
-        .paragraph("текст")
-    )
+    b = work("X", year=2026).section("Введение").paragraph("текст")
     out = tmp_path / "out.docx"
     export_docx(b.build(), profile, out)
     data = out.read_bytes()

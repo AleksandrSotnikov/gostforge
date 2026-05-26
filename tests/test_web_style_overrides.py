@@ -126,9 +126,7 @@ def test_overrides_do_not_mutate_original_profile() -> None:
     p = load_profile("gost-7.32-2017")
     orig_font = p.styles.body.font
     orig_uppercase = p.styles.heading_1.uppercase
-    _apply_style_overrides(
-        p, {"body_font": "Arial", "heading1_uppercase": False}
-    )
+    _apply_style_overrides(p, {"body_font": "Arial", "heading1_uppercase": False})
     assert p.styles.body.font == orig_font
     assert p.styles.heading_1.uppercase == orig_uppercase
 

@@ -15,9 +15,7 @@ from gostforge.stats import compute_stats
 
 def _doc_with_content(items: list[object]) -> Document:
     doc = Document()
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=list(items))
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=list(items)))
     return doc
 
 

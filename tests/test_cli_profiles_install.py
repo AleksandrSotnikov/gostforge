@@ -23,10 +23,7 @@ def db_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 def yaml_file(tmp_path: Path) -> Path:
     p = tmp_path / "kafedra.yaml"
     p.write_text(
-        'id: my-kafedra\n'
-        'name: Моя кафедра\n'
-        'version: "1.0"\n'
-        'extends: gost-7.32-2017\n',
+        'id: my-kafedra\nname: Моя кафедра\nversion: "1.0"\nextends: gost-7.32-2017\n',
         encoding="utf-8",
     )
     return p
@@ -48,9 +45,7 @@ def test_install_happy_path(db_path: Path, yaml_file: Path) -> None:
     assert "[custom]" in list_result.output
 
 
-def test_install_unknown_file_returns_error(
-    db_path: Path, tmp_path: Path
-) -> None:
+def test_install_unknown_file_returns_error(db_path: Path, tmp_path: Path) -> None:
     runner = CliRunner()
     nonexistent = tmp_path / "nope.yaml"
     result = runner.invoke(main, ["profiles", "install", str(nonexistent)])
@@ -58,9 +53,7 @@ def test_install_unknown_file_returns_error(
     assert result.exit_code != 0
 
 
-def test_install_invalid_yaml_reports_error(
-    db_path: Path, tmp_path: Path
-) -> None:
+def test_install_invalid_yaml_reports_error(db_path: Path, tmp_path: Path) -> None:
     bad = tmp_path / "bad.yaml"
     bad.write_text("description: только описание\n", encoding="utf-8")
     runner = CliRunner()
@@ -69,9 +62,7 @@ def test_install_invalid_yaml_reports_error(
     assert "Ошибка" in result.output
 
 
-def test_install_duplicate_without_overwrite_fails(
-    db_path: Path, yaml_file: Path
-) -> None:
+def test_install_duplicate_without_overwrite_fails(db_path: Path, yaml_file: Path) -> None:
     runner = CliRunner()
     runner.invoke(main, ["profiles", "install", str(yaml_file)])
     result = runner.invoke(main, ["profiles", "install", str(yaml_file)])
@@ -82,9 +73,7 @@ def test_install_duplicate_without_overwrite_fails(
 def test_install_with_overwrite_succeeds(db_path: Path, yaml_file: Path) -> None:
     runner = CliRunner()
     runner.invoke(main, ["profiles", "install", str(yaml_file)])
-    result = runner.invoke(
-        main, ["profiles", "install", str(yaml_file), "--overwrite"]
-    )
+    result = runner.invoke(main, ["profiles", "install", str(yaml_file), "--overwrite"])
     assert result.exit_code == 0
     assert "Профиль установлен" in result.output
 

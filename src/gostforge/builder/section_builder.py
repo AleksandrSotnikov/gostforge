@@ -63,9 +63,7 @@ class SectionBuilder:
 
     # --- Контент -------------------------------------------------------------
 
-    def paragraph(
-        self, text: str, *, bold: bool = False, italic: bool = False
-    ) -> SectionBuilder:
+    def paragraph(self, text: str, *, bold: bool = False, italic: bool = False) -> SectionBuilder:
         """Добавить параграф в текущий раздел.
 
         Высокоуровневая обёртка для случая «один абзац = одна строка с
@@ -73,9 +71,7 @@ class SectionBuilder:
         перекрёстных ссылок и mixed-форматирования используйте
         :meth:`rich_paragraph`.
         """
-        return self.rich_paragraph(
-            [TextRun(text=text, bold=bold, italic=italic)]
-        )
+        return self.rich_paragraph([TextRun(text=text, bold=bold, italic=italic)])
 
     def rich_paragraph(self, elements: list[InlineElement]) -> SectionBuilder:
         """Добавить параграф с готовым набором inline-элементов.

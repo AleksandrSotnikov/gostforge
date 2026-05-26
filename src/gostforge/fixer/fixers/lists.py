@@ -114,9 +114,7 @@ def fix_list_item_punctuation(
                 FixApplied(
                     fixer_code="L.04",
                     location=f"list[{lst.id}].item[{idx}]",
-                    description=(
-                        f"Пунктуация: «{old_text[-3:]!r}» → «{suffix}»"
-                    ),
+                    description=(f"Пунктуация: «{old_text[-3:]!r}» → «{suffix}»"),
                 )
             )
     return applied

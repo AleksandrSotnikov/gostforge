@@ -68,10 +68,7 @@ def test_import_preserves_user_selected_profile_eskd(tmp_path: Path) -> None:
         # state уже обновлён.
         pass
 
-    assert (
-        st.session_state["builder_state"]["profile_id"]
-        == "gost-r-2.105-2019"
-    ), (
+    assert st.session_state["builder_state"]["profile_id"] == "gost-r-2.105-2019", (
         "profile_id переключился с ЕСКД на дефолт после импорта — "
         "пользовательский выбор был утрачен."
     )
@@ -119,7 +116,4 @@ def test_import_preserves_eskd_through_multiple_docx_loads(
     except Exception:
         pass
 
-    assert (
-        st.session_state["builder_state"]["profile_id"]
-        == "gost-r-2.105-2019"
-    )
+    assert st.session_state["builder_state"]["profile_id"] == "gost-r-2.105-2019"

@@ -87,9 +87,7 @@ def test_try_load_autosave_returns_none_when_missing() -> None:
 
 def test_try_load_autosave_returns_state_when_fresh() -> None:
     payload = {"sections": [{"id": "s1", "heading": "Глава", "blocks": []}]}
-    be._autosave_path().write_text(
-        json.dumps(payload, ensure_ascii=False), encoding="utf-8"
-    )
+    be._autosave_path().write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
     loaded = be._try_load_autosave_state()
     assert loaded == payload
 

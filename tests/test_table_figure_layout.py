@@ -49,18 +49,12 @@ def test_table_cell_no_first_line_indent(tmp_path: Path) -> None:
                     indent = p.paragraph_format.first_line_indent
                     # None или 0 — оба ok (не должно быть 1.25 см).
                     if indent is not None:
-                        assert indent.cm <= 0.01, (
-                            f"Красная строка в ячейке: {indent.cm} см"
-                        )
+                        assert indent.cm <= 0.01, f"Красная строка в ячейке: {indent.cm} см"
 
 
 def test_table_cell_single_line_spacing(tmp_path: Path) -> None:
     """В ячейках single-spacing (1.0), не 1.5 как в Normal."""
-    b = (
-        work("X", year=2026)
-        .section("Введение")
-        .table(headers=["A"], rows=[["x"]], caption="T")
-    )
+    b = work("X", year=2026).section("Введение").table(headers=["A"], rows=[["x"]], caption="T")
     out = tmp_path / "tbl2.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     raw = DocxDocument(str(out))
@@ -92,11 +86,7 @@ def test_table_header_centered_cells_left(tmp_path: Path) -> None:
 
 def test_table_cell_no_extra_spacing(tmp_path: Path) -> None:
     """Без интервалов перед/после параграфа в ячейках."""
-    b = (
-        work("X", year=2026)
-        .section("Введение")
-        .table(headers=["A"], rows=[["x"]], caption="T")
-    )
+    b = work("X", year=2026).section("Введение").table(headers=["A"], rows=[["x"]], caption="T")
     out = tmp_path / "tbl4.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     raw = DocxDocument(str(out))
@@ -181,11 +171,7 @@ def test_figure_smaller_than_max_stays(tmp_path: Path) -> None:
 def test_figure_paragraph_has_keep_with_next(tmp_path: Path) -> None:
     """Параграф с рисунком имеет <w:keepNext/> — подпись не уезжает."""
     png_path = _make_test_png(tmp_path, width_px=500)
-    b = (
-        work("X", year=2026)
-        .section("Введение")
-        .figure(image_path=str(png_path), caption="Схема")
-    )
+    b = work("X", year=2026).section("Введение").figure(image_path=str(png_path), caption="Схема")
     out = tmp_path / "fig-keep.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     doc_xml = _docx_xml(out, "word/document.xml")
@@ -227,11 +213,7 @@ def test_caption_has_keep_together(tmp_path: Path) -> None:
 def test_table_caption_has_keep_with_next(tmp_path: Path) -> None:
     """Подпись таблицы (position=above) имеет keepNext — таблица не
     уезжает на следующую страницу без подписи."""
-    b = (
-        work("X", year=2026)
-        .section("Введение")
-        .table(headers=["A"], rows=[["x"]], caption="T")
-    )
+    b = work("X", year=2026).section("Введение").table(headers=["A"], rows=[["x"]], caption="T")
     out = tmp_path / "cap-kn.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     doc_xml = _docx_xml(out, "word/document.xml")

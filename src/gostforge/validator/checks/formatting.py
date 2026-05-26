@@ -258,8 +258,7 @@ def check_paper_size(document: Document, profile: Profile) -> list[Violation]:
                 check_code="F.02",
                 severity="error",
                 message=(
-                    f"Формат бумаги в секции «{section.name}» — «{actual}», "
-                    f"ожидается «{expected}»"
+                    f"Формат бумаги в секции «{section.name}» — «{actual}», ожидается «{expected}»"
                 ),
                 location=f"page_sections.{section.id}.page.paper",
                 suggestion=f"Установить формат бумаги «{expected}»",
