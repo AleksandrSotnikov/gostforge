@@ -1361,6 +1361,28 @@ def _render_style_overrides_section(state: dict[str, Any]) -> None:
             )),
             min_value=0.0, max_value=3.0, step=0.05, key="ov_indent",
         )
+        cols = st.columns(2)
+        overrides["body_space_before_pt"] = cols[0].number_input(
+            "Интервал перед абзацем (pt)",
+            value=float(overrides.get(
+                "body_space_before_pt", base.styles.body.space_before_pt
+            )),
+            min_value=0.0, max_value=72.0, step=1.0, key="ov_body_before",
+            help=(
+                "По ГОСТ Р 2.105-2019 / 7.32-2017 — 0 pt: разделение "
+                "достигается красной строкой и полуторным межстрочным "
+                "интервалом. Поднимите до 6-8 pt только если требует "
+                "методичка кафедры."
+            ),
+        )
+        overrides["body_space_after_pt"] = cols[1].number_input(
+            "Интервал после абзаца (pt)",
+            value=float(overrides.get(
+                "body_space_after_pt", base.styles.body.space_after_pt
+            )),
+            min_value=0.0, max_value=72.0, step=1.0, key="ov_body_after",
+            help="См. подсказку для «Интервал перед абзацем».",
+        )
 
         # --- Заголовки ---
         st.markdown("**Заголовки**")
@@ -1462,6 +1484,10 @@ def _apply_style_overrides(profile: Any, overrides: dict[str, Any]) -> Any:
         p.styles.body.first_line_indent_cm = float(
             overrides["body_first_line_indent_cm"]
         )
+    if "body_space_before_pt" in overrides:
+        p.styles.body.space_before_pt = float(overrides["body_space_before_pt"])
+    if "body_space_after_pt" in overrides:
+        p.styles.body.space_after_pt = float(overrides["body_space_after_pt"])
     # Заголовок 1.
     if "heading1_uppercase" in overrides:
         p.styles.heading_1.uppercase = bool(overrides["heading1_uppercase"])

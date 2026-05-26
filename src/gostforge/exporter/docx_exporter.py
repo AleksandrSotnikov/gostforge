@@ -150,6 +150,12 @@ def _apply_normal_style(doc: DocxDocument, profile: Profile) -> None:
     pf = normal.paragraph_format
     pf.line_spacing = body.line_spacing
     pf.first_line_indent = Cm(body.first_line_indent_cm)
+    # Интервалы между абзацами. По ГОСТу — 0; Word из дефолтного
+    # шаблона ставит 'after=200 twips' (10 pt), что вылезает
+    # между абзацами обычного текста как лишнее белое поле. Явно
+    # сбрасываем по значению из профиля.
+    pf.space_before = Pt(body.space_before_pt)
+    pf.space_after = Pt(body.space_after_pt)
 
 
 def _clear_theme_fonts(style_element: Any, *, font_name: str) -> None:

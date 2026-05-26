@@ -29,6 +29,14 @@ class BodyTextProfile(BaseModel):
     first_line_indent_cm: float = 1.25
     alignment: Literal["left", "right", "center", "justify"] = "justify"
     hyphenation: bool = False
+    # Интервалы между абзацами обычного текста (pt). По ГОСТ Р
+    # 2.105-2019 и ГОСТ 7.32-2017 разделение абзацев достигается
+    # абзацным отступом первой строки + полуторным межстрочным —
+    # дополнительные интервалы НЕ требуются. Поэтому default = 0.
+    # Кафедральные методички могут требовать 6 или 8 pt — тогда
+    # переопределяется в YAML или через UI «Настройки стилей».
+    space_before_pt: float = 0
+    space_after_pt: float = 0
 
 
 class HeadingStyleProfile(BaseModel):
