@@ -561,6 +561,39 @@ def ui(host: str, port: int) -> None:
     subprocess.run(cmd, check=False)
 
 
+@main.command()
+@click.option("--host", default="127.0.0.1", help="Адрес для bind (по умолчанию 127.0.0.1).")
+@click.option("--port", default=8000, help="Порт (по умолчанию 8000).")
+@click.option(
+    "--reload", is_flag=True, help="Включить hot-reload для разработки."
+)
+def serve(host: str, port: int, reload: bool) -> None:
+    """Запустить REST API gostforge на FastAPI/uvicorn.
+
+    Опциональная зависимость: pip install -e ".[api]". Полный список
+    endpoints — docs/phase-3-api-spec.md. По умолчанию слушает только
+    127.0.0.1 (запуск из публичной сети — за reverse-proxy с auth).
+    """
+    try:
+        import uvicorn  # noqa: F401
+    except ImportError:
+        click.echo(
+            "FastAPI/uvicorn не установлены. Установите gostforge[api]:\n"
+            '  pip install -e ".[api]"',
+            err=True,
+        )
+        sys.exit(2)
+
+    import uvicorn
+
+    uvicorn.run(
+        "gostforge.api.app:app",
+        host=host,
+        port=port,
+        reload=reload,
+    )
+
+
 def _normalize_message(text: str) -> str:
     """Нормализовать текст сообщения для устойчивого сравнения нарушений.
 
