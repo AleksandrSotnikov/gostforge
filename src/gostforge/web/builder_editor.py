@@ -2253,8 +2253,18 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
     После успешной загрузки сразу прогоняет нормоконтроль через
     profile из state и показывает summary нарушений — пользователь
     получает мгновенный feedback о том, что нужно исправить.
+
+    Профиль из импортируемого .docx не перезаписывает выбранный
+    пользователем в sidebar: студент мог выбрать gost-r-2.105-2019,
+    а в чужом docx стоит дефолтный gost-7.32-2017 — переключение на
+    дефолт было бы потерей пользовательского выбора.
     """
     from gostforge.parser import parse_docx  # noqa: PLC0415
+
+    # Запоминаем профиль, который пользователь уже выбрал в sidebar
+    # ДО перезаписи state. Применим к новому state после загрузки.
+    current_state = st.session_state.get("builder_state") or {}
+    user_selected_profile = current_state.get("profile_id")
 
     try:
         with tempfile.NamedTemporaryFile(
@@ -2274,6 +2284,11 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
             "Возможно, работа без заголовков 1-го уровня."
         )
         return
+
+    # Восстанавливаем профиль, который пользователь выбрал в sidebar.
+    # Если он не был задан — берём из импортированного документа.
+    if user_selected_profile:
+        new_state["profile_id"] = user_selected_profile
 
     _normalize_state_paragraphs(new_state)
     st.session_state["builder_state"] = new_state
