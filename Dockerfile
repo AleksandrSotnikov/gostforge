@@ -48,7 +48,8 @@ FROM python:3.11-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    GOSTFORGE_MAX_UPLOAD_MB=25
+    GOSTFORGE_MAX_UPLOAD_MB=25 \
+    GOSTFORGE_DB_PATH=/var/lib/gostforge/gostforge.db
 
 # Создаём непривилегированного пользователя.
 RUN groupadd --system gostforge && \
@@ -60,6 +61,12 @@ COPY --from=builder /build/profiles /app/profiles
 COPY --from=builder /build/src /app/src
 COPY --from=builder /build/pyproject.toml /app/pyproject.toml
 COPY --from=builder /build/README.md /app/README.md
+
+# Каталог для локальной SQLite-БД (history + future fixtures).
+# Volume в docker-compose монтируется именно сюда; права назначаем
+# юзеру gostforge, иначе sqlite3.connect упадёт с EACCES.
+RUN mkdir -p /var/lib/gostforge && \
+    chown -R gostforge:gostforge /var/lib/gostforge
 
 WORKDIR /app
 USER gostforge

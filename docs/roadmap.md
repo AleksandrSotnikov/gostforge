@@ -246,6 +246,18 @@ inline-формула, библиографическая цитата.
       ruff/mypy в warn-only режиме, сборка обоих Docker-образов,
       валидация docker-compose.yml. concurrency.group отменяет
       устаревшие прогоны.
+- [x] **Локальная SQLite-БД с auto-init**. Stdlib sqlite3, ноль
+      внешних зависимостей. Путь `~/.gostforge/gostforge.db` или env
+      `GOSTFORGE_DB_PATH`; каталог и схема создаются автоматически
+      через `schema_version`-таблицу + append-only список миграций.
+      Подробное руководство — [database.md](database.md).
+- [x] **История проверок (submissions)**. Каждый `gostforge check`
+      и `POST /check` опционально (по умолчанию вкл.) записывает
+      submission + все violations в БД. Просмотр через
+      `gostforge history [--limit N] [--filename F] [--id N]` и
+      `GET /submissions[/{id}]`. DELETE для очистки. Persistence
+      между перезапусками Docker — через named volume
+      `gostforge-data`.
 - [ ] Командная работа: руководитель ↔ студент (комментарии,
       обсуждения, итерации).
 - [ ] Интеграция с LMS (Moodle, eLearning, и др.) — теперь

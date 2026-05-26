@@ -119,6 +119,32 @@ curl -X POST http://localhost:8000/stats \
   -F file=@thesis.docx
 ```
 
+### 4.5. История проверок (submissions)
+
+Каждый `POST /check` по умолчанию записывает submission в локальную
+БД (см. [database.md](database.md)).
+
+```bash
+# Список последних 20 проверок.
+curl -H "X-API-Key: $KEY" http://localhost:8000/submissions
+
+# Фильтр + лимит.
+curl -H "X-API-Key: $KEY" \
+  "http://localhost:8000/submissions?filename=thesis.docx&limit=5"
+
+# Детали (с полным списком violations).
+curl -H "X-API-Key: $KEY" http://localhost:8000/submissions/42
+
+# Удалить запись (CASCADE на violations).
+curl -X DELETE -H "X-API-Key: $KEY" \
+  http://localhost:8000/submissions/42
+
+# Отключить запись в БД для конкретного запроса.
+curl -X POST http://localhost:8000/check \
+  -H "X-API-Key: $KEY" \
+  -F file=@thesis.docx -F record=false
+```
+
 ## 5. Деплой через Docker
 
 В корне репозитория лежат три файла для деплоя:

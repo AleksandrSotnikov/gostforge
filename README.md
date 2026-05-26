@@ -12,9 +12,9 @@
 ## Статус
 
 **Фазы 0–2 завершены, Фаза 2.5 (пословное редактирование в
-конструкторе) и Фаза 3 (REST API на FastAPI с API-key auth, Docker)
-— реализованы.** Покрытие каталога — **104 проверки в 15 категориях
-(100%)**, общая база тестов **877+**.
+конструкторе) и Фаза 3 (REST API + Docker + локальная БД истории
+с auto-migrations) — реализованы.** Покрытие каталога —
+**104 проверки в 15 категориях (100%)**, общая база тестов **918+**.
 
 Что уже работает:
 
@@ -48,9 +48,9 @@
   Word (боковые выноски) либо inline-маркеры о нарушениях прямо в `.docx`.
 - **Плагины проверок** (`~/.gostforge/plugins/`): динамическая загрузка
   пользовательских проверок без модификации кода gostforge.
-- **CLI** (14 операций): `check`, `fix`, `annotate`, `new`, `pdf`, `diff`,
-  `stats`, `ui`, `serve`, `checks`, `profiles list/show/validate/diff`,
-  `plugins list/dir`.
+- **CLI** (15 операций): `check`, `fix`, `annotate`, `new`, `pdf`, `diff`,
+  `stats`, `ui`, `serve`, `history`, `checks`,
+  `profiles list/show/validate/diff`, `plugins list/dir`.
 - **Streamlit-UI** с двумя режимами (Нормоконтроль / Конструктор) и
   тремя вкладками результатов (Проверка / Статистика / Автоисправление).
 - **Пословное редактирование** (Фаза 2.5): каждый параграф в визуальном
@@ -59,14 +59,20 @@
   рисунка/таблицы/формулы по списку), Citation (выбор записи
   библиографии с опц. страницами). Undo/Redo на 50 шагов + автосохранение
   в `~/.gostforge/autosave/`. См. [docs/builder.md](docs/builder.md#41-пословное-редактирование-фаза-25).
-- **REST API** (Фаза 3, опц. extra `[api]`): 7 endpoints на FastAPI —
+- **REST API** (Фаза 3, опц. extra `[api]`): 10 endpoints на FastAPI —
   `/health`, `/profiles`, `/profiles/{id}`, `/checks`, `/check`,
-  `/fix`, `/annotate`, `/stats`. Аутентификация через `X-API-Key`
-  middleware (env `GOSTFORGE_API_KEYS`), CORS, лимит размера файла.
-  Запуск через `gostforge serve` или `docker compose up`. См.
+  `/fix`, `/annotate`, `/stats`, `/submissions`, `/submissions/{id}`.
+  Аутентификация через `X-API-Key` middleware (env
+  `GOSTFORGE_API_KEYS`), CORS, лимит размера файла. Запуск через
+  `gostforge serve` или `docker compose up`. См.
   [docs/api.md](docs/api.md) — руководство по деплою с nginx,
   [docs/phase-3-api-spec.md](docs/phase-3-api-spec.md) — спецификация
   endpoints.
+- **Локальная SQLite-БД истории**: `~/.gostforge/gostforge.db`,
+  auto-init при первом запуске (миграции применяются через
+  `schema_version`-таблицу, zero-config). Каждый `gostforge check`
+  записывает submission + violations; `gostforge history` показывает
+  трекинг прогресса. См. [docs/database.md](docs/database.md).
 - **Production-деплой через Docker**: `Dockerfile` (API), `Dockerfile.ui`
   (Streamlit UI), `docker compose up -d` поднимает оба сервиса.
   Multi-stage образы на `python:3.11-slim` с non-root юзером и

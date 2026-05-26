@@ -21,6 +21,11 @@ services:
       GOSTFORGE_API_KEYS: "${GOSTFORGE_API_KEYS:-}"
       GOSTFORGE_CORS_ORIGINS: "${GOSTFORGE_CORS_ORIGINS:-}"
       GOSTFORGE_MAX_UPLOAD_MB: "${GOSTFORGE_MAX_UPLOAD_MB:-25}"
+      # Локальная БД (история проверок). Volume ниже сохраняет её между
+      # перезапусками контейнера.
+      GOSTFORGE_DB_PATH: /var/lib/gostforge/gostforge.db
+    volumes:
+      - gostforge-data:/var/lib/gostforge
     healthcheck:
       test: ["CMD", "python", "-c",
              "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200 else 1)"]
@@ -57,15 +62,15 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
-    # Если хотите сохранять autosave между перезапусками контейнера —
-    # раскомментируйте volume:
-    # volumes:
-    #   - gostforge-autosave:/home/gostforge/.gostforge/autosave
+    # Сохраняем autosave-конструктора между перезапусками контейнера.
+    volumes:
+      - gostforge-autosave:/home/gostforge/.gostforge
     deploy:
       resources:
         limits:
           cpus: "1.0"
           memory: 768M
 
-# volumes:
-#   gostforge-autosave:
+volumes:
+  gostforge-data:
+  gostforge-autosave:
