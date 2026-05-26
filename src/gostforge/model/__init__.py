@@ -273,6 +273,31 @@ class DocumentMetadata:
 
 
 @dataclass
+class Comment:
+    """Комментарий рецензента из word/comments.xml.
+
+    Word/LibreOffice кладут комментарии в отдельный XML-part:
+    каждый ``<w:comment>`` имеет id, автора, дату и тело
+    (один или несколько параграфов). В document.xml — только
+    ссылки ``<w:commentRangeStart>``, ``<w:commentRangeEnd>``,
+    ``<w:commentReference>`` с тем же id.
+
+    Парсер собирает list[Comment] в Document.comments. Это полезно
+    для научного руководителя, оставляющего заметки прямо в Word,
+    и для UI, который может показать их в редакторе.
+    """
+
+    id: str
+    author: str = ""
+    date: str = ""  # ISO 8601, как в XML; парсить дальше пользователю
+    text: str = ""
+    # Контекст: id раздела, к которому привязан комментарий (если удалось
+    # вычислить через commentRangeStart). None = верхнеуровневый или
+    # не определено.
+    section_id: str | None = None
+
+
+@dataclass
 class Document:
     """Корень модели документа."""
 
@@ -286,3 +311,5 @@ class Document:
     # None — не задано (наследуется от приложения).
     auto_hyphenation: bool | None = None
     abbreviations: dict[str, str] = field(default_factory=dict)
+    # Комментарии рецензента из word/comments.xml. Заполняется парсером.
+    comments: list[Comment] = field(default_factory=list)

@@ -2019,6 +2019,22 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
     _normalize_state_paragraphs(new_state)
     st.session_state["builder_state"] = new_state
 
+    # Если в импортируемом docx есть комментарии рецензента (от
+    # научного руководителя в Word) — сохраняем их в session_state
+    # для отдельной панели отображения. document_to_state их не
+    # переносит в state, потому что в builder-state нет такого поля.
+    parsed_comments = getattr(document, "comments", None) or []
+    if parsed_comments:
+        st.session_state["last_imported_comments"] = [
+            {
+                "id": c.id,
+                "author": c.author,
+                "date": c.date,
+                "text": c.text,
+            }
+            for c in parsed_comments
+        ]
+
     # Сохраним сводку для пользователя: сколько и каких нарушений
     # нашёл нормоконтроль (показывается через _render_import_violations_panel
     # после rerun, потому что прямой st.* здесь не дойдёт в main-области).
@@ -2063,6 +2079,34 @@ def _compute_import_violations_summary(
         "by_severity": by_severity,
         "top_codes": [{"code": c, "count": n} for c, n in codes],
     }
+
+
+def _render_imported_comments_panel() -> None:
+    """Показать комментарии рецензента, импортированные из docx.
+
+    Если научный руководитель оставил замечания через Word
+    (комментарии в правой панели), они извлекаются парсером и
+    показываются здесь. Студент видит их в одном месте — это
+    удобнее, чем переключаться между конструктором и Word.
+    """
+    comments = st.session_state.get("last_imported_comments")
+    if not comments:
+        return
+    with st.expander(
+        f"Комментарии рецензента из импортированной работы — "
+        f"{len(comments)} шт.",
+        expanded=False,
+    ):
+        for c in comments:
+            author = c.get("author", "?")
+            date = (c.get("date") or "").split("T")[0]
+            text = c.get("text", "")
+            st.markdown(f"**{author}** ({date}):")
+            st.write(text)
+            st.divider()
+        if st.button("Скрыть комментарии", key="dismiss_comments"):
+            del st.session_state["last_imported_comments"]
+            st.rerun()
 
 
 def _render_import_violations_panel() -> None:
@@ -3106,6 +3150,7 @@ def render_interactive_builder() -> None:
     )
 
     _render_import_violations_panel()
+    _render_imported_comments_panel()
     _render_section_tree()
     _render_active_section_editor()
     _render_generate_button()

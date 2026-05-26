@@ -206,13 +206,74 @@ def parse_docx(path: str | Path) -> Document:
     # извлечения библиографии, чтобы не сгруппировать references как
     # элементы списка (в bib-разделе каждая запись = отдельный параграф).
     _group_text_marker_lists(page_section, exclude_section_ids=_bibliography_section_ids([page_section]))
+    comments = _extract_comments(docx_doc)
 
     return Document(
         metadata=metadata,
         page_sections=[page_section],
         bibliography=bibliography,
         auto_hyphenation=auto_hyphenation,
+        comments=comments,
     )
+
+
+def _extract_comments(docx_doc: DocxDocument) -> list[Any]:
+    """Извлечь комментарии рецензента из word/comments.xml.
+
+    Возвращает list[Comment]. Если comments-part отсутствует
+    (документ без комментариев) — пустой список.
+
+    python-docx не предоставляет высокоуровневого API для
+    комментариев — обходимся прямым lxml-доступом к part-у.
+    """
+    from gostforge.model import Comment  # noqa: PLC0415
+
+    out: list[Comment] = []
+    # python-docx предоставляет part через related_parts; ищем
+    # CommentsPart по reltype.
+    rels = getattr(docx_doc.part, "rels", None)
+    if rels is None:
+        return out
+    comments_part = None
+    target_reltype = (
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+    )
+    try:
+        for rel in rels.values():
+            if getattr(rel, "reltype", None) == target_reltype:
+                # rel.target_part может бросить XMLSyntaxError, если
+                # comments.xml сломан — поймаем здесь и вернём [].
+                comments_part = rel.target_part
+                break
+    except (etree.XMLSyntaxError, KeyError, AttributeError):
+        return out
+    if comments_part is None:
+        return out
+
+    blob = getattr(comments_part, "blob", None)
+    if not blob:
+        return out
+    try:
+        root = etree.fromstring(blob)
+    except etree.XMLSyntaxError:
+        return out
+
+    for cm in root.findall(f"{{{W_NS}}}comment"):
+        cid = cm.get(f"{{{W_NS}}}id", "")
+        author = cm.get(f"{{{W_NS}}}author", "")
+        date = cm.get(f"{{{W_NS}}}date", "")
+        # Текст: собираем все <w:t> внутри.
+        texts: list[str] = []
+        for t in cm.iter(f"{{{W_NS}}}t"):
+            if t.text:
+                texts.append(t.text)
+        text = "\n".join(texts).strip()
+        # Без section_id — для MVP. Привязка к разделу через
+        # commentRangeStart/End — отложена (требует обхода document.xml
+        # с трекингом текущей секции).
+        out.append(Comment(id=cid, author=author, date=date, text=text))
+
+    return out
 
 
 def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> None:
