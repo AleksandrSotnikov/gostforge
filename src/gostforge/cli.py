@@ -1702,6 +1702,138 @@ def _block_to_md(block: dict[str, Any], *, lines: list[str]) -> None:
             lines.append("")
 
 
+@main.command("stats-state")
+@click.argument("state_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--json", "as_json", is_flag=True,
+    help="Вывод в JSON (для скриптов). По умолчанию — таблица.",
+)
+def stats_state_cmd(state_path: Path, as_json: bool) -> None:
+    """Числовые метрики state-файла конструктора.
+
+    Считает: разделов, параграфов, таблиц, рисунков, формул, элементов
+    списков, источников, общее число слов, оценочное число знаков.
+    Полезно для быстрой проверки прогресса работы без открытия UI.
+
+    Пример::
+
+        gostforge stats-state draft.json
+        gostforge stats-state draft.json --json | jq .total_words
+    """
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        click.echo(f"Не удалось прочитать JSON: {exc}", err=True)
+        sys.exit(2)
+    if not isinstance(state, dict) or "sections" not in state:
+        click.echo("В state.json должен быть ключ 'sections'.", err=True)
+        sys.exit(2)
+
+    from gostforge.web.builder_editor import (  # noqa: PLC0415
+        _compute_progress_metrics,
+    )
+
+    metrics = _compute_progress_metrics(state)
+    if as_json:
+        click.echo(json.dumps(metrics, ensure_ascii=False, indent=2))
+        return
+
+    click.echo(f"Состояние: {state_path}")
+    click.echo(f"  Заголовок: {state.get('title', '(без названия)')}")
+    click.echo(f"  Автор: {state.get('author') or '(не указан)'}")
+    click.echo(f"  Год: {state.get('year', '(не указан)')}")
+    click.echo(f"  Профиль: {state.get('profile_id', 'gost-7.32-2017')}")
+    click.echo("")
+    click.echo("Прогресс:")
+    click.echo(f"  Разделов: {metrics['sections_filled']}/{metrics['sections_total']}")
+    click.echo(f"  Параграфов: {metrics['paragraphs_nonempty']}/{metrics['paragraphs_total']}")
+    click.echo(f"  Таблиц: {metrics['tables']}")
+    click.echo(f"  Рисунков: {metrics['figures']}")
+    click.echo(f"  Формул: {metrics['formulas']}")
+    click.echo(f"  Элементов списков: {metrics['list_items']}")
+    click.echo(f"  Источников: {metrics['references_total']}")
+    click.echo("")
+    click.echo("Объём:")
+    click.echo(f"  Слов: {metrics['total_words']}")
+    # Оценка знаков: ~6 символов на слово (среднее для русского).
+    est_chars = metrics["total_words"] * 6
+    click.echo(f"  Знаков (≈): {est_chars}")
+
+
+@main.command("check-state")
+@click.argument("state_path", type=click.Path(exists=True, path_type=Path))
+@click.option(
+    "--json", "as_json", is_flag=True,
+    help="Вывод в JSON (для скриптов).",
+)
+@click.option(
+    "--profile",
+    "profile_override",
+    type=str,
+    default=None,
+    help="Профиль для проверки. По умолчанию — из state.profile_id.",
+)
+def check_state_cmd(
+    state_path: Path, as_json: bool, profile_override: str | None
+) -> None:
+    """Прогон нормоконтроля над state-файлом без сохранения в .docx.
+
+    Использует тот же путь, что и live-нормоконтроль в UI: state →
+    builder → Document → validate. В разы быстрее чем
+    `generate + check`, потому что не пишет промежуточный .docx.
+
+    Учитывает ``disabled_checks`` каждого раздела — нарушения для
+    отключённых проверок отфильтровываются.
+
+    Exit code: 0 — нарушений нет; 1 — найдены ошибки; 2 — невалидный
+    state JSON или профиль не найден.
+    """
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        click.echo(f"Не удалось прочитать JSON: {exc}", err=True)
+        sys.exit(2)
+    if not isinstance(state, dict) or "sections" not in state:
+        click.echo("В state.json должен быть ключ 'sections'.", err=True)
+        sys.exit(2)
+    if profile_override:
+        state = dict(state)
+        state["profile_id"] = profile_override
+
+    from gostforge.web.builder_editor import (  # noqa: PLC0415
+        _compute_live_validation_summary,
+    )
+
+    summary = _compute_live_validation_summary(state)
+    total = summary.get("total", 0)
+
+    if as_json:
+        click.echo(json.dumps(summary, ensure_ascii=False, indent=2))
+    else:
+        click.echo(f"Состояние: {state_path}")
+        click.echo(f"Профиль: {state.get('profile_id', 'gost-7.32-2017')}")
+        click.echo("")
+        if total == 0:
+            click.echo("✓ Нарушений нормоконтроля не найдено.")
+        else:
+            by_sev = summary.get("by_severity", {})
+            click.echo(f"Всего нарушений: {total}")
+            click.echo(f"  Ошибок: {by_sev.get('error', 0)}")
+            click.echo(f"  Предупреждений: {by_sev.get('warning', 0)}")
+            click.echo(f"  Информационных: {by_sev.get('info', 0)}")
+            top = summary.get("top_codes", [])
+            if top:
+                click.echo("")
+                click.echo("Топ-5 нарушений:")
+                for entry in top:
+                    click.echo(f"  {entry['code']}: {entry['count']}")
+
+    # Exit code = 1 если есть error-уровневые нарушения.
+    by_sev = summary.get("by_severity", {})
+    if by_sev.get("error", 0) > 0:
+        sys.exit(1)
+
+
 @main.command("apply-fixes")
 @click.argument("state_path", type=click.Path(exists=True, path_type=Path))
 @click.option(
