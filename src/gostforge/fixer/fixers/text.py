@@ -478,6 +478,67 @@ def fix_paragraph_alignment(
     return applied
 
 
+@register("T.14")
+def fix_paragraph_spacing(
+    document: Document, profile: Profile
+) -> list[FixApplied]:
+    """Привести интервалы между абзацами к profile.styles.body.
+
+    Исправление симметрично проверке T.14: для каждого Normal-параграфа
+    с явно заданным space_before_pt/space_after_pt != expected
+    заменяем на expected (по умолчанию 0). Heading*/Caption/List*
+    пропускаем.
+    """
+    body = profile.styles.body
+    expected_before = float(body.space_before_pt)
+    expected_after = float(body.space_after_pt)
+    tolerance = 0.5
+    config = profile.checks.get("T.14")
+    if config:
+        if config.params.get("expected_before_pt") is not None:
+            expected_before = float(config.params["expected_before_pt"])
+        if config.params.get("expected_after_pt") is not None:
+            expected_after = float(config.params["expected_after_pt"])
+        if config.params.get("tolerance_pt") is not None:
+            tolerance = float(config.params["tolerance_pt"])
+
+    applied: list[FixApplied] = []
+    for p in _all_paragraphs(document):
+        style = (p.style_name or "Normal").lower()
+        if any(
+            style.startswith(prefix)
+            for prefix in ("heading", "caption", "list", "footer", "header", "title")
+        ):
+            continue
+        if (
+            p.space_before_pt is not None
+            and abs(p.space_before_pt - expected_before) > tolerance
+        ):
+            old = p.space_before_pt
+            p.space_before_pt = expected_before
+            applied.append(
+                FixApplied(
+                    fixer_code="T.14",
+                    location=_paragraph_location(p) + ".space_before_pt",
+                    description=f"space_before {old:g} pt → {expected_before:g} pt",
+                )
+            )
+        if (
+            p.space_after_pt is not None
+            and abs(p.space_after_pt - expected_after) > tolerance
+        ):
+            old = p.space_after_pt
+            p.space_after_pt = expected_after
+            applied.append(
+                FixApplied(
+                    fixer_code="T.14",
+                    location=_paragraph_location(p) + ".space_after_pt",
+                    description=f"space_after {old:g} pt → {expected_after:g} pt",
+                )
+            )
+    return applied
+
+
 __all__ = [
     "fix_consecutive_empty_paragraphs",
     "fix_disable_auto_hyphenation",
@@ -487,6 +548,7 @@ __all__ = [
     "fix_initials_nbsp",
     "fix_line_spacing",
     "fix_paragraph_alignment",
+    "fix_paragraph_spacing",
     "fix_straight_quotes",
     "fix_trailing_whitespace",
     "fix_unit_nbsp",

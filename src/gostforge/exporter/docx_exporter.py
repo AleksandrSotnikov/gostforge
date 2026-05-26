@@ -454,6 +454,10 @@ def _apply_paragraph_format(docx_para: DocxParagraph, paragraph: Paragraph) -> N
         pf.first_line_indent = Cm(paragraph.first_line_indent_cm)
     if paragraph.page_break_before is not None:
         pf.page_break_before = paragraph.page_break_before
+    if paragraph.space_before_pt is not None:
+        pf.space_before = Pt(paragraph.space_before_pt)
+    if paragraph.space_after_pt is not None:
+        pf.space_after = Pt(paragraph.space_after_pt)
 
 
 def _write_paragraph(doc: DocxDocument, paragraph: Paragraph) -> None:
