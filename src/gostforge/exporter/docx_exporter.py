@@ -759,26 +759,30 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
         lvl_text = ordered_fmt.replace("{n}", "%1")
     else:
         lvl_text = bullet
+    # Сколько уровней нужно (0 = плоский). Берём max(item_levels)+1
+    # или 1 (если levels пустые).
+    levels = list(list_block.item_levels) if list_block.item_levels else []
+    max_level = max(levels) if levels else 0
     num_id = _ensure_list_num_in_numbering(
         doc, ordered=list_block.ordered, lvl_text=lvl_text,
         left_twips=int(Cm(left_indent_cm).twips),
         hanging_twips=int(Cm(hanging_indent_cm).twips),
+        max_level=max_level,
     )
 
-    for item_content in list_block.items:
+    for idx, item_content in enumerate(list_block.items):
         paragraph = doc.add_paragraph()
+        # ilvl: из item_levels или 0 по умолчанию.
+        item_level = levels[idx] if idx < len(levels) else 0
         # Ставим numPr.
         pPr = paragraph._p.get_or_add_pPr()
-        # Удалим существующий numPr на всякий случай.
         for old in pPr.findall(f"{{{W_NS}}}numPr"):
             pPr.remove(old)
         num_pr = etree.SubElement(pPr, f"{{{W_NS}}}numPr")
         ilvl = etree.SubElement(num_pr, f"{{{W_NS}}}ilvl")
-        ilvl.set(f"{{{W_NS}}}val", "0")
+        ilvl.set(f"{{{W_NS}}}val", str(item_level))
         num_id_el = etree.SubElement(num_pr, f"{{{W_NS}}}numId")
         num_id_el.set(f"{{{W_NS}}}val", str(num_id))
-        # Indent не нужен в pPr самого параграфа — он в abstractNum.
-        # Но first_line_indent на 0 ставим, чтобы Normal-стиль не сдвигал текст.
         paragraph.paragraph_format.first_line_indent = Cm(0)
         _write_runs(paragraph, item_content)
 
@@ -797,6 +801,7 @@ def _ensure_list_num_in_numbering(
     lvl_text: str,
     left_twips: int,
     hanging_twips: int,
+    max_level: int = 0,
 ) -> int:
     """Зарегистрировать (если ещё нет) abstractNum + num с этими параметрами.
 
@@ -810,7 +815,7 @@ def _ensure_list_num_in_numbering(
     global _current_list_numbering
     if _current_list_numbering is None:
         _current_list_numbering = {}
-    cache_key = (ordered, lvl_text, left_twips, hanging_twips)
+    cache_key = (ordered, lvl_text, left_twips, hanging_twips, max_level)
     if cache_key in _current_list_numbering:
         return _current_list_numbering[cache_key]
 
@@ -845,37 +850,29 @@ def _ensure_list_num_in_numbering(
     # Создаём <w:abstractNum>.
     an = etree.SubElement(num_elem, f"{{{W_NS}}}abstractNum")
     an.set(f"{{{W_NS}}}abstractNumId", str(new_anid))
-    # multiLevelType: достаточно singleLevel — мы поддерживаем только 1 уровень.
     mlt = etree.SubElement(an, f"{{{W_NS}}}multiLevelType")
-    mlt.set(f"{{{W_NS}}}val", "singleLevel")
-    # Один уровень (ilvl=0).
-    lvl = etree.SubElement(an, f"{{{W_NS}}}lvl")
-    lvl.set(f"{{{W_NS}}}ilvl", "0")
-    start = etree.SubElement(lvl, f"{{{W_NS}}}start")
-    start.set(f"{{{W_NS}}}val", "1")
-    num_fmt = etree.SubElement(lvl, f"{{{W_NS}}}numFmt")
-    num_fmt.set(f"{{{W_NS}}}val", "decimal" if ordered else "bullet")
-    lvl_text_el = etree.SubElement(lvl, f"{{{W_NS}}}lvlText")
-    lvl_text_el.set(f"{{{W_NS}}}val", lvl_text)
-    lvl_jc = etree.SubElement(lvl, f"{{{W_NS}}}lvlJc")
-    lvl_jc.set(f"{{{W_NS}}}val", "left")
-    # Параграф-настройки в lvl/pPr — для left+hanging indent.
-    lvl_pPr = etree.SubElement(lvl, f"{{{W_NS}}}pPr")
-    lvl_ind = etree.SubElement(lvl_pPr, f"{{{W_NS}}}ind")
-    lvl_ind.set(f"{{{W_NS}}}left", str(left_twips))
-    lvl_ind.set(f"{{{W_NS}}}hanging", str(hanging_twips))
-    # Шрифт маркера: для bullet ставим обычный TNR, иначе Word возьмёт
-    # Symbol и нарисует  — не наш тире.
-    if not ordered:
-        lvl_rPr = etree.SubElement(lvl, f"{{{W_NS}}}rPr")
-        lvl_rFonts = etree.SubElement(lvl_rPr, f"{{{W_NS}}}rFonts")
-        font = (
-            _current_profile.styles.body.font
-            if _current_profile is not None
-            else "Times New Roman"
+    mlt.set(
+        f"{{{W_NS}}}val",
+        "singleLevel" if max_level == 0 else "multilevel",
+    )
+    for _ilvl in range(max_level + 1):
+        _add_list_level(
+            an,
+            ilvl=_ilvl,
+            ordered=ordered,
+            lvl_text=(
+                lvl_text
+                if _ilvl == 0
+                else _nested_lvl_text(ordered, _ilvl, lvl_text)
+            ),
+            left_twips=left_twips + _ilvl * 720,
+            hanging_twips=hanging_twips,
+            font_for_bullet=(
+                _current_profile.styles.body.font
+                if _current_profile is not None
+                else "Times New Roman"
+            ),
         )
-        for attr in ("ascii", "hAnsi", "cs", "eastAsia"):
-            lvl_rFonts.set(f"{{{W_NS}}}{attr}", font)
 
     # Создаём <w:num> ссылающийся на abstractNum.
     n = etree.SubElement(num_elem, f"{{{W_NS}}}num")
@@ -885,6 +882,67 @@ def _ensure_list_num_in_numbering(
 
     _current_list_numbering[cache_key] = new_nid
     return new_nid
+
+
+def _add_list_level(
+    abstract_num: Any,
+    *,
+    ilvl: int,
+    ordered: bool,
+    lvl_text: str,
+    left_twips: int,
+    hanging_twips: int,
+    font_for_bullet: str = "Times New Roman",
+) -> None:
+    """Добавить <w:lvl ilvl="N"> внутрь <w:abstractNum>.
+
+    Содержит: start, numFmt (decimal/bullet), lvlText, lvlJc, pPr/ind
+    с left+hanging, rPr (для bullet — явный шрифт во избежание Symbol),
+    и suff=space — чтобы между маркером и текстом был ОДИН пробел,
+    а не Tab (Tab даёт слишком большой визуальный отступ).
+    """
+    lvl = etree.SubElement(abstract_num, f"{{{W_NS}}}lvl")
+    lvl.set(f"{{{W_NS}}}ilvl", str(ilvl))
+    start = etree.SubElement(lvl, f"{{{W_NS}}}start")
+    start.set(f"{{{W_NS}}}val", "1")
+    num_fmt = etree.SubElement(lvl, f"{{{W_NS}}}numFmt")
+    num_fmt.set(f"{{{W_NS}}}val", "decimal" if ordered else "bullet")
+    # suff = разделитель между маркером и текстом: tab (default),
+    # space или nothing. По дефолту Word ставит tab — это даёт
+    # большой визуальный отступ. Используем space.
+    suff = etree.SubElement(lvl, f"{{{W_NS}}}suff")
+    suff.set(f"{{{W_NS}}}val", "space")
+    lvl_text_el = etree.SubElement(lvl, f"{{{W_NS}}}lvlText")
+    lvl_text_el.set(f"{{{W_NS}}}val", lvl_text)
+    lvl_jc = etree.SubElement(lvl, f"{{{W_NS}}}lvlJc")
+    lvl_jc.set(f"{{{W_NS}}}val", "left")
+    lvl_pPr = etree.SubElement(lvl, f"{{{W_NS}}}pPr")
+    lvl_ind = etree.SubElement(lvl_pPr, f"{{{W_NS}}}ind")
+    lvl_ind.set(f"{{{W_NS}}}left", str(left_twips))
+    lvl_ind.set(f"{{{W_NS}}}hanging", str(hanging_twips))
+    if not ordered:
+        lvl_rPr = etree.SubElement(lvl, f"{{{W_NS}}}rPr")
+        lvl_rFonts = etree.SubElement(lvl_rPr, f"{{{W_NS}}}rFonts")
+        for attr in ("ascii", "hAnsi", "cs", "eastAsia"):
+            lvl_rFonts.set(f"{{{W_NS}}}{attr}", font_for_bullet)
+
+
+def _nested_lvl_text(ordered: bool, ilvl: int, base_lvl_text: str) -> str:
+    """Вернуть lvlText для вложенного уровня ilvl > 0.
+
+    Для ordered (decimal): '%(ilvl+1).' — стандартная nested-нумерация
+    '%2.', '%3.', и т. д.
+
+    Для unordered: альтернативный bullet-символ для разнообразия
+    ('◦', '▪', ...), если base_lvl_text стандартный. Кастомный
+    bullet просто повторяется.
+    """
+    if ordered:
+        return f"%{ilvl + 1}."
+    nested_bullets = ["◦", "▪", "·", "▫", "‣", "◆", "•"]
+    if base_lvl_text in {"–", "—", "*", "•"}:
+        return nested_bullets[min(ilvl - 1, len(nested_bullets) - 1)]
+    return base_lvl_text
 
 
 def _write_template_into_footer_paragraph(

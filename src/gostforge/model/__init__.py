@@ -168,6 +168,12 @@ class ListBlock(Block):
     type: BlockType = BlockType.LIST
     ordered: bool = False
     items: list[list[InlineElement]] = field(default_factory=list)
+    # Уровень вложенности каждого элемента (0..8). По умолчанию пустой
+    # список = все элементы на уровне 0 (плоский список — backwards
+    # compatible со старым кодом). При item_levels[i] > 0 экспортёр
+    # пишет multilevel abstractNum в numbering.xml с правильным ilvl,
+    # парсер читает ilvl из <w:numPr><w:ilvl/> обратно.
+    item_levels: list[int] = field(default_factory=list)
 
 
 # --- Логические разделы -------------------------------------------------------
