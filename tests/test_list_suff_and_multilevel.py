@@ -24,26 +24,27 @@ def _numbering_xml(out: Path) -> str:
 # --- suff=space ---
 
 
-def test_list_writes_suff_space(tmp_path: Path) -> None:
-    """После маркера должен быть пробел, не tab."""
+def test_list_writes_suff_tab(tmp_path: Path) -> None:
+    """После маркера ставится Tab (для классического hanging-list:
+    Tab расширяется до позиции left, выравнивая текст первой строки
+    с переносом)."""
     b = work("X", year=2026).section("Введение").list(
         ["один", "два"], ordered=False
     )
     out = tmp_path / "out.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     numbering = _numbering_xml(out)
-    assert '<w:suff w:val="space"/>' in numbering
+    assert '<w:suff w:val="tab"/>' in numbering
 
 
-def test_ordered_list_writes_suff_space(tmp_path: Path) -> None:
+def test_ordered_list_writes_suff_tab(tmp_path: Path) -> None:
     b = work("X", year=2026).section("Введение").list(
         ["шаг 1", "шаг 2"], ordered=True
     )
     out = tmp_path / "out.docx"
     export_docx(b.build(), load_profile("gost-7.32-2017"), out)
     numbering = _numbering_xml(out)
-    # Каждое <w:lvl> имеет suff=space.
-    assert '<w:suff w:val="space"/>' in numbering
+    assert '<w:suff w:val="tab"/>' in numbering
 
 
 # --- multilevel ---

@@ -1088,11 +1088,14 @@ def _add_list_level(
     start.set(f"{{{W_NS}}}val", "1")
     num_fmt = etree.SubElement(lvl, f"{{{W_NS}}}numFmt")
     num_fmt.set(f"{{{W_NS}}}val", "decimal" if ordered else "bullet")
-    # suff = разделитель между маркером и текстом: tab (default),
-    # space или nothing. По дефолту Word ставит tab — это даёт
-    # большой визуальный отступ. Используем space.
+    # suff = разделитель между маркером и текстом: tab (default
+    # Word), space или nothing. Используем tab — это стандарт Word,
+    # при котором Tab расширяется до позиции left из <w:ind>. То
+    # есть после маркера автоматически идёт Tab и текст начинается
+    # ровно с позиции left (1.75 см) — перенос длинной строки
+    # выровнен с текстом первой строки, а не с маркером.
     suff = etree.SubElement(lvl, f"{{{W_NS}}}suff")
-    suff.set(f"{{{W_NS}}}val", "space")
+    suff.set(f"{{{W_NS}}}val", "tab")
     lvl_text_el = etree.SubElement(lvl, f"{{{W_NS}}}lvlText")
     lvl_text_el.set(f"{{{W_NS}}}val", lvl_text)
     lvl_jc = etree.SubElement(lvl, f"{{{W_NS}}}lvlJc")

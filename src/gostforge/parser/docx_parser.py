@@ -625,6 +625,7 @@ class _Counters:
         self.table = 0
         self.list = 0
         self.formula = 0
+        self.toc = 0
 
 
 # Имена Word-стилей, обозначающих элемент списка (case-insensitive).
@@ -1074,6 +1075,29 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
             caption=[],
             alignment=alignment,
         )
+    # TOC-field: <w:fldSimple w:instr=" TOC \o \"1-3\" \h \z "/>.
+    # При парсинге чужого .docx распознаём TOC-поле и возвращаем
+    # TableOfContents-блок, чтобы он переживал round-trip
+    # docx → state → docx без замены на текстовый плейсхолдер.
+    for fld in dp._p.findall(f".//{{{W_NS}}}fldSimple"):
+        instr = (fld.get(f"{{{W_NS}}}instr") or "").strip()
+        if instr.startswith("TOC"):
+            counters.toc = getattr(counters, "toc", 0) + 1
+            from gostforge.model import TableOfContents  # noqa: PLC0415
+
+            min_lvl, max_lvl = 1, 3
+            m = re.search(r'\\o\s+"(\d+)-(\d+)"', instr)
+            if m:
+                try:
+                    min_lvl = int(m.group(1))
+                    max_lvl = int(m.group(2))
+                except ValueError:
+                    pass
+            return TableOfContents(
+                id=f"toc-{counters.toc}",
+                min_level=min_lvl,
+                max_level=max_lvl,
+            )
     # Блочная формула: <m:oMathPara> существует. Тогда весь параграф
     # становится Formula. Внутри <m:oMathPara> может быть несколько
     # <m:oMath>; склеиваем их текст.
