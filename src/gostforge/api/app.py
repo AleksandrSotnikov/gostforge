@@ -17,9 +17,11 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+    from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import JSONResponse, Response
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.types import ASGIApp
 except ImportError as exc:  # pragma: no cover — extras [api] обязателен
     raise ImportError(
         'Установите gostforge[api] для REST API: pip install -e ".[api]"'
@@ -57,6 +59,58 @@ def _cors_origins() -> list[str]:
     """CORS-origins из env (comma-separated). Пустая строка → [] (запрет)."""
     raw = os.environ.get("GOSTFORGE_CORS_ORIGINS", "")
     return [o.strip() for o in raw.split(",") if o.strip()]
+
+
+def _api_keys() -> set[str]:
+    """API-ключи из env GOSTFORGE_API_KEYS (comma-separated).
+
+    Пустая строка / отсутствие переменной → set() (auth выключен —
+    все запросы анонимны). Минимальная длина ключа 8 символов; короче
+    игнорируется как опечатка.
+    """
+    raw = os.environ.get("GOSTFORGE_API_KEYS", "")
+    return {k.strip() for k in raw.split(",") if k.strip() and len(k.strip()) >= 8}
+
+
+# Пути, которые НЕ требуют API-key даже когда auth включён —
+# liveness-проверки доступны мониторингу без секретов.
+_AUTH_BYPASS_PATHS: frozenset[str] = frozenset({"/health", "/docs", "/redoc", "/openapi.json"})
+
+
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Простейшая аутентификация по заголовку X-API-Key.
+
+    Поведение:
+    * Если env `GOSTFORGE_API_KEYS` не задан / пустой — middleware
+      пропускает все запросы (режим разработки).
+    * Если ключи заданы — каждый запрос (кроме `_AUTH_BYPASS_PATHS`)
+      должен прислать заголовок `X-API-Key: <значение>`.
+    * Невалидный ключ → 401 + JSON `{detail, error}`.
+
+    Сравнение строкой через `==` приемлемо для small set ключей.
+    Для большого числа ключей и серьёзной защиты от timing-атак
+    нужно перейти на hmac.compare_digest.
+    """
+
+    def __init__(self, app: ASGIApp, *, allowed_keys: set[str]) -> None:
+        super().__init__(app)
+        self._allowed = allowed_keys
+
+    async def dispatch(self, request: Request, call_next: Any) -> Any:
+        if not self._allowed:
+            return await call_next(request)
+        if request.url.path in _AUTH_BYPASS_PATHS:
+            return await call_next(request)
+        provided = request.headers.get("x-api-key", "")
+        if provided and provided in self._allowed:
+            return await call_next(request)
+        return JSONResponse(
+            status_code=401,
+            content={
+                "detail": "Неверный или отсутствует X-API-Key",
+                "error": "unauthorized",
+            },
+        )
 
 
 # --- Утилиты обработки запроса ----------------------------------------------
@@ -152,8 +206,11 @@ def create_app() -> FastAPI:
             CORSMiddleware,
             allow_origins=origins,
             allow_methods=["GET", "POST"],
-            allow_headers=["*"],
+            allow_headers=["*", "X-API-Key"],
         )
+
+    keys = _api_keys()
+    app.add_middleware(APIKeyMiddleware, allowed_keys=keys)
 
     @app.get("/health")
     def health() -> dict[str, str]:
