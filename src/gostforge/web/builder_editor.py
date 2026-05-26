@@ -2157,6 +2157,123 @@ def _compute_import_violations_summary(
     }
 
 
+def _compute_progress_metrics(state: dict[str, Any]) -> dict[str, Any]:
+    """Подсчитать метрики прогресса работы по state.
+
+    Возвращает:
+    * sections_total, sections_filled (с непустым контентом),
+    * paragraphs_total, paragraphs_nonempty,
+    * tables, figures, formulas, list_items,
+    * references_total,
+    * total_words в текстах параграфов.
+
+    Используется в _render_progress_panel.
+    """
+    out = {
+        "sections_total": 0,
+        "sections_filled": 0,
+        "paragraphs_total": 0,
+        "paragraphs_nonempty": 0,
+        "tables": 0,
+        "figures": 0,
+        "formulas": 0,
+        "list_items": 0,
+        "references_total": 0,
+        "total_words": 0,
+    }
+
+    def block_text(b: dict[str, Any]) -> str:
+        text = b.get("text", "")
+        if not text and b.get("runs"):
+            text = "".join(
+                r.get("text", "")
+                for r in b["runs"]
+                if r.get("kind") == "text"
+            )
+        return text
+
+    def walk_section(sec: dict[str, Any]) -> bool:
+        """Возвращает True если в секции есть контент."""
+        has_content = False
+        for b in sec.get("blocks", []) or []:
+            kind = b.get("kind", "")
+            if kind == "paragraph":
+                out["paragraphs_total"] += 1
+                t = block_text(b)
+                if t.strip():
+                    out["paragraphs_nonempty"] += 1
+                    out["total_words"] += len(t.split())
+                    has_content = True
+            elif kind == "table":
+                out["tables"] += 1
+                has_content = True
+            elif kind == "figure":
+                out["figures"] += 1
+                has_content = True
+            elif kind == "formula":
+                out["formulas"] += 1
+                has_content = True
+            elif kind == "list":
+                out["list_items"] += len(b.get("items") or [])
+                has_content = True
+        if sec.get("is_bibliography"):
+            refs = sec.get("references") or []
+            out["references_total"] += len(refs)
+            if refs:
+                has_content = True
+        for sub in sec.get("subsections") or []:
+            if walk_section(sub):
+                has_content = True
+        return has_content
+
+    for sec in state.get("sections", []) or []:
+        out["sections_total"] += 1
+        if walk_section(sec):
+            out["sections_filled"] += 1
+
+    return out
+
+
+def _render_progress_panel() -> None:
+    """Показать прогресс работы: заполненность разделов, число слов и пр.
+
+    Отображается перед деревом разделов. Помогает студенту видеть
+    общую картину: сколько разделов уже наполнено, сколько слов
+    написано, сколько таблиц/рисунков/источников.
+    """
+    state = _get_state()
+    if not state.get("sections"):
+        return
+    metrics = _compute_progress_metrics(state)
+    total = metrics["sections_total"]
+    filled = metrics["sections_filled"]
+    if total > 0:
+        progress = filled / total
+    else:
+        progress = 0.0
+
+    with st.expander(
+        f"Прогресс работы — {filled}/{total} разделов заполнено "
+        f"({metrics['total_words']} слов)",
+        expanded=False,
+    ):
+        st.progress(progress)
+        cols = st.columns(4)
+        cols[0].metric("Параграфы", metrics["paragraphs_nonempty"])
+        cols[1].metric("Таблицы", metrics["tables"])
+        cols[2].metric("Рисунки", metrics["figures"])
+        cols[3].metric("Источники", metrics["references_total"])
+        cols2 = st.columns(4)
+        cols2[0].metric("Формулы", metrics["formulas"])
+        cols2[1].metric("Элементы списков", metrics["list_items"])
+        cols2[2].metric("Слов всего", metrics["total_words"])
+        # Кол-во знаков по словам приближённое: ~6 знаков на слово
+        # (среднее для русского текста). Используется только для
+        # быстрой оценки объёма.
+        est_chars = metrics["total_words"] * 6
+        cols2[3].metric("Знаков (≈)", est_chars)
+
+
 def _render_imported_comments_panel() -> None:
     """Показать комментарии рецензента, импортированные из docx.
 
@@ -3227,6 +3344,7 @@ def render_interactive_builder() -> None:
 
     _render_import_violations_panel()
     _render_imported_comments_panel()
+    _render_progress_panel()
     _render_section_tree()
     _render_active_section_editor()
     _render_generate_button()
