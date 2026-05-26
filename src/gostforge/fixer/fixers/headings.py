@@ -141,7 +141,142 @@ def fix_heading_trailing_dot(
     return applied
 
 
+@register("H.04")
+def fix_heading_auto_numbering(
+    document: Document,
+    profile: Profile,
+) -> list[FixApplied]:
+    """Авто-нумерация содержательных разделов: '1', '1.1', '1.1.1'.
+
+    По ГОСТ 7.32-2017 п. 6.2: разделы и подразделы основной части
+    нумеруются арабскими цифрами. Структурные разделы (Введение,
+    Заключение, Содержание, Реферат, Список источников, Приложения)
+    не нумеруются.
+
+    Алгоритм симметричен UI-кнопке «Авто-нумерация» в bulk-операциях
+    Streamlit-конструктора, но реализован на уровне модели Document
+    через рекурсивный обход иерархии секций.
+
+    Не активен по умолчанию (`profile.checks.H.04.enabled` контролирует).
+    """
+    config = profile.checks.get("H.04")
+    if not (config and config.enabled):
+        return []
+
+    applied: list[FixApplied] = []
+    top_idx = 0
+    for ps in document.page_sections:
+        for sec in ps.content:
+            if not isinstance(sec, LogicalSection):
+                continue
+            heading_text = _heading_text(sec)
+            if _is_structural_heading(heading_text):
+                # Нормализуем — убираем случайную нумерацию.
+                _set_heading_text(sec, _strip_existing_number(heading_text))
+                # Подразделы внутри Содержание/Введение и т. п. тоже не нумеруются.
+                continue
+            top_idx += 1
+            base = _strip_existing_number(heading_text)
+            new_text = f"{top_idx} {base}"
+            if new_text != heading_text:
+                _set_heading_text(sec, new_text)
+                applied.append(
+                    FixApplied(
+                        fixer_code="H.04",
+                        location=_heading_location(sec),
+                        description=f"«{heading_text}» → «{new_text}»",
+                    )
+                )
+            # Рекурсивно нумеруем подразделы.
+            _renumber_subsections(sec, prefix=str(top_idx), applied=applied)
+    return applied
+
+
+def _renumber_subsections(
+    parent: LogicalSection,
+    *,
+    prefix: str,
+    applied: list[FixApplied],
+) -> None:
+    """Простановка номеров 'prefix.K' для подразделов parent и
+    'prefix.K.M' для их подподразделов."""
+    sub_idx = 0
+    for child in parent.children:
+        if not isinstance(child, LogicalSection):
+            continue
+        old_text = _heading_text(child)
+        if _is_structural_heading(old_text):
+            _set_heading_text(child, _strip_existing_number(old_text))
+            continue
+        sub_idx += 1
+        base = _strip_existing_number(old_text)
+        new_text = f"{prefix}.{sub_idx} {base}"
+        if new_text != old_text:
+            _set_heading_text(child, new_text)
+            applied.append(
+                FixApplied(
+                    fixer_code="H.04",
+                    location=_heading_location(child),
+                    description=f"«{old_text}» → «{new_text}»",
+                )
+            )
+        _renumber_subsections(
+            child, prefix=f"{prefix}.{sub_idx}", applied=applied
+        )
+
+
+def _heading_text(section: LogicalSection) -> str:
+    """Склейка inline-элементов заголовка в строку."""
+    return "".join(
+        el.text for el in section.heading if isinstance(el, TextRun)
+    )
+
+
+def _set_heading_text(section: LogicalSection, text: str) -> None:
+    """Заменить весь heading на один TextRun(text=...).
+
+    Существующее форматирование heading-runs теряется — это OK
+    для авто-нумерации (Heading-стиль применяется к всему параграфу
+    в экспортёре).
+    """
+    section.heading = [TextRun(text=text)]
+
+
+# Структурные разделы (Введение, Заключение, Приложение, ...) — не нумеруются.
+_STRUCTURAL = frozenset(
+    {
+        "введение",
+        "заключение",
+        "содержание",
+        "реферат",
+        "список использованных источников",
+        "список литературы",
+        "литература",
+        "список источников",
+        "библиографический список",
+        "оглавление",
+        "перечень сокращений",
+        "перечень обозначений и сокращений",
+    }
+)
+
+
+def _is_structural_heading(heading: str) -> bool:
+    cleaned = _strip_existing_number(heading).strip().lower()
+    if cleaned in _STRUCTURAL:
+        return True
+    if cleaned.startswith("приложение"):
+        return True
+    return False
+
+
+def _strip_existing_number(heading: str) -> str:
+    """Убрать существующую нумерацию '1', '1.', '1.1', '1.1.1' с начала."""
+    return re.sub(r"^\d+(\.\d+)*\.?\s+", "", heading).strip()
+
+
 __all__ = [
     "fix_dot_after_heading_number",
+    "fix_heading_auto_numbering",
     "fix_heading_trailing_dot",
 ]

@@ -2534,6 +2534,47 @@ def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _render_toc_preview_panel() -> None:
+    """Live-preview оглавления (списка заголовков) из текущего state.
+
+    Word TOC-field в .docx требует F9 чтобы построиться — пользователь
+    хочет видеть оглавление сразу в UI. Эта панель строит список
+    заголовков из state.sections и показывает их с глубинной отбивкой
+    как реальное оглавление.
+    """
+    state = _get_state()
+    sections = state.get("sections") or []
+    if not sections:
+        return
+    # Собираем все заголовки с глубиной.
+    headings: list[tuple[int, str]] = []
+
+    def walk(secs: list[dict], depth: int = 1) -> None:
+        for sec in secs:
+            heading = (sec.get("heading") or "").strip()
+            if heading:
+                headings.append((depth, heading))
+            walk(sec.get("subsections") or [], depth + 1)
+
+    walk(sections)
+    if not headings:
+        return
+    with st.expander(
+        f"Оглавление (preview) — {len(headings)} заголовков",
+        expanded=False,
+    ):
+        st.caption(
+            "Это live-preview. В сгенерированном .docx оглавление "
+            "формирует Word при открытии (F9). Здесь только для "
+            "удобства проверки структуры."
+        )
+        for depth, heading in headings:
+            # Отбивка через неразрывные пробелы (` `) — Markdown
+            # схлопывает обычные.
+            indent = " " * (4 * (depth - 1))
+            st.markdown(f"{indent}{heading}")
+
+
 def _render_live_validation_panel() -> None:
     """Постоянная панель live-нормоконтроля в main-области.
 
@@ -3489,12 +3530,9 @@ def _render_single_block(
 
 
 def _render_add_block_buttons(blocks: list[dict[str, Any]], *, key_prefix: str) -> None:
-    """Кнопки «+ Параграф», «+ Таблица», «+ Рисунок», «+ Список», «+ Формула»."""
-    cols = st.columns(5)
+    """Кнопки добавления блоков + шаблоны через выпадающий список."""
+    cols = st.columns(6)
     if cols[0].button("+ Параграф", key=f"{key_prefix}_add_p"):
-        # Phase 2.5: новые параграфы создаются в формате runs.
-        # UI-редактор inline-элементов появится в шаге 6; пока
-        # `_render_single_block` толерантно показывает оба формата.
         blocks.append({"kind": "paragraph", "runs": []})
         st.rerun()
     if cols[1].button("+ Таблица", key=f"{key_prefix}_add_t"):
@@ -3516,6 +3554,134 @@ def _render_add_block_buttons(blocks: list[dict[str, Any]], *, key_prefix: str) 
     if cols[4].button("+ Формула", key=f"{key_prefix}_add_m"):
         blocks.append({"kind": "formula", "latex": "", "numbered": True})
         st.rerun()
+    if cols[5].button("+ Оглавление", key=f"{key_prefix}_add_toc"):
+        blocks.append({"kind": "toc", "min_level": 1, "max_level": 3})
+        st.rerun()
+
+    # Расширенные шаблоны блоков — выпадающий список с готовыми структурами.
+    with st.expander("Шаблоны блоков", expanded=False):
+        template_keys = list(_BLOCK_TEMPLATES.keys())
+        sel = st.selectbox(
+            "Готовый блок",
+            options=template_keys,
+            format_func=lambda k: _BLOCK_TEMPLATES[k][0],
+            key=f"{key_prefix}_block_template",
+        )
+        if st.button(
+            "Вставить шаблон", key=f"{key_prefix}_insert_block_template"
+        ):
+            _label, factory = _BLOCK_TEMPLATES[sel]
+            new_blocks = factory()
+            # Шаблон может возвращать один блок или список блоков.
+            if isinstance(new_blocks, list):
+                blocks.extend(new_blocks)
+            else:
+                blocks.append(new_blocks)
+            st.rerun()
+
+
+# Шаблоны блоков для быстрой вставки готовых структур.
+# Каждый = (label, factory). factory возвращает dict (один блок) или
+# list[dict] (несколько связанных блоков).
+_BLOCK_TEMPLATES: dict[str, tuple[str, Any]] = {
+    "table_3x3_captioned": (
+        "Таблица 3×3 с подписью",
+        lambda: {
+            "kind": "table",
+            "headers": ["Параметр", "Значение", "Единица"],
+            "rows": [
+                ["A", "1", "—"],
+                ["B", "2", "—"],
+                ["C", "3", "—"],
+            ],
+            "caption": "Параметры эксперимента",
+        },
+    ),
+    "table_2col_data": (
+        "Таблица 2 колонки (свойство / значение)",
+        lambda: {
+            "kind": "table",
+            "headers": ["Свойство", "Значение"],
+            "rows": [["Шрифт", "Times New Roman"], ["Кегль", "14 pt"]],
+            "caption": "",
+        },
+    ),
+    "figure_captioned": (
+        "Рисунок с подписью",
+        lambda: {
+            "kind": "figure",
+            "image_path": "",
+            "caption": "Архитектура системы",
+        },
+    ),
+    "list_tasks_ordered": (
+        "Список задач (нумерованный)",
+        lambda: {
+            "kind": "list",
+            "ordered": True,
+            "items": [
+                "проанализировать существующие подходы;",
+                "разработать архитектуру решения;",
+                "реализовать прототип;",
+                "провести экспериментальное сравнение.",
+            ],
+        },
+    ),
+    "list_requirements_bullet": (
+        "Список требований (маркированный)",
+        lambda: {
+            "kind": "list",
+            "ordered": False,
+            "items": [
+                "функциональные требования;",
+                "нефункциональные требования;",
+                "ограничения предметной области.",
+            ],
+        },
+    ),
+    "formula_numbered": (
+        "Формула с номером",
+        lambda: {
+            "kind": "formula",
+            "latex": "E = mc^2",
+            "numbered": True,
+        },
+    ),
+    "intro_block": (
+        "Шаблон введения (актуальность + цель + задачи)",
+        lambda: [
+            {"kind": "paragraph", "text": "Актуальность темы исследования заключается в…"},
+            {"kind": "paragraph", "text": "Цель работы — разработать…"},
+            {"kind": "paragraph", "text": "Для достижения цели поставлены задачи:"},
+            {
+                "kind": "list",
+                "ordered": True,
+                "items": [
+                    "проанализировать предметную область;",
+                    "сформулировать требования;",
+                    "разработать решение;",
+                    "оценить эффективность.",
+                ],
+            },
+        ],
+    ),
+    "conclusion_block": (
+        "Шаблон заключения (результаты + выводы)",
+        lambda: [
+            {"kind": "paragraph", "text": "В ходе работы достигнуты следующие результаты:"},
+            {
+                "kind": "list",
+                "ordered": True,
+                "items": [
+                    "проведён анализ предметной области;",
+                    "разработан и реализован прототип;",
+                    "получены количественные оценки эффективности.",
+                ],
+            },
+            {"kind": "paragraph", "text": "Поставленные задачи выполнены, цель работы достигнута."},
+        ],
+    ),
+}
 
 
 def _render_subsections_editor(section: dict[str, Any], sec_idx: int) -> None:
@@ -3792,6 +3958,7 @@ def render_interactive_builder() -> None:
     _render_import_violations_panel()
     _render_imported_comments_panel()
     _render_progress_panel()
+    _render_toc_preview_panel()
     _render_live_validation_panel()
     _render_section_tree()
     _render_active_section_editor()
