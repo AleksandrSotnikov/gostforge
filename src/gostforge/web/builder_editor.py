@@ -2148,6 +2148,18 @@ _APPENDIX_LETTERS = "АБВГДЕЖИКЛМНПРСТУФХЦШЩЭЮЯ"
 # в начало списка разделов, а не в конец.
 _FRONT_TEMPLATES = frozenset({"title"})
 
+# Полный структурный каркас работы по ГОСТ 7.32 (порядок разделов).
+_GOST_SKELETON_ORDER = (
+    "title",
+    "abstract",
+    "toc",
+    "intro",
+    "chapter",
+    "conclusion",
+    "bib",
+    "appendix",
+)
+
 
 def _next_appendix_letter(sections: list[dict[str, Any]]) -> str:
     """Следующая буква приложения по ГОСТ (А, Б, В, …) по числу уже
@@ -2189,6 +2201,26 @@ def _render_section_templates_sidebar() -> None:
             state["sections"].append(new_section)
             state["active_section_index"] = len(state["sections"]) - 1
         st.rerun()
+
+    if st.sidebar.button(
+        "Собрать каркас по ГОСТ",
+        key="insert_gost_skeleton",
+        help=(
+            "Один клик — весь структурный набор по ГОСТ 7.32: титульный лист, "
+            "реферат, содержание, введение, глава, заключение, список "
+            "источников, приложение. Доступно только для пустого документа."
+        ),
+    ):
+        state = _get_state()
+        if state.get("sections"):
+            st.sidebar.warning(
+                "Каркас вставляется только в пустой документ. Удалите "
+                "разделы или начните новую работу."
+            )
+        else:
+            state["sections"] = [_SECTION_TEMPLATES[k][1]() for k in _GOST_SKELETON_ORDER]
+            state["active_section_index"] = 0
+            st.rerun()
 
 
 def _render_bulk_operations_sidebar() -> None:
@@ -4124,13 +4156,39 @@ def _render_generate_button() -> None:
         return
 
     st.success(f"Готово — {len(data) // 1024} КБ")
-    st.download_button(
+    dl_cols = st.columns(3)
+    dl_cols[0].download_button(
         "Скачать .docx",
         data=data,
         file_name="work.docx",
         mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         key="builder_download_docx",
     )
+    # Markdown / HTML — те же функции, что у CLI export-md/export-html.
+    from gostforge.cli import _state_to_html, _state_to_markdown
+
+    try:
+        md_text = _state_to_markdown(state)
+        dl_cols[1].download_button(
+            "Скачать .md",
+            data=md_text.encode("utf-8"),
+            file_name="work.md",
+            mime="text/markdown",
+            key="builder_download_md",
+        )
+    except Exception as exc:  # pragma: no cover - UI-фидбек
+        dl_cols[1].caption(f"MD недоступен: {exc}")
+    try:
+        html_text = _state_to_html(state, standalone=True)
+        dl_cols[2].download_button(
+            "Скачать .html",
+            data=html_text.encode("utf-8"),
+            file_name="work.html",
+            mime="text/html",
+            key="builder_download_html",
+        )
+    except Exception as exc:  # pragma: no cover - UI-фидбек
+        dl_cols[2].caption(f"HTML недоступен: {exc}")
 
     counts = _validate_state_bytes(data, state.get("profile_id", "gost-7.32-2017"))
     total = sum(counts.values())
