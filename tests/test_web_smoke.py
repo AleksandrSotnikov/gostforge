@@ -32,6 +32,22 @@ def test_app_module_importable() -> None:
     assert hasattr(app_module, "render"), "В app.py должна быть функция render()"
 
 
+def test_app_renders_dashboard_by_default() -> None:
+    """По умолчанию (режим «Главная») приложение рисует дашборд без ошибок."""
+    pytest.importorskip("streamlit")
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.app import render\nrender()\n")
+    at.run(timeout=90)
+    assert not at.exception, [str(e) for e in at.exception]
+    # Дашборд — режим по умолчанию: есть заголовок и переключатель режимов.
+    assert at.title
+    assert any("Режим" in r.label for r in at.radio)
+
+
 def test_ui_command_without_streamlit_exits_2(monkeypatch: pytest.MonkeyPatch) -> None:
     """Если streamlit не установлен, ``gostforge ui`` падает с exit code 2."""
     # Прячем streamlit, чтобы ``import streamlit`` внутри команды упал.

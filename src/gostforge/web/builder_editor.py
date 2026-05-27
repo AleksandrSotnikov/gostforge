@@ -27,6 +27,7 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import re
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -4104,6 +4105,82 @@ def _render_references_editor(section: dict[str, Any], sec_idx: int) -> None:
 # --- UI: generate button + preview -------------------------------------------
 
 
+def _compute_readiness(state: dict[str, Any]) -> dict[str, bool]:
+    """Вычислить флаги присутствия стандартных структурных элементов ГОСТ.
+
+    Анализирует только заголовки разделов 1-го уровня (регистронезависимо).
+    Заголовок нормализуется так: ``" ".join(h.lower().split())`` — приводится
+    к нижнему регистру и схлопывает повторяющиеся пробелы.
+
+    Возвращает dict с 7 ключами (название элемента → найден ли он).
+    Это чистая функция: не трогает Streamlit и не мутирует ``state``.
+    """
+    flags: dict[str, bool] = {
+        "Титульный лист": False,
+        "Содержание": False,
+        "Введение": False,
+        "Основная часть": False,
+        "Заключение": False,
+        "Список источников": False,
+        "Приложения": False,
+    }
+
+    for section in state.get("sections", []):
+        heading = section.get("heading") or ""
+        norm = " ".join(heading.lower().split())
+
+        if norm == "титульный лист":
+            flags["Титульный лист"] = True
+        if norm == "содержание":
+            flags["Содержание"] = True
+        if norm == "введение":
+            flags["Введение"] = True
+        if re.match(r"^\d+(\.\d+)*\.?\s", heading.strip()) or norm.startswith("глава "):
+            flags["Основная часть"] = True
+        if norm == "заключение":
+            flags["Заключение"] = True
+        if (
+            section.get("is_bibliography") is True
+            or norm == "литература"
+            or (norm.startswith("список") and ("источник" in norm or "литератур" in norm))
+        ):
+            flags["Список источников"] = True
+        if norm.startswith("приложение"):
+            flags["Приложения"] = True
+
+    return flags
+
+
+def _render_readiness_panel() -> None:
+    """Панель «Готовность работы»: чек-лист структурных элементов ГОСТ.
+
+    Показывает для каждого стандартного элемента, найден ли он среди
+    разделов 1-го уровня, и даёт быструю навигацию к нужному разделу.
+    """
+    state = _get_state()
+    st.subheader("Готовность работы")
+
+    sections: list[dict[str, Any]] = state.get("sections", [])
+    if not sections:
+        st.caption("Документ пуст — добавьте разделы.")
+        return
+
+    for name, ok in _compute_readiness(state).items():
+        st.markdown(f"- {'✅' if ok else '⬜'} {name}")
+
+    # Навигация: выбрать раздел и перейти к нему в редакторе.
+    options = list(range(len(sections)))
+    selected = st.selectbox(
+        "Перейти к разделу",
+        options=options,
+        format_func=lambda i: sections[i].get("heading") or f"Раздел {i + 1}",
+        key="readiness_goto_select",
+    )
+    if st.button("Перейти к разделу", key="readiness_goto_button"):
+        state["active_section_index"] = selected
+        st.rerun()
+
+
 def _render_generate_button() -> None:
     """Кнопка генерации .docx + live-preview нарушений + превью PDF."""
     state = _get_state()
@@ -4296,6 +4373,7 @@ def render_interactive_builder() -> None:
     _render_live_validation_panel()
     _render_section_tree()
     _render_active_section_editor()
+    _render_readiness_panel()
     _render_generate_button()
 
 

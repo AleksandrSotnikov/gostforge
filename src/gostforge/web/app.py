@@ -505,8 +505,10 @@ def _render_builder_mode() -> None:
 def render() -> None:
     """Главная функция рендера — точка входа streamlit-приложения."""
     st.set_page_config(
-        page_title="gostforge — нормоконтроль .docx",
+        page_title="gostforge — нормоконтроль и конструктор по ГОСТу",
+        page_icon="📄",
         layout="wide",
+        initial_sidebar_state="expanded",
     )
     profiles = list_profiles()
     if not profiles:
@@ -515,17 +517,31 @@ def render() -> None:
 
     mode = st.radio(
         "Режим",
-        options=["Нормоконтроль", "Конструктор", "Редактор профиля", "История", "Документация"],
+        options=[
+            "Главная",
+            "Нормоконтроль",
+            "Конструктор",
+            "Редактор профиля",
+            "История",
+            "Документация",
+        ],
         horizontal=True,
         help=(
+            "Главная — обзор возможностей и быстрый старт. "
             "Нормоконтроль — проверка существующего .docx по ГОСТ. "
-            "Конструктор — генерация .docx-скелета по шаблону. "
+            "Конструктор — сборка работы по ГОСТу с нуля или из .docx. "
             "Редактор профиля — настройка всех параметров оформления и "
             "сохранение своего профиля. "
             "История — все прошлые проверки + обсуждение руководитель↔студент. "
             "Документация — встроенный просмотр руководства."
         ),
     )
+
+    if mode == "Главная":
+        from gostforge.web.dashboard import render_dashboard
+
+        render_dashboard()
+        return
 
     if mode == "Документация":
         from gostforge.web.docs_viewer import render_docs_viewer
