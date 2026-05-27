@@ -24,7 +24,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import tempfile
 from collections import Counter
 from pathlib import Path
@@ -740,6 +742,72 @@ def remap_embedded_image_paths_in_state(
         walk_section(sec)
 
 
+def _image_file_to_data_uri(path: Path) -> str | None:
+    """Прочитать файл изображения и вернуть self-describing data-URI.
+
+    Формат: ``data:<mime>;base64,<...>``. None — если файл не читается.
+    """
+    try:
+        raw = path.read_bytes()
+    except OSError:
+        return None
+    mime = mimetypes.guess_type(path.name)[0] or "image/png"
+    return f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
+
+
+def _data_uri_to_temp_file(data_uri: str) -> str | None:
+    """Материализовать data-URI во временный файл, вернуть путь.
+
+    None — если строка не похожа на ``data:<mime>;base64,...``.
+    """
+    if not data_uri.startswith("data:") or ";base64," not in data_uri:
+        return None
+    header, b64 = data_uri.split(";base64,", 1)
+    mime = header[len("data:") :] or "image/png"
+    ext = mimetypes.guess_extension(mime) or ".png"
+    try:
+        raw = base64.b64decode(b64)
+    except (ValueError, TypeError):
+        return None
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(raw)
+        return tmp.name
+
+
+def embed_images_as_data_uri_in_state(state: dict[str, Any], rid_to_path: dict[str, Path]) -> None:
+    """Вшить картинки прямо в state как data-URI (``image_data``).
+
+    В отличие от :func:`remap_embedded_image_paths_in_state`, не оставляет
+    ссылок на внешние файлы: после этого state самодостаточен и переживает
+    сохранение в JSON, новую сессию и эфемерный контейнер. ``image_path``
+    тоже проставляется — для предпросмотра в текущей сессии.
+    """
+
+    def walk_blocks(blocks: list[dict[str, Any]]) -> None:
+        for b in blocks:
+            if b.get("kind") != "figure":
+                continue
+            path = b.get("image_path", "")
+            if not path.startswith("embedded:"):
+                continue
+            rid = path[len("embedded:") :]
+            src = rid_to_path.get(rid)
+            if src is None:
+                continue
+            data_uri = _image_file_to_data_uri(src)
+            if data_uri:
+                b["image_data"] = data_uri
+                b["image_path"] = str(src)
+
+    def walk_section(sec: dict[str, Any]) -> None:
+        walk_blocks(sec.get("blocks") or [])
+        for sub in sec.get("subsections") or []:
+            walk_section(sub)
+
+    for sec in state.get("sections") or []:
+        walk_section(sec)
+
+
 def document_to_state(document: Any) -> dict[str, Any]:
     """Разложить распарсенный Document обратно в state-dict конструктора.
 
@@ -1383,6 +1451,18 @@ def _apply_blocks(section_builder: SectionBuilder, blocks: list[dict[str, Any]])
             section_builder.table(headers=headers, rows=rows, caption=str(caption))
         elif kind == "figure":
             image_path = block.get("image_path") or ""
+            # Канонический источник — вшитый в state data-URI (переживает
+            # сохранение/новую сессию). Путь к файлу — лишь предпросмотр и
+            # может «протухнуть», поэтому материализуем data-URI заново.
+            data_uri = block.get("image_data") or ""
+            if data_uri:
+                materialized = _data_uri_to_temp_file(data_uri)
+                if materialized:
+                    image_path = materialized
+            elif image_path and not Path(image_path).exists():
+                # Протухший путь без вшитых данных — пропускаем, чтобы
+                # экспортёр не падал на несуществующем файле.
+                image_path = ""
             caption = block.get("caption", "")
             section_builder.image(image_path=image_path, caption=str(caption))
         elif kind == "list":
@@ -2521,7 +2601,10 @@ def _handle_docx_import(data: bytes, filename: str) -> None:
         images_dir = Path.home() / ".gostforge" / "imports" / f"{filename}-{int(time.time())}"
         rid_to_path = extract_embedded_images(tmp_path, images_dir)
         if rid_to_path:
-            remap_embedded_image_paths_in_state(new_state, rid_to_path)
+            # Вшиваем картинки прямо в state (data-URI) — так они переживают
+            # сохранение в JSON и новую сессию, а не теряются вместе с
+            # временным каталогом, как при простой подстановке путей.
+            embed_images_as_data_uri_in_state(new_state, rid_to_path)
     except Exception as exc:  # pragma: no cover - UI feedback
         st.sidebar.error(f"Не удалось разложить «{filename}»: {exc}")
         return
@@ -3636,14 +3719,20 @@ def _render_single_block(
             key=f"{base}_image",
         )
         if uploaded is not None:
-            # Сохраняем изображение во временный файл, чтобы экспортёр
-            # смог его вставить в .docx.
+            # Вшиваем картинку прямо в state как data-URI — так она
+            # переживает сохранение в JSON и новую сессию. Плюс пишем
+            # во временный файл для предпросмотра в текущей сессии.
+            raw = uploaded.getvalue()
+            mime = mimetypes.guess_type(uploaded.name)[0] or "image/png"
+            block["image_data"] = f"data:{mime};base64,{base64.b64encode(raw).decode('ascii')}"
             with tempfile.NamedTemporaryFile(
                 suffix=Path(uploaded.name).suffix, delete=False
             ) as tmp:
-                tmp.write(uploaded.getvalue())
+                tmp.write(raw)
                 block["image_path"] = tmp.name
-        if block.get("image_path"):
+        if block.get("image_data"):
+            st.caption("Изображение вшито в работу (сохранится в .json).")
+        elif block.get("image_path"):
             st.caption(f"Текущий путь: `{block['image_path']}`")
     elif kind == "list":
         items_text = "\n".join(block.get("items") or [])
