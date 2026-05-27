@@ -62,6 +62,59 @@ def build_profile_yaml(data: dict[str, Any]) -> str:
     )
 
 
+_UNCHANGED = object()
+
+
+def _diff(base: Any, edited: Any) -> Any:
+    """Вернуть часть ``edited``, отличающуюся от ``base``.
+
+    Для совпадающих значений возвращает сентинел ``_UNCHANGED``. dict
+    обходится рекурсивно (только изменённые ключи), list и скаляры
+    берутся целиком при любом отличии — это согласовано с правилами
+    ``_deep_merge`` при наследовании профилей.
+    """
+    if isinstance(base, dict) and isinstance(edited, dict):
+        out: dict[str, Any] = {}
+        for key, edited_value in edited.items():
+            if key not in base:
+                out[key] = edited_value
+                continue
+            sub = _diff(base[key], edited_value)
+            if sub is not _UNCHANGED:
+                out[key] = sub
+        return out if out else _UNCHANGED
+    return _UNCHANGED if base == edited else edited
+
+
+def build_extends_profile_yaml(data: dict[str, Any], base_id: str) -> str:
+    """YAML профиля-наследника: ``extends: base_id`` + только отличия.
+
+    В отличие от :func:`build_profile_yaml` (полный снимок), сохраняется
+    минимальный diff поверх базового профиля — при обновлении базового
+    стандарта наследник подхватит изменения неизменённых параметров.
+    """
+    base = load_profile(base_id).model_dump()
+    result: dict[str, Any] = {
+        "id": (data.get("id") or "").strip(),
+        "name": data.get("name", ""),
+        "version": data.get("version", "1.0"),
+        "extends": base_id,
+    }
+    if data.get("description"):
+        result["description"] = data["description"]
+    for key in ("styles", "checks", "sections_template"):
+        sub = _diff(base.get(key), data.get(key))
+        if sub is not _UNCHANGED and sub:
+            result[key] = sub
+
+    # Структурная валидация (типы значений в diff'е); сам diff и пишем.
+    try:
+        Profile(**result)
+    except Exception as exc:
+        raise ValueError(f"Профиль не прошёл валидацию: {exc}") from exc
+    return yaml.safe_dump(result, allow_unicode=True, sort_keys=False)
+
+
 def save_profile_to_registry(yaml_content: str, *, overwrite: bool) -> str:
     """Установить YAML-профиль в локальный реестр (БД). Возвращает id.
 
@@ -446,12 +499,26 @@ def render_profile_editor() -> None:
     with tabs[6]:
         _edit_checks(data)
     with tabs[7]:
-        _render_yaml_and_save(data)
+        _render_yaml_and_save(data, st.session_state.get(_SESSION_BASE, ""))
 
 
-def _render_yaml_and_save(data: dict[str, Any]) -> None:
+def _render_yaml_and_save(data: dict[str, Any], base_id: str) -> None:
+    mode = st.radio(
+        "Способ сохранения",
+        options=["Полный снимок", "Наследник базового (extends)"],
+        horizontal=True,
+        help=(
+            "Полный снимок — самодостаточный профиль со всеми параметрами. "
+            "Наследник — сохраняются только отличия от базового профиля "
+            f"«{base_id}»; при его обновлении наследник подхватит изменения."
+        ),
+        key="pe_save_mode",
+    )
     try:
-        yaml_text = build_profile_yaml(data)
+        if mode.startswith("Наследник") and base_id:
+            yaml_text = build_extends_profile_yaml(data, base_id)
+        else:
+            yaml_text = build_profile_yaml(data)
     except ValueError as exc:
         st.error(str(exc))
         return
