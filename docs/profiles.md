@@ -139,8 +139,9 @@ styles:
   lists:
     bullet_char: "–"            # тире по ГОСТ Р 7.32-2017
     ordered_format: "{n})"      # «1)», «2)», ...
-    left_indent_cm: 1.25
-    hanging_indent_cm: 0.5
+    left_indent_cm: 1.75        # «Отступ текста» (куда переносится строка)
+    hanging_indent_cm: 0.5      # выступ маркера: >0 — маркер левее текста
+    marker_suffix: tab          # символ после маркера: tab | space | nothing
   # ... (см. полный пример в profiles/gost-7.32-2017.yaml)
 
 sections_template:
