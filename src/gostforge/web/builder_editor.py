@@ -3813,6 +3813,21 @@ def _render_citation_editor(run: dict[str, Any], *, base: str, state: dict[str, 
         run.pop("template", None)
 
 
+def _move_block(blocks: list[dict[str, Any]], from_idx: int, to_idx: int) -> None:
+    """Переместить блок с позиции from_idx на to_idx (с клампингом).
+
+    Мутирует список на месте. No-op при выходе индекса за границы,
+    совпадении позиций или пустом списке.
+    """
+    if from_idx < 0 or from_idx >= len(blocks):
+        return
+    to_idx = max(0, min(to_idx, len(blocks) - 1))
+    if to_idx == from_idx:
+        return
+    item = blocks.pop(from_idx)
+    blocks.insert(to_idx, item)
+
+
 def _render_single_block(
     block: dict[str, Any],
     blocks: list[dict[str, Any]],
@@ -3820,7 +3835,7 @@ def _render_single_block(
     *,
     key_prefix: str,
 ) -> None:
-    """Отрисовать редактор одного блока + кнопку «Удалить»."""
+    """Отрисовать редактор одного блока + кнопки перемещения и удаления."""
     kind = block.get("kind")
     base = f"{key_prefix}_b{b_idx}"
 
@@ -3908,7 +3923,22 @@ def _render_single_block(
             key=f"{base}_numbered",
         )
 
-    if st.button("Удалить блок", key=f"{base}_del"):
+    # Перемещение блока вверх/вниз (без drag-and-drop) + удаление.
+    move_cols = st.columns([1, 1, 3])
+    if move_cols[0].button(
+        "↑", key=f"{base}_up", disabled=b_idx == 0, help="Переместить блок выше"
+    ):
+        _move_block(blocks, b_idx, b_idx - 1)
+        st.rerun()
+    if move_cols[1].button(
+        "↓",
+        key=f"{base}_down",
+        disabled=b_idx >= len(blocks) - 1,
+        help="Переместить блок ниже",
+    ):
+        _move_block(blocks, b_idx, b_idx + 1)
+        st.rerun()
+    if move_cols[2].button("Удалить блок", key=f"{base}_del"):
         blocks.pop(b_idx)
         st.rerun()
 
