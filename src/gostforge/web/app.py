@@ -515,11 +515,13 @@ def render() -> None:
 
     mode = st.radio(
         "Режим",
-        options=["Нормоконтроль", "Конструктор", "История", "Документация"],
+        options=["Нормоконтроль", "Конструктор", "Редактор профиля", "История", "Документация"],
         horizontal=True,
         help=(
             "Нормоконтроль — проверка существующего .docx по ГОСТ. "
             "Конструктор — генерация .docx-скелета по шаблону. "
+            "Редактор профиля — настройка всех параметров оформления и "
+            "сохранение своего профиля. "
             "История — все прошлые проверки + обсуждение руководитель↔студент. "
             "Документация — встроенный просмотр руководства."
         ),
@@ -529,6 +531,12 @@ def render() -> None:
         from gostforge.web.docs_viewer import render_docs_viewer
 
         render_docs_viewer()
+        return
+
+    if mode == "Редактор профиля":
+        from gostforge.web.profile_editor import render_profile_editor
+
+        render_profile_editor()
         return
 
     if mode == "История":
