@@ -618,3 +618,42 @@ def test_t04_noop_when_already_correct() -> None:
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
     profile = load_profile("gost-7.32-2017")
     assert run_fix(doc, profile, codes=["T.04"]) == []
+
+
+# --- U.01: NBSP между числом и единицей СИ ----------------------------------
+
+
+def test_u01_fixer_registered() -> None:
+    """Фиксер U.01 присутствует в реестре."""
+    assert "U.01" in registered_fixers()
+
+
+def test_u01_inserts_nbsp_between_number_and_si_unit() -> None:
+    """U.01-фиксер: обычный пробел между числом и единицей СИ → NBSP."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="масса 10 кг")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.01"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "U.01"
+    assert isinstance(applied[0], FixApplied)
+    runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert "10 кг" in runs[0].text
+    assert "10 кг" not in runs[0].text  # обычного пробела больше нет
+
+
+def test_u01_fixer_no_change_when_already_nbsp() -> None:
+    """Если уже стоит NBSP — фиксер ничего не делает."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="ток 5 А")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.01"])
+    assert applied == []
