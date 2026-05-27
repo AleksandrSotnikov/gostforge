@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from gostforge.model import (
     Block,
@@ -11,6 +12,7 @@ from gostforge.model import (
     TextRun,
 )
 from gostforge.profile import Profile
+from gostforge.profile.schema import HeadingStyleProfile
 
 from ..engine import FixApplied, register
 
@@ -57,6 +59,97 @@ def _heading_runs(section: LogicalSection) -> list[TextRun]:
 def _heading_location(section: LogicalSection) -> str:
     """Стандартный путь в модели для FixApplied.location."""
     return f"page_sections.*.logical_section[{section.id}].heading"
+
+
+# Допуск кегля (pt) — как в проверке H.01/H.02.
+_HEADING_SIZE_TOLERANCE_PT = 0.1
+
+
+def _fix_heading_format(
+    document: Document,
+    *,
+    level: int,
+    fixer_code: str,
+    hstyle: HeadingStyleProfile,
+    legacy: dict[str, Any],
+) -> list[FixApplied]:
+    """Привести формат заголовков уровня ``level`` к профилю.
+
+    Исправляет ЯВНЫЕ шрифт/кегль/жирность/цвет run-ов (наследуемые
+    значения не трогает). UPPERCASE не меняем — это правка текста, а не
+    форматирования. Предикат цвета берётся из проверки, чтобы фиксер
+    исправлял ровно то, что она находит.
+    """
+    from gostforge.validator.checks.headings import _color_violates_expected
+
+    expected_font: str | None = legacy.get("font", hstyle.font)
+    expected_size: float | None = legacy.get("size_pt", hstyle.size_pt)
+    expected_bold: bool | None = legacy.get("bold", hstyle.bold)
+    expected_color: str | None = legacy.get("color", hstyle.color)
+
+    applied: list[FixApplied] = []
+    for section in _all_logical_sections(document):
+        if section.level != level:
+            continue
+        changed = False
+        for run in _heading_runs(section):
+            if not run.text or not run.text.strip():
+                continue
+            if expected_font and run.font and run.font != expected_font:
+                run.font = expected_font
+                changed = True
+            if (
+                expected_size is not None
+                and run.size_pt is not None
+                and abs(run.size_pt - float(expected_size)) > _HEADING_SIZE_TOLERANCE_PT
+            ):
+                run.size_pt = float(expected_size)
+                changed = True
+            if expected_bold is True and run.bold is False:
+                run.bold = True
+                changed = True
+            if _color_violates_expected(run.color_hex, expected_color):
+                if not expected_color or expected_color == "auto":
+                    run.color_hex = None
+                else:
+                    run.color_hex = str(expected_color).lstrip("#").upper()
+                changed = True
+        if changed:
+            applied.append(
+                FixApplied(
+                    fixer_code=fixer_code,
+                    location=_heading_location(section),
+                    description=(
+                        f"Формат заголовка {level} уровня приведён к профилю "
+                        f"(шрифт/кегль/жирность/цвет)"
+                    ),
+                )
+            )
+    return applied
+
+
+@register("H.01")
+def fix_heading_1_format(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести формат заголовков 1 уровня к профилю (без UPPERCASE)."""
+    return _fix_heading_format(
+        document,
+        level=1,
+        fixer_code="H.01",
+        hstyle=profile.styles.heading_1,
+        legacy=profile.styles.extra.get("heading_1", {}) or {},
+    )
+
+
+@register("H.02")
+def fix_heading_2_format(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести формат заголовков 2 уровня к профилю (без UPPERCASE)."""
+    return _fix_heading_format(
+        document,
+        level=2,
+        fixer_code="H.02",
+        hstyle=profile.styles.heading_2,
+        legacy=profile.styles.extra.get("heading_2", {}) or {},
+    )
 
 
 @register("H.03")
@@ -280,6 +373,8 @@ def _strip_existing_number(heading: str) -> str:
 
 __all__ = [
     "fix_dot_after_heading_number",
+    "fix_heading_1_format",
+    "fix_heading_2_format",
     "fix_heading_auto_numbering",
     "fix_heading_trailing_dot",
 ]

@@ -368,6 +368,115 @@ def test_h08_preserves_question_mark() -> None:
     assert runs[0].text == "Что такое?"
 
 
+# --- H.01/H.02: формат заголовков (шрифт/кегль/жирность/цвет) ----------------
+
+
+def test_h01_h02_fix_registered() -> None:
+    """Фиксеры формата заголовков зарегистрированы."""
+    codes = set(registered_fixers())
+    assert {"H.01", "H.02"}.issubset(codes)
+
+
+def test_h01_fixes_blue_cambria_heading() -> None:
+    """«Синий Cambria» заголовок 1 уровня приводится к профилю."""
+    section = LogicalSection(
+        id="s1",
+        heading=[
+            TextRun(
+                text="ВВЕДЕНИЕ",
+                font="Cambria",
+                size_pt=16.0,
+                bold=False,
+                color_hex="365F91",
+            )
+        ],
+        level=1,
+    )
+    doc = _doc_with_section(section)
+    profile = load_profile("gost-7.32-2017")
+
+    pre = [v for v in validate(doc, profile) if v.check_code == "H.01"]
+    assert pre, "тест должен начинаться с нарушениями H.01"
+
+    applied = fix(doc, profile, codes=["H.01"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "H.01"
+
+    runs = [el for el in section.heading if isinstance(el, TextRun)]
+    run = runs[0]
+    assert run.font == "Times New Roman"
+    assert run.size_pt == 14.0
+    assert run.bold is True
+    assert run.color_hex is None
+
+    post = [v for v in validate(doc, profile) if v.check_code == "H.01"]
+    assert post == []
+
+
+def test_h01_leaves_inherited_runs_untouched() -> None:
+    """Run с наследуемыми (None) атрибутами фиксер не трогает."""
+    section = LogicalSection(
+        id="s1",
+        heading=[TextRun(text="ГЛАВА 1", font=None, size_pt=None, bold=None, color_hex=None)],
+        level=1,
+    )
+    doc = _doc_with_section(section)
+    profile = load_profile("gost-7.32-2017")
+
+    applied = fix(doc, profile, codes=["H.01"])
+    assert applied == []
+
+    runs = [el for el in section.heading if isinstance(el, TextRun)]
+    run = runs[0]
+    assert run.font is None
+    assert run.size_pt is None
+    assert run.bold is None
+    assert run.color_hex is None
+
+
+def test_h01_does_not_change_uppercase() -> None:
+    """Регистр заголовка фиксер не меняет — это правка текста, не формата."""
+    section = LogicalSection(
+        id="s1",
+        heading=[TextRun(text="введение", font="Times New Roman", size_pt=14.0, bold=True)],
+        level=1,
+    )
+    doc = _doc_with_section(section)
+    profile = load_profile("gost-7.32-2017")
+
+    fix(doc, profile, codes=["H.01"])
+    runs = [el for el in section.heading if isinstance(el, TextRun)]
+    assert runs[0].text == "введение"
+
+
+def test_h02_fixes_heading_level_2_only() -> None:
+    """H.02 правит заголовки 2 уровня, не трогая 1 уровень."""
+    h1 = LogicalSection(
+        id="s1",
+        heading=[TextRun(text="ГЛАВА", font="Cambria", size_pt=16.0, bold=False)],
+        level=1,
+    )
+    h2 = LogicalSection(
+        id="s2",
+        heading=[TextRun(text="Подраздел", font="Cambria", size_pt=16.0, bold=False)],
+        level=2,
+    )
+    h1.children.append(h2)
+    doc = _doc_with_section(h1)
+    profile = load_profile("gost-7.32-2017")
+
+    applied = fix(doc, profile, codes=["H.02"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "H.02"
+
+    # Заголовок 1 уровня не тронут фиксером H.02.
+    runs1 = [el for el in h1.heading if isinstance(el, TextRun)]
+    assert runs1[0].font == "Cambria"
+    # Заголовок 2 уровня приведён к профилю.
+    runs2 = [el for el in h2.heading if isinstance(el, TextRun)]
+    assert runs2[0].font == "Times New Roman"
+
+
 # --- end-to-end: export → parse → fix → export → parse → validate -----------
 
 
