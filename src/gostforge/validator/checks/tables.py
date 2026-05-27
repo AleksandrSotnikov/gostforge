@@ -344,6 +344,83 @@ def check_table_referenced_in_text(
     return violations
 
 
+def _document_blocks_linear(document: Document) -> list[Block]:
+    """Все Block-и документа в порядке появления (для проверок порядка)."""
+    blocks: list[Block] = []
+    for ps in document.page_sections:
+        blocks.extend(_iter_linear_blocks(ps.content))
+    return blocks
+
+
+def _iter_linear_blocks(items: Sequence[LogicalSection | Block]) -> list[Block]:
+    """Линейный список Block-ов; рекурсивно обходит LogicalSection.children."""
+    result: list[Block] = []
+    for item in items:
+        if isinstance(item, LogicalSection):
+            result.extend(_iter_linear_blocks(item.children))
+        elif isinstance(item, Block):
+            result.append(item)
+    return result
+
+
+@register("B.11")
+def check_table_reference_precedes(document: Document, profile: Profile) -> list[Violation]:
+    """Таблица должна располагаться ПОСЛЕ первого упоминания в тексте.
+
+    ГОСТ 7.32-2017 п. 6.5.2: таблицу помещают после абзаца с первой
+    ссылкой на неё. Аналог I.07 для рисунков (severity=warning). Если
+    ссылок на таблицу нет совсем — это случай B.08, здесь не дублируем.
+    """
+    violations: list[Violation] = []
+    blocks = _document_blocks_linear(document)
+
+    for idx, block in enumerate(blocks):
+        if not isinstance(block, Table):
+            continue
+        text = _caption_text(block.caption)
+        if not text:
+            continue
+        match = _TABLE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            num = int(match.group(1))
+        except ValueError:
+            continue
+
+        before_text = "\n".join(
+            _paragraph_text(b) for b in blocks[:idx] if isinstance(b, Paragraph)
+        )
+        after_text = "\n".join(
+            _paragraph_text(b) for b in blocks[idx + 1 :] if isinstance(b, Paragraph)
+        )
+        patterns = _table_reference_patterns(num)
+        if any(p.search(before_text) for p in patterns):
+            continue
+        if not any(p.search(after_text) for p in patterns):
+            # Ссылок нет ни до, ни после — случай B.08, не дублируем.
+            continue
+
+        violations.append(
+            Violation(
+                check_code="B.11",
+                severity="warning",
+                message=(
+                    f"Ссылка на таблицу {num} в тексте идёт после самой "
+                    f"таблицы — она должна предшествовать таблице"
+                ),
+                location=f"table[{block.id}]",
+                suggestion=(
+                    f"Перенесите упоминание «таблица {num}» в текст ДО самой "
+                    f"таблицы (например, «В таблице {num} приведены ...»)"
+                ),
+                details={"table_id": block.id, "number": str(num)},
+            )
+        )
+
+    return violations
+
+
 @register("B.06")
 def check_table_cell_font_size(document: Document, profile: Profile) -> list[Violation]:
     """В ячейках таблицы шрифт должен быть `cell_font_size_pt` (по умолчанию 12pt).

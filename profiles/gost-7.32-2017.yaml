@@ -167,6 +167,7 @@ checks:
   B.08: {enabled: true}
   B.09: {enabled: true}
   B.10: {enabled: true}   # таблица не должна быть пустой
+  B.11: {enabled: true}   # таблица — после первого упоминания в тексте
   R.01: {enabled: true}
   R.02: {enabled: true, params: {order: alphabetical}}
   R.03:
