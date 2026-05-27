@@ -30,6 +30,35 @@ _NUMBER_WITH_DOT = re.compile(r"^(\d+(?:\.\d+)*)(\.)\s")
 # например «1 Введение» → 1, «1.2 Анализ» → 1, «1. Введение» → 1.
 _LEADING_NUMBER = re.compile(r"^(\d+)(?:\.\d+)*\.?\s")
 
+# Структурные элементы по ГОСТ 7.32-2017, которые НЕ нумеруются
+# (в отличие от разделов основной части). Сравнение — по
+# нормализованному тексту заголовка.
+_STRUCTURAL_HEADINGS_NORMALIZED: frozenset[str] = frozenset(
+    {
+        "реферат",
+        "содержание",
+        "определения",
+        "термины и определения",
+        "обозначения и сокращения",
+        "перечень сокращений и обозначений",
+        "перечень сокращений",
+        "нормативные ссылки",
+        "введение",
+        "заключение",
+        "список использованных источников",
+        "список литературы",
+        "список источников",
+        "литература",
+    }
+)
+
+
+def _is_structural_heading(text: str) -> bool:
+    """True для структурных элементов ГОСТ (не нумеруются): введение,
+    заключение, список источников, реферат, приложение и т. п."""
+    norm = " ".join(text.lower().split()).rstrip(".")
+    return norm in _STRUCTURAL_HEADINGS_NORMALIZED or norm.startswith("приложение")
+
 
 def _heading_text(content: Sequence[InlineElement]) -> str:
     return "".join(el.text for el in content if isinstance(el, TextRun))
@@ -370,9 +399,19 @@ def check_heading_numbering_continuous(
     if not level1:
         return violations
 
+    # Структурные элементы (Введение, Заключение, Список источников и т. п.)
+    # по ГОСТ 7.32 НЕ нумеруются — исключаем их из проверки единообразия
+    # нумерации, иначе корректный документ (структурные без номера +
+    # разделы основной части с номером) ложно помечался бы «смешанным».
+    content_level1 = [
+        s for s in level1 if not _is_structural_heading(_heading_text(s.heading))
+    ]
+    if not content_level1:
+        return violations
+
     numbered: list[tuple[LogicalSection, int]] = []
     unnumbered: list[LogicalSection] = []
-    for section in level1:
+    for section in content_level1:
         text = _heading_text(section.heading).lstrip()
         match = _LEADING_NUMBER.match(text)
         if match:

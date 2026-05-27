@@ -390,6 +390,10 @@ def check_no_empty_sections(
 # - «Приложение А», «Приложение 1», «Приложение Б», ...
 _GENERIC_CHAPTER = re.compile(r"^глава\s+\S+", re.IGNORECASE)
 _GENERIC_APPENDIX = re.compile(r"^приложение(\s+\S+)?", re.IGNORECASE)
+# Нумерованный раздел основной части по ГОСТ: «1 Название», «1.1 …».
+# Такие разделы — содержательные, их название не сверяется со списком
+# структурных элементов.
+_NUMBERED_HEADING = re.compile(r"^\d+(\.\d+)*\.?\s+\S")
 
 
 def _default_s03_expected(profile: Profile) -> list[str]:
@@ -474,6 +478,9 @@ def check_section_names_match_profile(document: Document, profile: Profile) -> l
             continue
         # «Глава N»
         if _GENERIC_CHAPTER.match(heading):
+            continue
+        # Нумерованный раздел основной части: «1 …», «1.1 …».
+        if _NUMBERED_HEADING.match(heading):
             continue
         # «Приложение Х»
         if _GENERIC_APPENDIX.match(heading):

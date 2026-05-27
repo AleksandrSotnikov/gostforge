@@ -352,12 +352,15 @@ def test_h04_starts_not_from_one_violation() -> None:
 
 
 def test_h04_mixed_numbering_warning() -> None:
-    """Часть нумерованы, часть — нет — warning."""
+    """Среди разделов основной части часть нумерованы, часть — нет — warning.
+
+    Берём именно содержательные разделы (не структурные): «1 Анализ»
+    с номером и «Реализация» без — это реальная несогласованность.
+    """
     doc = _doc(
         [
-            _heading("Введение"),  # без номера
             _heading("1 Анализ"),
-            _heading("Заключение"),  # без номера
+            _heading("Реализация"),  # содержательный раздел без номера
         ]
     )
     profile = load_profile("gost-7.32-2017")
@@ -365,6 +368,23 @@ def test_h04_mixed_numbering_warning() -> None:
     assert len(found) == 1
     assert found[0].severity == "warning"
     assert "единый стиль" in found[0].message
+
+
+def test_h04_structural_unnumbered_with_numbered_content_ok() -> None:
+    """Канонический ГОСТ: структурные (Введение/Заключение) без номера +
+    разделы основной части с номером — это НЕ «смешанный стиль»."""
+    doc = _doc(
+        [
+            _heading("Введение"),
+            _heading("1 Анализ"),
+            _heading("2 Реализация"),
+            _heading("Заключение"),
+            _heading("Список использованных источников"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "H.04"]
+    assert found == []
 
 
 def test_h04_dotted_number_recognized() -> None:
