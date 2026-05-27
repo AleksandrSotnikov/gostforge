@@ -222,9 +222,7 @@ def test_h04_fixer_replaces_chapter_label_without_double_numbering() -> None:
     """«ГЛАВА 1. ОСНОВНАЯ ЧАСТЬ» → «1 ОСНОВНАЯ ЧАСТЬ», а не
     «1 ГЛАВА 1. ОСНОВНАЯ ЧАСТЬ» (словесная метка раздела = уже-нумерация)."""
     doc = Document(metadata=DocumentMetadata(title="X"))
-    sec = LogicalSection(
-        id="s1", heading=[TextRun(text="ГЛАВА 1. ОСНОВНАЯ ЧАСТЬ")], level=1
-    )
+    sec = LogicalSection(id="s1", heading=[TextRun(text="ГЛАВА 1. ОСНОВНАЯ ЧАСТЬ")], level=1)
     doc.page_sections.append(
         PageSection(
             id="m",

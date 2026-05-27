@@ -403,9 +403,7 @@ def check_heading_numbering_continuous(
     # по ГОСТ 7.32 НЕ нумеруются — исключаем их из проверки единообразия
     # нумерации, иначе корректный документ (структурные без номера +
     # разделы основной части с номером) ложно помечался бы «смешанным».
-    content_level1 = [
-        s for s in level1 if not _is_structural_heading(_heading_text(s.heading))
-    ]
+    content_level1 = [s for s in level1 if not _is_structural_heading(_heading_text(s.heading))]
     if not content_level1:
         return violations
 
