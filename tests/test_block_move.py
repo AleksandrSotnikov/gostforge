@@ -49,6 +49,18 @@ def test_move_block_to_section_target_without_blocks_key() -> None:
     assert state["sections"][1]["blocks"] == [{"kind": "x"}]
 
 
+def test_move_and_duplicate_work_on_subsections() -> None:
+    """Те же helper-ы переупорядочивают/дублируют подразделы (list[dict])."""
+    subs = [{"heading": "1.1"}, {"heading": "1.2"}, {"heading": "1.3"}]
+    _move_block(subs, 2, 0)
+    assert [s["heading"] for s in subs] == ["1.3", "1.1", "1.2"]
+    _duplicate_block(subs, 0)
+    assert [s["heading"] for s in subs] == ["1.3", "1.3", "1.1", "1.2"]
+    # Копия независима от оригинала.
+    subs[1]["heading"] = "изменено"
+    assert subs[0]["heading"] == "1.3"
+
+
 def _blocks() -> list[dict[str, str]]:
     return [{"kind": "a"}, {"kind": "b"}, {"kind": "c"}]
 

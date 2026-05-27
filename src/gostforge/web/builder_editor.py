@@ -3815,10 +3815,11 @@ def _render_citation_editor(run: dict[str, Any], *, base: str, state: dict[str, 
 
 
 def _move_block(blocks: list[dict[str, Any]], from_idx: int, to_idx: int) -> None:
-    """Переместить блок с позиции from_idx на to_idx (с клампингом).
+    """Переместить элемент списка (блок/подраздел) с from_idx на to_idx.
 
-    Мутирует список на месте. No-op при выходе индекса за границы,
-    совпадении позиций или пустом списке.
+    Универсальный helper для любого упорядоченного списка dict-ов
+    (блоки, подразделы, пункты). Мутирует список на месте; no-op при
+    выходе индекса за границы, совпадении позиций или пустом списке.
     """
     if from_idx < 0 or from_idx >= len(blocks):
         return
@@ -3830,11 +3831,12 @@ def _move_block(blocks: list[dict[str, Any]], from_idx: int, to_idx: int) -> Non
 
 
 def _duplicate_block(blocks: list[dict[str, Any]], b_idx: int) -> None:
-    """Вставить глубокую копию блока сразу после оригинала.
+    """Вставить глубокую копию элемента (блока/подраздела) сразу после него.
 
-    Глубокая копия через json round-trip (блоки — dict/list примитивов,
-    включая data-URI картинок), чтобы правки копии не затрагивали оригинал.
-    No-op при индексе вне диапазона.
+    Универсальный helper для любого списка dict-ов. Глубокая копия через
+    json round-trip (dict/list примитивов, включая data-URI картинок),
+    чтобы правки копии не затрагивали оригинал. No-op при индексе вне
+    диапазона.
     """
     if b_idx < 0 or b_idx >= len(blocks):
         return
@@ -4189,10 +4191,27 @@ def _render_subsections_editor(section: dict[str, Any], sec_idx: int) -> None:
             # Подразделы 3-го уровня (sub-subsections).
             _render_subsubsections_editor(sub, sec_idx, s_idx)
 
-            if st.button(
-                "Удалить подраздел",
-                key=f"del_sub_{sec_idx}_{s_idx}",
+            # Перемещение ↑/↓, дублирование, удаление подраздела.
+            sub_cols = st.columns([1, 1, 1, 3])
+            if sub_cols[0].button(
+                "↑", key=f"sub_up_{sec_idx}_{s_idx}", disabled=s_idx == 0, help="Выше"
             ):
+                _move_block(subs, s_idx, s_idx - 1)
+                st.rerun()
+            if sub_cols[1].button(
+                "↓",
+                key=f"sub_down_{sec_idx}_{s_idx}",
+                disabled=s_idx >= len(subs) - 1,
+                help="Ниже",
+            ):
+                _move_block(subs, s_idx, s_idx + 1)
+                st.rerun()
+            if sub_cols[2].button(
+                "⎘", key=f"sub_dup_{sec_idx}_{s_idx}", help="Дублировать подраздел"
+            ):
+                _duplicate_block(subs, s_idx)
+                st.rerun()
+            if sub_cols[3].button("Удалить подраздел", key=f"del_sub_{sec_idx}_{s_idx}"):
                 subs.pop(s_idx)
                 st.rerun()
 
@@ -4228,10 +4247,27 @@ def _render_subsubsections_editor(sub: dict[str, Any], sec_idx: int, s_idx: int)
             prefix = f"sec{sec_idx}_sub{s_idx}_ss{ss_idx}"
             _render_blocks_editor(subsub_blocks, key_prefix=prefix)
             _render_add_block_buttons(subsub_blocks, key_prefix=prefix)
-            if st.button(
-                "Удалить пункт",
-                key=f"del_subsub_{sec_idx}_{s_idx}_{ss_idx}",
+            # Перемещение ↑/↓, дублирование, удаление пункта.
+            ss_cols = st.columns([1, 1, 1, 3])
+            if ss_cols[0].button(
+                "↑", key=f"subsub_up_{sec_idx}_{s_idx}_{ss_idx}", disabled=ss_idx == 0, help="Выше"
             ):
+                _move_block(subsubs, ss_idx, ss_idx - 1)
+                st.rerun()
+            if ss_cols[1].button(
+                "↓",
+                key=f"subsub_down_{sec_idx}_{s_idx}_{ss_idx}",
+                disabled=ss_idx >= len(subsubs) - 1,
+                help="Ниже",
+            ):
+                _move_block(subsubs, ss_idx, ss_idx + 1)
+                st.rerun()
+            if ss_cols[2].button(
+                "⎘", key=f"subsub_dup_{sec_idx}_{s_idx}_{ss_idx}", help="Дублировать пункт"
+            ):
+                _duplicate_block(subsubs, ss_idx)
+                st.rerun()
+            if ss_cols[3].button("Удалить пункт", key=f"del_subsub_{sec_idx}_{s_idx}_{ss_idx}"):
                 subsubs.pop(ss_idx)
                 st.rerun()
 
