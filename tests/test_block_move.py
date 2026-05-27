@@ -6,7 +6,47 @@ import pytest
 
 pytest.importorskip("streamlit")
 
-from gostforge.web.builder_editor import _duplicate_block, _move_block
+from gostforge.web.builder_editor import (
+    _duplicate_block,
+    _move_block,
+    _move_block_to_section,
+)
+
+
+def _state() -> dict[str, object]:
+    return {
+        "sections": [
+            {"heading": "A", "blocks": [{"kind": "x"}, {"kind": "y"}]},
+            {"heading": "B", "blocks": [{"kind": "z"}]},
+        ]
+    }
+
+
+def test_move_block_to_section_appends_to_target() -> None:
+    state = _state()
+    assert _move_block_to_section(state, 0, 0, 1) is True
+    secs = state["sections"]
+    assert [b["kind"] for b in secs[0]["blocks"]] == ["y"]
+    assert [b["kind"] for b in secs[1]["blocks"]] == ["z", "x"]
+
+
+def test_move_block_to_section_same_section_noop() -> None:
+    state = _state()
+    assert _move_block_to_section(state, 0, 0, 0) is False
+    assert [b["kind"] for b in state["sections"][0]["blocks"]] == ["x", "y"]
+
+
+def test_move_block_to_section_bad_indices() -> None:
+    state = _state()
+    assert _move_block_to_section(state, 0, 9, 1) is False  # block_idx вне диапазона
+    assert _move_block_to_section(state, 5, 0, 1) is False  # from вне диапазона
+    assert _move_block_to_section(state, 0, 0, 9) is False  # to вне диапазона
+
+
+def test_move_block_to_section_target_without_blocks_key() -> None:
+    state = {"sections": [{"heading": "A", "blocks": [{"kind": "x"}]}, {"heading": "B"}]}
+    assert _move_block_to_section(state, 0, 0, 1) is True
+    assert state["sections"][1]["blocks"] == [{"kind": "x"}]
 
 
 def _blocks() -> list[dict[str, str]]:

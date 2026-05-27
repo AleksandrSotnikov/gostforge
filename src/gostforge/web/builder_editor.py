@@ -3463,6 +3463,7 @@ def _render_active_section_editor() -> None:
     else:
         _render_blocks_editor(section.get("blocks", []), key_prefix=f"sec{idx}")
         _render_add_block_buttons(section.get("blocks", []), key_prefix=f"sec{idx}")
+        _render_move_block_to_section_panel(section, idx)
         _render_subsections_editor(section, idx)
 
     _render_single_section_pdf_preview(section, idx)
@@ -3839,6 +3840,54 @@ def _duplicate_block(blocks: list[dict[str, Any]], b_idx: int) -> None:
         return
     clone = json.loads(json.dumps(blocks[b_idx]))
     blocks.insert(b_idx + 1, clone)
+
+
+def _move_block_to_section(
+    state: dict[str, Any], from_sec_idx: int, block_idx: int, to_sec_idx: int
+) -> bool:
+    """Перенести блок из раздела from_sec_idx в конец раздела to_sec_idx.
+
+    Возвращает True, если перенос выполнен. No-op (False) при неверных
+    индексах или совпадении разделов.
+    """
+    sections = state.get("sections") or []
+    if not (0 <= from_sec_idx < len(sections)) or not (0 <= to_sec_idx < len(sections)):
+        return False
+    if from_sec_idx == to_sec_idx:
+        return False
+    src_blocks = sections[from_sec_idx].get("blocks") or []
+    if not (0 <= block_idx < len(src_blocks)):
+        return False
+    block = src_blocks.pop(block_idx)
+    sections[to_sec_idx].setdefault("blocks", []).append(block)
+    return True
+
+
+def _render_move_block_to_section_panel(section: dict[str, Any], sec_idx: int) -> None:
+    """Панель «Переместить блок в другой раздел» (в конец целевого)."""
+    state = _get_state()
+    sections = state.get("sections") or []
+    blocks = section.get("blocks") or []
+    targets = [i for i, s in enumerate(sections) if i != sec_idx and not s.get("is_bibliography")]
+    if not blocks or not targets:
+        return
+    with st.expander("Переместить блок в другой раздел", expanded=False):
+        b_idx = st.selectbox(
+            "Блок",
+            options=list(range(len(blocks))),
+            format_func=lambda i: f"{i + 1}. {_block_label(blocks[i])}",
+            key=f"movblk_b_{sec_idx}",
+        )
+        tgt = st.selectbox(
+            "В раздел",
+            options=targets,
+            format_func=lambda i: sections[i].get("heading") or f"Раздел {i + 1}",
+            key=f"movblk_t_{sec_idx}",
+        )
+        if st.button("Переместить блок", key=f"movblk_btn_{sec_idx}") and _move_block_to_section(
+            state, sec_idx, int(b_idx), int(tgt)
+        ):
+            st.rerun()
 
 
 def _render_single_block(
