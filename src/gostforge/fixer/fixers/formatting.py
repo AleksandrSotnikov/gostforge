@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal, cast
+
 from gostforge.model import (
     ContentTemplate,
     Document,
@@ -12,6 +14,101 @@ from gostforge.model import (
 from gostforge.profile import Profile
 
 from ..engine import FixApplied, register
+
+# Допуск полей (мм) — как в проверке F.01.
+_MARGIN_TOLERANCE_MM = 0.5
+
+
+@register("F.01")
+def fix_margins(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести поля страницы к профилю.
+
+    Эталонные поля — ``profile.styles.page.margins_mm`` (по умолчанию для
+    ГОСТ 7.32: 20/15/20/30 мм). Меняем только те стороны, что отклоняются
+    больше допуска (0.5 мм) — как и проверка F.01.
+    """
+    expected = profile.styles.page.margins_mm
+    applied: list[FixApplied] = []
+    for section in document.page_sections:
+        actual = section.page.margins_mm
+        changed_sides: list[str] = []
+        for side in ("top", "right", "bottom", "left"):
+            exp = expected.get(side)
+            act = actual.get(side)
+            if exp is None or act is None:
+                continue
+            if abs(exp - act) > _MARGIN_TOLERANCE_MM:
+                actual[side] = exp
+                changed_sides.append(f"{side}={exp}")
+        if changed_sides:
+            applied.append(
+                FixApplied(
+                    fixer_code="F.01",
+                    location=f"page_sections.{section.id}.page.margins_mm",
+                    description="Поля приведены к профилю: " + ", ".join(changed_sides),
+                )
+            )
+    return applied
+
+
+@register("F.02")
+def fix_paper_size(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести формат бумаги к профилю (по умолчанию A4).
+
+    Параметр ``checks.F.02.params.paper`` перекрывает
+    ``profile.styles.page.size``.
+    """
+    config = profile.checks.get("F.02")
+    expected = profile.styles.page.size or "A4"
+    if config and config.params.get("paper"):
+        expected = str(config.params["paper"])
+
+    applied: list[FixApplied] = []
+    for section in document.page_sections:
+        old = section.page.paper
+        if old == expected:
+            continue
+        section.page.paper = expected
+        applied.append(
+            FixApplied(
+                fixer_code="F.02",
+                location=f"page_sections.{section.id}.page.paper",
+                description=f"Формат бумаги «{old}» → «{expected}»",
+            )
+        )
+    return applied
+
+
+@register("F.03")
+def fix_orientation(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести ориентацию страницы к профилю (по умолчанию portrait).
+
+    Секции типа ``appendix`` пропускаем — у приложений по ГОСТ допустима
+    альбомная ориентация (как и в проверке F.03).
+    """
+    config = profile.checks.get("F.03")
+    expected = "portrait"
+    if config and config.params.get("orientation"):
+        expected = str(config.params["orientation"])
+    if expected not in {"portrait", "landscape"}:
+        return []
+
+    applied: list[FixApplied] = []
+    for section in document.page_sections:
+        if section.type == "appendix":
+            continue
+        old = section.page.orientation
+        if old == expected:
+            continue
+        section.page.orientation = cast(Literal["portrait", "landscape"], expected)
+        applied.append(
+            FixApplied(
+                fixer_code="F.03",
+                location=f"page_sections.{section.id}.page.orientation",
+                description=f"Ориентация «{old}» → «{expected}»",
+            )
+        )
+    return applied
 
 
 @register("F.06")
@@ -134,4 +231,10 @@ def _strip_page_placeholder(
     return [el for el in (content or []) if not (isinstance(el, TextRun) and el.text == "{page}")]
 
 
-__all__ = ["fix_page_number_position", "fix_page_numbering_start"]
+__all__ = [
+    "fix_margins",
+    "fix_orientation",
+    "fix_page_number_position",
+    "fix_page_numbering_start",
+    "fix_paper_size",
+]

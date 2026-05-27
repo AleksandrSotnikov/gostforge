@@ -477,6 +477,86 @@ def test_h02_fixes_heading_level_2_only() -> None:
     assert runs2[0].font == "Times New Roman"
 
 
+# --- F.01/F.02/F.03: геометрия страницы --------------------------------------
+
+
+def _doc_with_page(page: PageGeometry, *, section_type: str = "main") -> Document:
+    """Документ с одной PageSection заданной геометрии."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="Основная часть",
+            type=section_type,
+            page=page,
+            content=[],
+        )
+    )
+    return doc
+
+
+def test_f01_f02_f03_fix_registered() -> None:
+    """Фиксеры геометрии страницы зарегистрированы."""
+    codes = set(registered_fixers())
+    assert {"F.01", "F.02", "F.03"}.issubset(codes)
+
+
+def test_f01_fixes_wrong_margins() -> None:
+    """Поля 25/25/25/25 приводятся к профилю ГОСТ (20/15/20/30)."""
+    doc = _doc_with_page(
+        PageGeometry(margins_mm={"top": 25, "right": 25, "bottom": 25, "left": 25})
+    )
+    profile = load_profile("gost-7.32-2017")
+
+    pre = [v for v in validate(doc, profile) if v.check_code == "F.01"]
+    assert pre, "тест должен начинаться с нарушениями F.01"
+
+    applied = fix(doc, profile, codes=["F.01"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "F.01"
+
+    margins = doc.page_sections[0].page.margins_mm
+    assert margins == profile.styles.page.margins_mm
+    post = [v for v in validate(doc, profile) if v.check_code == "F.01"]
+    assert post == []
+
+
+def test_f01_no_change_when_within_tolerance() -> None:
+    """Отклонение ≤ 0.5 мм не считается нарушением — фиксер молчит."""
+    base = dict(load_profile("gost-7.32-2017").styles.page.margins_mm)
+    base["top"] = base["top"] + 0.3  # в пределах допуска
+    doc = _doc_with_page(PageGeometry(margins_mm=base))
+    profile = load_profile("gost-7.32-2017")
+    assert fix(doc, profile, codes=["F.01"]) == []
+
+
+def test_f02_fixes_paper_size() -> None:
+    """A5 → A4."""
+    doc = _doc_with_page(PageGeometry(paper="A5"))
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["F.02"])
+    assert len(applied) == 1
+    assert doc.page_sections[0].page.paper == "A4"
+
+
+def test_f03_fixes_orientation() -> None:
+    """landscape → portrait для обычной секции."""
+    doc = _doc_with_page(PageGeometry(orientation="landscape"))
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["F.03"])
+    assert len(applied) == 1
+    assert doc.page_sections[0].page.orientation == "portrait"
+
+
+def test_f03_skips_appendix() -> None:
+    """Приложение может быть альбомным — фиксер F.03 его не трогает."""
+    doc = _doc_with_page(PageGeometry(orientation="landscape"), section_type="appendix")
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["F.03"])
+    assert applied == []
+    assert doc.page_sections[0].page.orientation == "landscape"
+
+
 # --- end-to-end: export → parse → fix → export → parse → validate -----------
 
 
