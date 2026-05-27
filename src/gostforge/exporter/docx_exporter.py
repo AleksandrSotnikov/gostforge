@@ -1021,6 +1021,7 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
     ordered_fmt = cfg.ordered_format if cfg is not None else "{n})"
     left_indent_cm = cfg.left_indent_cm if cfg is not None else 1.25
     hanging_indent_cm = cfg.hanging_indent_cm if cfg is not None else 0.5
+    marker_suffix = cfg.marker_suffix if cfg is not None else "tab"
 
     # lvlText для numbering.xml: %1 = подстановка номера, остальное —
     # литеральный текст. ordered_fmt из профиля имеет «{n}» — конвертируем.
@@ -1036,6 +1037,7 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
         left_twips=int(Cm(left_indent_cm).twips),
         hanging_twips=int(Cm(hanging_indent_cm).twips),
         max_level=max_level,
+        marker_suffix=marker_suffix,
     )
 
     item_left_twips = int(Cm(left_indent_cm).twips)
@@ -1075,12 +1077,16 @@ def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
         effective_left = item_left_twips + item_level * 720
         ind = etree.SubElement(pPr, f"{{{W_NS}}}ind")
         ind.set(f"{{{W_NS}}}left", str(effective_left))
-        # firstLine="0" нужен, чтобы перекрыть Normal-стиль (там 1.25 см
-        # красной строки). hanging пишем только при значении > 0.
+        # Семантика диалога Word «Изменение отступов в списке»:
+        # hanging>0 — маркер левее текста; hanging<0 — правее (firstLine);
+        # hanging=0 — совпадают (firstLine="0" перекрывает красную строку
+        # стиля Normal, иначе перенос длинной строки съезжает на 1.25 см).
         if item_hanging_twips > 0:
             ind.set(f"{{{W_NS}}}hanging", str(item_hanging_twips))
+        elif item_hanging_twips < 0:
+            ind.set(f"{{{W_NS}}}firstLine", str(-item_hanging_twips))
         else:
-            ind.set(f"{{{W_NS}}}firstLine", "0")
+            ind.set(f"{{{W_NS}}}firstLine", "0")  # перекрыть красную строку Normal
         _write_runs(paragraph, item_content)
 
 
@@ -1099,6 +1105,7 @@ def _ensure_list_num_in_numbering(
     left_twips: int,
     hanging_twips: int,
     max_level: int = 0,
+    marker_suffix: str = "tab",
 ) -> int:
     """Зарегистрировать (если ещё нет) abstractNum + num с этими параметрами.
 
@@ -1112,7 +1119,7 @@ def _ensure_list_num_in_numbering(
     global _current_list_numbering
     if _current_list_numbering is None:
         _current_list_numbering = {}
-    cache_key = (ordered, lvl_text, left_twips, hanging_twips, max_level)
+    cache_key = (ordered, lvl_text, left_twips, hanging_twips, max_level, marker_suffix)
     if cache_key in _current_list_numbering:
         return _current_list_numbering[cache_key]
 
@@ -1154,6 +1161,7 @@ def _ensure_list_num_in_numbering(
             lvl_text=(lvl_text if _ilvl == 0 else _nested_lvl_text(ordered, _ilvl, lvl_text)),
             left_twips=left_twips + _ilvl * 720,
             hanging_twips=hanging_twips,
+            marker_suffix=marker_suffix,
             font_for_bullet=(
                 _current_profile.styles.body.font
                 if _current_profile is not None
@@ -1179,14 +1187,15 @@ def _add_list_level(
     lvl_text: str,
     left_twips: int,
     hanging_twips: int,
+    marker_suffix: str = "tab",
     font_for_bullet: str = "Times New Roman",
 ) -> None:
     """Добавить <w:lvl ilvl="N"> внутрь <w:abstractNum>.
 
     Содержит: start, numFmt (decimal/bullet), lvlText, lvlJc, pPr/ind
-    с left+hanging, rPr (для bullet — явный шрифт во избежание Symbol),
-    и suff=space — чтобы между маркером и текстом был ОДИН пробел,
-    а не Tab (Tab даёт слишком большой визуальный отступ).
+    с left+hanging/firstLine, rPr (для bullet — явный шрифт во избежание
+    Symbol) и suff (tab/space/nothing) — символ после маркера/номера
+    из профиля (поле «Символ после номера» диалога Word).
     """
     lvl = etree.SubElement(abstract_num, f"{{{W_NS}}}lvl")
     lvl.set(f"{{{W_NS}}}ilvl", str(ilvl))
@@ -1195,13 +1204,11 @@ def _add_list_level(
     num_fmt = etree.SubElement(lvl, f"{{{W_NS}}}numFmt")
     num_fmt.set(f"{{{W_NS}}}val", "decimal" if ordered else "bullet")
     # suff = разделитель между маркером и текстом: tab (default
-    # Word), space или nothing. Используем tab — это стандарт Word,
-    # при котором Tab расширяется до позиции left из <w:ind>. То
-    # есть после маркера автоматически идёт Tab и текст начинается
-    # ровно с позиции left (1.75 см) — перенос длинной строки
-    # выровнен с текстом первой строки, а не с маркером.
+    # Word), space или nothing — из профиля (поле «Символ после
+    # номера»). При tab Tab расширяется до позиции left из <w:ind>,
+    # выравнивая текст первой строки с переносом длинной строки.
     suff = etree.SubElement(lvl, f"{{{W_NS}}}suff")
-    suff.set(f"{{{W_NS}}}val", "tab")
+    suff.set(f"{{{W_NS}}}val", marker_suffix)
     lvl_text_el = etree.SubElement(lvl, f"{{{W_NS}}}lvlText")
     lvl_text_el.set(f"{{{W_NS}}}val", lvl_text)
     lvl_jc = etree.SubElement(lvl, f"{{{W_NS}}}lvlJc")
@@ -1209,11 +1216,13 @@ def _add_list_level(
     lvl_pPr = etree.SubElement(lvl, f"{{{W_NS}}}pPr")
     lvl_ind = etree.SubElement(lvl_pPr, f"{{{W_NS}}}ind")
     lvl_ind.set(f"{{{W_NS}}}left", str(left_twips))
-    # При hanging=0 маркер на той же позиции, что и текст продолжения
-    # (это default ГОСТ 7.32-2017 — «запись с абзацного отступа»).
-    # При hanging>0 маркер «выпирает» левее на hanging twips.
+    # Семантика диалога Word «Изменение отступов в списке»:
+    # hanging>0 — маркер левее текста; hanging<0 — правее (firstLine);
+    # hanging=0 — совпадают (ни hanging, ни firstLine).
     if hanging_twips > 0:
         lvl_ind.set(f"{{{W_NS}}}hanging", str(hanging_twips))
+    elif hanging_twips < 0:
+        lvl_ind.set(f"{{{W_NS}}}firstLine", str(-hanging_twips))
     if not ordered:
         lvl_rPr = etree.SubElement(lvl, f"{{{W_NS}}}rPr")
         lvl_rFonts = etree.SubElement(lvl_rPr, f"{{{W_NS}}}rFonts")

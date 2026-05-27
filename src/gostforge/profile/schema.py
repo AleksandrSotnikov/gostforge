@@ -172,7 +172,15 @@ class ListStyleProfile(BaseModel):
     # маркером — «единый отступ»), задайте hanging_indent_cm=0 и
     # left_indent_cm=1.25.
     left_indent_cm: float = 1.75
+    # Выступ маркера относительно текста (в терминах диалога Word
+    # «Изменение отступов в списке»: Отступ текста − Положение маркера):
+    # >0 — маркер левее текста (hanging), <0 — правее (firstLine),
+    # 0 — совпадают.
     hanging_indent_cm: float = 0.5
+    # Символ после маркера/номера: «Знак табуляции» (tab) / «Пробел»
+    # (space) / «Нет» (nothing) — соответствует полю «Символ после
+    # номера» диалога Word «Изменение отступов в списке».
+    marker_suffix: Literal["tab", "space", "nothing"] = "tab"
 
 
 class StylesProfile(BaseModel):

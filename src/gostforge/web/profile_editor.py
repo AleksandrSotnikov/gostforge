@@ -337,6 +337,11 @@ def _edit_figure(data: dict[str, Any]) -> None:
     _edit_caption(f["caption"], "pe_figcap")
 
 
+# Соответствие отображаемого названия символа после номера ↔ internal-значению
+# (поле «Символ после номера» диалога Word «Изменение отступов в списке»).
+_LIST_SUFFIX_DISPLAY = {"Знак табуляции": "tab", "Пробел": "space", "Нет": "nothing"}
+
+
 def _edit_lists(data: dict[str, Any]) -> None:
     li = data["styles"]["lists"]
     li["bullet_char"] = st.text_input(
@@ -345,11 +350,43 @@ def _edit_lists(data: dict[str, Any]) -> None:
     li["ordered_format"] = st.text_input(
         "Шаблон нумерации ({n})", value=li["ordered_format"], key="pe_list_fmt"
     )
-    li["left_indent_cm"] = _num(
-        "Левый отступ текста (см)", li["left_indent_cm"], "pe_list_left", step=0.05
+    # Поля в терминах диалога Word «Изменение отступов в списке».
+    # «Отступ текста» = left_indent_cm; «Положение маркера» =
+    # left_indent_cm − hanging_indent_cm.
+    text_indent = _num(
+        "Отступ текста (см)", li["left_indent_cm"], "pe_list_text", step=0.05, min_value=0.0
     )
-    li["hanging_indent_cm"] = _num(
-        "Выступ маркера (см)", li["hanging_indent_cm"], "pe_list_hang", step=0.05
+    marker_pos = _num(
+        "Положение маркера (см)",
+        li["left_indent_cm"] - li["hanging_indent_cm"],
+        "pe_list_marker",
+        step=0.05,
+        min_value=0.0,
+    )
+    # «Символ после номера» — selectbox по отображаемым названиям с
+    # маппингом в internal-значение схемы (tab/space/nothing).
+    suffix_options = list(_LIST_SUFFIX_DISPLAY.keys())
+    current_internal = li.get("marker_suffix", "tab")
+    current_display = next(
+        (disp for disp, internal in _LIST_SUFFIX_DISPLAY.items() if internal == current_internal),
+        suffix_options[0],
+    )
+    chosen_display = str(
+        st.selectbox(
+            "Символ после номера",
+            options=suffix_options,
+            index=suffix_options.index(current_display),
+            key="pe_list_suffix",
+        )
+    )
+    li["left_indent_cm"] = text_indent
+    li["hanging_indent_cm"] = text_indent - marker_pos
+    li["marker_suffix"] = _LIST_SUFFIX_DISPLAY[chosen_display]
+    st.caption(
+        "Параметры соответствуют диалогу Word «Изменение отступов в "
+        "списке»: «Положение маркера» — где маркер/номер, «Отступ текста» — "
+        "где текст и перенос длинной строки, «Символ после номера» — "
+        "разделитель между маркером и текстом."
     )
 
 
