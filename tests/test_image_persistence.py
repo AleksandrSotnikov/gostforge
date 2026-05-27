@@ -103,3 +103,32 @@ def test_generate_skips_stale_path_without_data_uri() -> None:
     state = _state_with_figure(image_path="/nonexistent/gone.png")
     data = _build_document_from_state(state)  # не должно бросить
     assert _media_in_docx(data) == []
+
+
+def test_cli_import_docx_inlines_images_self_contained(tmp_path: Path) -> None:
+    """`gostforge import-docx` вшивает картинки в JSON (data-URI) и не
+    создаёт сайдкар-каталог; state остаётся переносимым."""
+    from click.testing import CliRunner
+
+    from gostforge.cli import main
+
+    # .docx с встроенным изображением (через генерацию из data-URI).
+    uri = "data:image/png;base64," + base64.b64encode(_PNG_1x1).decode("ascii")
+    src = tmp_path / "src.docx"
+    src.write_bytes(_build_document_from_state(_state_with_figure(image_data=uri)))
+
+    out = tmp_path / "state.json"
+    result = CliRunner().invoke(main, ["import-docx", str(src), "-o", str(out)])
+    assert result.exit_code == 0, result.output
+
+    data = json.loads(out.read_text(encoding="utf-8"))
+    figs = [b for s in data["sections"] for b in s.get("blocks", []) if b.get("kind") == "figure"]
+    assert figs, "должен быть хотя бы один figure-блок"
+    assert figs[0].get("image_data", "").startswith("data:image/")
+    # Сайдкар-каталог <output>.images больше не создаётся.
+    assert not (tmp_path / "state.images").exists()
+
+    # Переносимость: удаляем исходный .docx, генерируем из JSON — картинка на месте.
+    src.unlink()
+    regen = _build_document_from_state(data)
+    assert _media_in_docx(regen)

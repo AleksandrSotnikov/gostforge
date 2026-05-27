@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 from collections import defaultdict
 from pathlib import Path
@@ -2640,6 +2641,10 @@ def import_docx_cmd(path: Path, output: Path) -> None:
     может иметь disabled_checks: list[str] — фича-конструктор
     «не проверять этот раздел нормоконтролем».
 
+    Изображения вшиваются прямо в JSON как data-URI — state получается
+    самодостаточным и переносимым: его можно открыть в UI или собрать
+    в .docx где угодно без внешних файлов.
+
     Пример::
 
         gostforge import-docx work.docx -o draft.json
@@ -2653,25 +2658,26 @@ def import_docx_cmd(path: Path, output: Path) -> None:
     """
     from gostforge.web.builder_editor import (
         document_to_state,
+        embed_images_as_data_uri_in_state,
         extract_embedded_images,
-        remap_embedded_image_paths_in_state,
     )
 
     document = parse_docx(path)
     state = document_to_state(document)
-    # Извлекаем embedded-картинки рядом со state.json (каталог
-    # <output>.images/), чтобы при повторной генерации они не
-    # терялись.
-    images_dir = output.parent / f"{output.stem}.images"
-    rid_to_path = extract_embedded_images(path, images_dir)
-    if rid_to_path:
-        remap_embedded_image_paths_in_state(state, rid_to_path)
+    # Картинки вшиваем в state как data-URI (через временный каталог —
+    # сами файлы не нужны после кодирования). Так JSON самодостаточен и
+    # не теряет изображения при переносе/новой сессии.
+    n_img = 0
+    with tempfile.TemporaryDirectory() as tmpdir:
+        rid_to_path = extract_embedded_images(path, Path(tmpdir))
+        if rid_to_path:
+            embed_images_as_data_uri_in_state(state, rid_to_path)
+            n_img = len(rid_to_path)
     output.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     n_sec = len(state.get("sections", []))
-    n_img = len(rid_to_path)
     msg = f"Разложено {n_sec} разделов в {output}."
     if n_img:
-        msg += f" Извлечено {n_img} изображений → {images_dir}."
+        msg += f" Вшито {n_img} изображений (data-URI), state самодостаточный."
     msg += " Загрузите через `gostforge ui` → «Загрузить сохранение (.json)»."
     click.echo(msg)
 
