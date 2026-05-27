@@ -34,6 +34,7 @@ from gostforge.builder.templates import (
 )
 from gostforge.cli import _write_markdown_report, _write_xlsx_report
 from gostforge.exporter import export_docx
+from gostforge.fixer import FixApplied
 from gostforge.fixer import fix as run_fix
 from gostforge.fixer.engine import registered_fixers
 from gostforge.parser import parse_docx
@@ -94,19 +95,31 @@ def _process_file(uploaded_file: Any, profile: Profile) -> tuple[Document, list[
     return document, validate(document, profile)
 
 
-def _build_fixed_docx_bytes(document: Document, profile: Profile) -> tuple[bytes, list[str]]:
+def _build_fixed_docx_bytes(document: Document, profile: Profile) -> tuple[bytes, list[FixApplied]]:
     """Применить автофиксы к документу и вернуть байты исправленного .docx.
 
-    Возвращает (bytes, fix_codes). fix_codes — список применённых кодов,
-    в порядке вызова фиксеров. Если ничего не исправлено — fix_codes пуст.
+    Возвращает (bytes, fixes_applied). fixes_applied — список записей
+    о правках (код, location, описание) в порядке вызова фиксеров.
+    Если ничего не исправлено — список пуст.
     """
     fixes_applied = run_fix(document, profile)
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         out_path = Path(tmp.name)
     export_docx(document, profile, out_path)
     data = out_path.read_bytes()
-    codes = [fa.fixer_code for fa in fixes_applied]
-    return data, codes
+    return data, fixes_applied
+
+
+def _group_fixes(fixes: list[FixApplied]) -> list[tuple[str, int, list[str]]]:
+    """Сгруппировать применённые правки по коду фиксера.
+
+    Возвращает список (код, количество, описания) с сортировкой по коду.
+    Порядок описаний внутри группы сохраняется (как применялись).
+    """
+    grouped: dict[str, list[str]] = {}
+    for fa in fixes:
+        grouped.setdefault(fa.fixer_code, []).append(fa.description)
+    return [(code, len(descs), descs) for code, descs in sorted(grouped.items())]
 
 
 def _build_pdf_bytes(uploaded_file: Any) -> bytes:
@@ -352,23 +365,28 @@ def _render_main(profile_id: str) -> None:
 
     with tab_fix:
         st.markdown(
-            "Эти правки **безопасны** и не меняют смысл текста: "
-            f"`{', '.join(sorted(registered_fixers()))}`."
+            f"Доступно **{len(registered_fixers())}** безопасных автофиксеров — "
+            "они исправляют форматирование, не меняя смысл текста: поля и "
+            "ориентация страницы, шрифт/кегль/цвет текста и заголовков, "
+            "пробелы и кавычки, точки в заголовках, единицы измерения."
         )
-        st.caption(
-            "Сводка по фиксерам: двойные пробелы, хвостовые пробелы, "
-            "прямые кавычки → «ёлочки», дефис → длинное тире, "
-            "точки в заголовках."
-        )
+        st.caption(f"Полный список: `{', '.join(sorted(registered_fixers()))}`.")
         for name, document in documents.items():
             st.subheader(name)
             try:
-                fixed_bytes, codes = _build_fixed_docx_bytes(document, prof)
+                fixed_bytes, applied = _build_fixed_docx_bytes(document, prof)
             except Exception as e:
                 st.error(f"Не удалось сгенерировать исправленный .docx: {e}")
                 continue
-            if codes:
-                st.success(f"Применено правок: {len(codes)} ({', '.join(codes)})")
+            if applied:
+                groups = _group_fixes(applied)
+                summary = ", ".join(f"{code} ×{count}" for code, count, _ in groups)
+                st.success(f"Применено правок: {len(applied)} ({summary})")
+                with st.expander("Что именно исправлено"):
+                    for code, count, descs in groups:
+                        st.markdown(f"**{code}** — {count} шт.")
+                        for desc in descs:
+                            st.markdown(f"- {desc}")
             else:
                 st.info("Нечего исправлять — документ уже без авто-исправимых нарушений.")
             stem = Path(name).stem or "document"
