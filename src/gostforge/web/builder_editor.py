@@ -2762,21 +2762,18 @@ def _compute_import_violations_summary(document: Any, profile_id: str) -> dict[s
     }
 
 
-def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
-    """Прогон нормоконтроля над текущим state — для live-сводки в UI.
+def _state_to_validation_document(state: dict[str, Any]) -> Any | None:
+    """Построить in-memory Document из текущего state конструктора.
 
-    Не сохраняет .docx на диск: builder.build() + validate напрямую.
-    Это быстрее, чем _validate_state_bytes (там нужно export →
-    parse → validate). Подходит для постоянного отображения в UI.
+    Внутрипрограммный путь без docx-touche: state → builder →
+    Document. Используется live-нормоконтролем (сводка и детальные
+    нарушения), чтобы не дублировать логику сборки.
 
-    На ошибку (например, builder упал на пустом state) — пустая
-    сводка без падения.
+    На ошибку (например, builder упал на пустом state) — None,
+    чтобы вызывающий код мог корректно обработать отсутствие
+    документа без падения.
     """
-    from collections import Counter
-
     try:
-        # Внутрипрограммный путь без docx-touche: state → builder →
-        # Document → validate.
         # Используем существующий WorkBuilder через _apply_blocks-логику.
         from gostforge.builder import work
 
@@ -2808,7 +2805,27 @@ def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
                     sec_builder.skip_all_checks()
                 else:
                     sec_builder.skip_checks(*[str(c) for c in disabled])
-        document = builder.build()
+        return builder.build()
+    except Exception:
+        return None
+
+
+def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
+    """Прогон нормоконтроля над текущим state — для live-сводки в UI.
+
+    Не сохраняет .docx на диск: builder.build() + validate напрямую.
+    Это быстрее, чем _validate_state_bytes (там нужно export →
+    parse → validate). Подходит для постоянного отображения в UI.
+
+    На ошибку (например, builder упал на пустом state) — пустая
+    сводка без падения.
+    """
+    from collections import Counter
+
+    document = _state_to_validation_document(state)
+    if document is None:
+        return {"total": 0, "by_severity": {}, "top_codes": []}
+    try:
         profile = load_profile(state.get("profile_id", "gost-7.32-2017"))
         violations = validate(document, profile)
     except Exception:
@@ -2823,6 +2840,32 @@ def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
         "by_severity": by_severity,
         "top_codes": [{"code": c, "count": n} for c, n in codes],
     }
+
+
+def _live_validation_items(state: dict[str, Any]) -> list[dict[str, str]]:
+    """Детальный список нарушений live-нормоконтроля для текущего state.
+
+    Возвращает список словарей с полями code/severity/message/suggestion
+    (все строки) — по одному на каждое нарушение. Если документ не
+    собирается или validate падает — пустой список.
+    """
+    document = _state_to_validation_document(state)
+    if document is None:
+        return []
+    try:
+        profile = load_profile(state.get("profile_id", "gost-7.32-2017"))
+        violations = validate(document, profile)
+    except Exception:
+        return []
+    return [
+        {
+            "code": v.check_code,
+            "severity": v.severity,
+            "message": v.message,
+            "suggestion": v.suggestion or "",
+        }
+        for v in violations
+    ]
 
 
 def _render_toc_preview_panel() -> None:
@@ -2873,9 +2916,10 @@ def _render_live_validation_panel() -> None:
     при каждом rerun Streamlit — это копеечно, потому что
     validate работает на in-memory Document.
 
-    Сводка: total + 3 metrics (error/warning/info) + топ-5 кодов.
-    Раскрывается expander-ом (свёрнут по умолчанию, чтобы не
-    перегружать UI).
+    Сводка: total + 3 metrics (error/warning/info) + детальный
+    список нарушений (текст + подсказки), сгруппированный по
+    severity. Раскрывается expander-ом (свёрнут по умолчанию,
+    чтобы не перегружать UI).
     """
     state = _get_state()
     if not state.get("sections"):
@@ -2901,11 +2945,37 @@ def _render_live_validation_panel() -> None:
         cols[0].metric("Ошибки", by_sev.get("error", 0))
         cols[1].metric("Предупреждения", by_sev.get("warning", 0))
         cols[2].metric("Информация", by_sev.get("info", 0))
-        top = summary.get("top_codes", [])
-        if top:
-            st.markdown("**Топ-5 нарушений:**")
-            for entry in top:
-                st.write(f"- `{entry['code']}` × {entry['count']}")
+
+        # Детальный список нарушений с текстом и подсказками,
+        # сгруппированный по severity (error → warning → info).
+        items = _live_validation_items(state)
+        if items:
+            severity_order: list[tuple[str, str, str]] = [
+                ("error", "❌", "Ошибки"),
+                ("warning", "⚠️", "Предупреждения"),
+                ("info", "ℹ️", "Информация"),
+            ]
+            max_rows = 50
+            shown = 0
+            truncated = False
+            st.markdown("**Нарушения:**")
+            for severity, icon, title in severity_order:
+                group = [it for it in items if it["severity"] == severity]
+                if not group:
+                    continue
+                st.markdown(f"{icon} **{title}** ({len(group)})")
+                for it in group:
+                    if shown >= max_rows:
+                        truncated = True
+                        break
+                    st.markdown(f"- `{it['code']}` {it['message']}")
+                    if it["suggestion"]:
+                        st.caption(f"→ {it['suggestion']}")
+                    shown += 1
+                if truncated:
+                    break
+            if truncated:
+                st.caption(f"… показаны первые {max_rows} из {len(items)} нарушений.")
 
 
 def _compute_progress_metrics(state: dict[str, Any]) -> dict[str, Any]:

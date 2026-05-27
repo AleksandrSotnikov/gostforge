@@ -27,6 +27,28 @@ _FALLBACK_LINE_SPACING: float = 1.5
 _FALLBACK_INDENT_CM: float = 1.25
 
 
+# Категории проверок нормоконтроля: буква кода → краткое название.
+# Используется в блоке «Что проверяет нормоконтроль».
+_CHECK_CATEGORIES: dict[str, str] = {
+    "F": "Поля и геометрия страницы",
+    "T": "Текст и типографика",
+    "S": "Структура работы",
+    "H": "Заголовки",
+    "I": "Рисунки",
+    "B": "Таблицы",
+    "M": "Формулы",
+    "L": "Списки",
+    "R": "Список литературы",
+    "C": "Перекрёстные ссылки",
+    "A": "Сокращения",
+    "P": "Приложения",
+    "K": "Колонтитулы и нумерация",
+    "V": "Объём",
+    "X": "Стиль изложения",
+    "U": "Единицы измерения",
+}
+
+
 def _gost_cheatsheet() -> dict[str, object]:
     """Собрать значения для шпаргалки по ГОСТ 7.32-2017.
 
@@ -140,6 +162,52 @@ def _render_metrics() -> None:
     col_profiles.metric("Профилей", profiles if profiles is not None else "—")
 
 
+def _render_check_categories() -> None:
+    """Раскрывающийся обзор категорий проверок нормоконтроля.
+
+    Список строится из модульной константы ``_CHECK_CATEGORIES``
+    (буква кода → краткое название категории).
+    """
+    with st.expander("Что проверяет нормоконтроль"):
+        lines = "\n".join(
+            f"- **{letter}** — {title}" for letter, title in _CHECK_CATEGORIES.items()
+        )
+        st.markdown(lines)
+
+
+def _render_profiles() -> None:
+    """Раскрывающийся список доступных профилей с описаниями.
+
+    Идентификаторы берём из ``list_profiles``; имя и описание — из
+    загруженного профиля. Загрузка каждого профиля обёрнута в
+    try/except, чтобы один битый профиль не ронял страницу. Если
+    список пуст или ничего не удалось загрузить — выводим подпись.
+    """
+    with st.expander("Доступные профили"):
+        try:
+            from gostforge.profile import list_profiles, load_profile
+
+            profile_ids = list_profiles()
+        except Exception:  # реестр профилей недоступен — не критично
+            profile_ids = []
+
+        lines: list[str] = []
+        for profile_id in profile_ids:
+            try:
+                prof = load_profile(profile_id)
+            except Exception:  # один битый профиль не должен ломать страницу
+                continue
+            if prof.description:
+                lines.append(f"- **{prof.name}** (`{profile_id}`) — {prof.description}")
+            else:
+                lines.append(f"- **{prof.name}** (`{profile_id}`)")
+
+        if lines:
+            st.markdown("\n".join(lines))
+        else:
+            st.caption("Профили не найдены.")
+
+
 def render_dashboard() -> None:
     """Отрисовать стартовую страницу «Главная» (дашборд/онбординг)."""
     st.title("gostforge — нормоконтроль и конструктор по ГОСТ")
@@ -160,3 +228,7 @@ def render_dashboard() -> None:
     st.divider()
 
     _render_cheatsheet()
+    st.divider()
+
+    _render_check_categories()
+    _render_profiles()

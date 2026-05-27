@@ -11,12 +11,18 @@ import pytest
 
 pytest.importorskip("streamlit")
 
-from gostforge.web.dashboard import render_dashboard
+from gostforge.web.dashboard import _CHECK_CATEGORIES, render_dashboard
 
 
 def test_render_dashboard_callable() -> None:
     """Функция импортируется и является вызываемой (smoke)."""
     assert callable(render_dashboard)
+
+
+def test_check_categories_contents() -> None:
+    """Константа категорий содержит ожидаемые буквы и непустые названия."""
+    assert {"F", "T", "S", "H", "U"} <= set(_CHECK_CATEGORIES)
+    assert all(isinstance(title, str) and title.strip() for title in _CHECK_CATEGORIES.values())
 
 
 def test_dashboard_renders_headless() -> None:
@@ -36,3 +42,4 @@ def test_dashboard_renders_headless() -> None:
     at.run(timeout=60)
     assert not at.exception, [str(e) for e in at.exception]
     assert at.title  # заголовок есть
+    assert at.expander  # есть раскрывающиеся блоки (категории/профили)

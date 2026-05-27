@@ -92,3 +92,10 @@ def test_ui_command_invokes_streamlit_run(monkeypatch: pytest.MonkeyPatch) -> No
     assert cmd[cmd.index("--server.address") + 1] == "0.0.0.0"
     assert "--server.port" in cmd
     assert cmd[cmd.index("--server.port") + 1] == "9000"
+    # Флаги темы оформления
+    assert "--theme.base" in cmd
+    assert cmd[cmd.index("--theme.base") + 1] == "light"
+    assert "--theme.primaryColor" in cmd
+    assert cmd[cmd.index("--theme.primaryColor") + 1] == "#2F5496"
+    assert "--theme.font" in cmd
+    assert cmd[cmd.index("--theme.font") + 1] == "serif"

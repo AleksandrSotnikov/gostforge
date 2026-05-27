@@ -667,6 +667,13 @@ def ui(host: str, port: int) -> None:
         host,
         "--server.port",
         str(port),
+        # Тема оформления: чистый светлый профессиональный вид.
+        "--theme.base",
+        "light",
+        "--theme.primaryColor",
+        "#2F5496",
+        "--theme.font",
+        "serif",
     ]
     subprocess.run(cmd, check=False)
 
