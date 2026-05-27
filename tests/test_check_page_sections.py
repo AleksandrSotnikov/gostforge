@@ -6,6 +6,7 @@ from gostforge.model import (
     ContentTemplate,
     Document,
     HeaderConfig,
+    LogicalSection,
     PageNumberingConfig,
     PageSection,
     TextRun,
@@ -423,6 +424,54 @@ def test_k01_empty_template_no_violation() -> None:
     doc = Document()
     violations = [v for v in validate(doc, profile) if v.check_code == "K.01"]
     assert violations == []
+
+
+def _main_section_with_headings(headings: list[str]) -> Document:
+    """Документ с одной main-PageSection и заданными разделами 1 уровня
+    (как его строит конструктор/парсер на Фазе 1)."""
+    doc = Document()
+    content: list[LogicalSection] = [
+        LogicalSection(id=f"s{i}", heading=[TextRun(text=h)], level=1)
+        for i, h in enumerate(headings)
+    ]
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="Основная часть",
+            type="main",
+            page_numbering=PageNumberingConfig(visible=True),
+            content=content,
+        )
+    )
+    return doc
+
+
+def test_k01_detects_structural_types_from_headings() -> None:
+    """Плоский документ (один main) с титульником/содержанием/приложением
+    по заголовкам — K.01 не штрафует за отсутствие типов вёрстки."""
+    doc = _main_section_with_headings(
+        [
+            "Титульный лист",
+            "Реферат",
+            "Содержание",
+            "Введение",
+            "1 Анализ",
+            "Заключение",
+            "Список использованных источников",
+            "Приложение А",
+        ]
+    )
+    violations = [v for v in validate(doc, _profile()) if v.check_code == "K.01"]
+    assert violations == []
+
+
+def test_k01_flags_missing_structural_via_headings() -> None:
+    """Если нет титульника/предисловной части/приложений — K.01 их находит."""
+    doc = _main_section_with_headings(["Введение", "1 Анализ", "Заключение"])
+    violations = [v for v in validate(doc, _profile()) if v.check_code == "K.01"]
+    missing_types = {v.details["expected_type"] for v in violations}
+    assert missing_types == {"title", "frontmatter", "appendix"}
+    assert all(v.severity == "error" for v in violations)
 
 
 # --- K.06 ---------------------------------------------------------------------

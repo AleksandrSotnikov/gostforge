@@ -17,6 +17,7 @@ from gostforge.model import (
     CrossRef,
     Document,
     InlineElement,
+    LogicalSection,
     PageSection,
     TextRun,
 )
@@ -265,6 +266,61 @@ def check_appendix_header(document: Document, profile: Profile) -> list[Violatio
 # Главные типы, по которым строится последовательность шаблона.
 _MAJOR_TYPES: frozenset[str] = frozenset({"title", "frontmatter", "main", "appendix"})
 
+# Заголовки структурных элементов «предисловной части» (frontmatter).
+_FRONTMATTER_HEADINGS: frozenset[str] = frozenset(
+    {
+        "реферат",
+        "содержание",
+        "перечень сокращений",
+        "перечень сокращений и обозначений",
+        "обозначения и сокращения",
+        "нормативные ссылки",
+        "термины и определения",
+        "определения",
+    }
+)
+
+
+def _level1_headings(document: Document) -> list[str]:
+    """Тексты заголовков всех LogicalSection 1-го уровня документа."""
+    out: list[str] = []
+
+    def walk(items: Sequence[object]) -> None:
+        for item in items:
+            if isinstance(item, LogicalSection):
+                if item.level == 1:
+                    out.append(_inline_to_text(item.heading))
+                walk(item.children)
+
+    for ps in document.page_sections:
+        walk(ps.content)
+    return out
+
+
+def _detect_types_from_headings(document: Document) -> set[str]:
+    """Определить присутствующие главные типы по логическим заголовкам.
+
+    Парсер на Фазе 1 кладёт весь документ в одну PageSection(type="main"),
+    поэтому типы title/frontmatter/appendix не видны на уровне вёрстки.
+    Чтобы K.01 не штрафовал каждый документ ложно, распознаём структурные
+    элементы по заголовкам разделов 1-го уровня (титульный лист,
+    приложения, реферат/содержание и т. п.).
+    """
+    types: set[str] = set()
+    for heading in _level1_headings(document):
+        norm = " ".join(heading.lower().split()).rstrip(".")
+        if not norm:
+            continue
+        if norm == "титульный лист":
+            types.add("title")
+        elif norm.startswith("приложение"):
+            types.add("appendix")
+        elif norm in _FRONTMATTER_HEADINGS or norm.startswith("задание"):
+            types.add("frontmatter")
+        else:
+            types.add("main")
+    return types
+
 
 def _lis_length(seq_a: Sequence[str], seq_b: Sequence[str]) -> list[int]:
     """Найти индексы elements seq_a, образующих самую длинную общую подпоследовательность с seq_b.
@@ -363,59 +419,58 @@ def check_sections_match_template(document: Document, profile: Profile) -> list[
     превращаются в Violation. Если документ полностью пуст или не содержит
     ни одного ожидаемого типа — Violation на каждый ожидаемый тип.
 
-    На Фазе 1 парсер пока создаёт одну PageSection(type=\"main\") — это
-    ограничение. Проверка фактически срабатывает, когда профиль требует
-    title/frontmatter/appendix, которых ещё нет.
+    Парсер на Фазе 1 кладёт весь документ в одну PageSection(type="main"),
+    поэтому типы title/frontmatter/appendix не видны на уровне вёрстки.
+    Чтобы не штрафовать каждый документ ложно, наличие типов определяется
+    по объединению: типы PageSection-ов ∪ распознанные по заголовкам
+    разделов (титульный лист, приложения, реферат/содержание …). Проверка
+    порядка выполняется только при реальной разметке (≥2 типов секций).
     """
-    expected_types_raw = [t.type for t in profile.sections_template]
-    expected_types = [t for t in expected_types_raw if t in _MAJOR_TYPES]
-    if not expected_types:
+    template_major = [t for t in profile.sections_template if t.type in _MAJOR_TYPES]
+    if not template_major:
         return []
 
-    actual_types = [ps.type for ps in document.page_sections if ps.type in _MAJOR_TYPES]
+    page_types_seq = [ps.type for ps in document.page_sections if ps.type in _MAJOR_TYPES]
+    available = set(page_types_seq) | _detect_types_from_headings(document)
 
     violations: list[Violation] = []
-    if not actual_types:
-        for tpl in profile.sections_template:
-            if tpl.type not in _MAJOR_TYPES:
-                continue
+
+    # 1. Присутствие требуемых типов (по объединению вёрстки и заголовков).
+    for tpl in template_major:
+        if tpl.type not in available:
             violations.append(
                 Violation(
                     check_code="K.01",
                     severity="error",
-                    message=(f"Отсутствует секция «{tpl.name}» (тип {tpl.type})"),
+                    message=f"Отсутствует секция «{tpl.name}» (тип {tpl.type})",
                     location="page_sections",
                     suggestion=f"Добавить секцию типа «{tpl.type}»",
                     details={"expected_type": tpl.type},
                 )
             )
-        return violations
 
-    # Индексы expected_types, которые удалось выровнять (LCS).
-    matched_indices = set(_lis_length(expected_types, actual_types))
-    # Соответствующие шаблоны (с фильтрацией по главным типам).
-    template_filtered = [t for t in profile.sections_template if t.type in _MAJOR_TYPES]
-    for idx, tpl in enumerate(template_filtered):
-        if idx in matched_indices:
-            continue
-        if tpl.type in actual_types:
-            # Тип присутствует, но «выпал» из правильной последовательности.
-            message = (
-                f"Секция типа «{tpl.type}» («{tpl.name}») присутствует, "
-                f"но нарушает ожидаемый порядок"
+    # 2. Порядок — только при реальной разметке PageSection-ов (≥2 разных
+    #    главных типа). На плоском документе (один main) порядок не определён.
+    distinct_page_types = list(dict.fromkeys(page_types_seq))
+    if len(distinct_page_types) >= 2:
+        expected_types = [t.type for t in template_major]
+        matched_indices = set(_lis_length(expected_types, page_types_seq))
+        for idx, tpl in enumerate(template_major):
+            # Отсутствие уже учтено в блоке присутствия выше — здесь только
+            # «тип есть, но не на своём месте».
+            if idx in matched_indices or tpl.type not in page_types_seq:
+                continue
+            violations.append(
+                Violation(
+                    check_code="K.01",
+                    severity="error",
+                    message=(
+                        f"Секция типа «{tpl.type}» («{tpl.name}») присутствует, "
+                        f"но нарушает ожидаемый порядок"
+                    ),
+                    location="page_sections",
+                    suggestion="Переставить секции в порядке шаблона",
+                    details={"expected_type": tpl.type},
+                )
             )
-            suggestion = "Переставить секции в порядке шаблона"
-        else:
-            message = f"Отсутствует секция «{tpl.name}» (тип {tpl.type})"
-            suggestion = f"Добавить секцию типа «{tpl.type}»"
-        violations.append(
-            Violation(
-                check_code="K.01",
-                severity="error",
-                message=message,
-                location="page_sections",
-                suggestion=suggestion,
-                details={"expected_type": tpl.type},
-            )
-        )
     return violations
