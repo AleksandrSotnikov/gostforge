@@ -2035,6 +2035,24 @@ def _render_section_tree() -> None:
 # (label, фабрика → dict с heading/blocks). Используются в UI-кнопках
 # «+ Раздел из шаблона».
 _SECTION_TEMPLATES: dict[str, tuple[str, Any]] = {
+    "title": (
+        "Титульный лист (вставить вручную)",
+        lambda: {
+            "heading": "Титульный лист",
+            "blocks": [
+                {
+                    "kind": "paragraph",
+                    "text": (
+                        "[Место для титульного листа. Вставьте сюда титульный лист "
+                        "по форме вашей кафедры или замените этот текст. Раздел "
+                        "не проверяется нормоконтролем.]"
+                    ),
+                }
+            ],
+            # Титульник оформляется вручную и не обязан соответствовать ГОСТу.
+            "disabled_checks": ["*"],
+        },
+    ),
     "intro": (
         "Введение",
         lambda: {
@@ -2122,11 +2140,32 @@ _SECTION_TEMPLATES: dict[str, tuple[str, Any]] = {
 }
 
 
+# ГОСТ 7.32-2017 п. 6.7.3: приложения обозначают буквами русского алфавита,
+# начиная с А, кроме Ё, З, Й, О, Ч, Ь, Ы, Ъ.
+_APPENDIX_LETTERS = "АБВГДЕЖИКЛМНПРСТУФХЦШЩЭЮЯ"
+
+# Шаблоны, которые по структуре документа идут в начале и вставляются
+# в начало списка разделов, а не в конец.
+_FRONT_TEMPLATES = frozenset({"title"})
+
+
+def _next_appendix_letter(sections: list[dict[str, Any]]) -> str:
+    """Следующая буква приложения по ГОСТ (А, Б, В, …) по числу уже
+    имеющихся разделов-приложений. Если буквы кончились — номер."""
+    count = sum(
+        1 for s in sections if str(s.get("heading", "")).strip().lower().startswith("приложение")
+    )
+    if count < len(_APPENDIX_LETTERS):
+        return _APPENDIX_LETTERS[count]
+    return str(count + 1)
+
+
 def _render_section_templates_sidebar() -> None:
     """Sidebar-блок: «+ Раздел из шаблона» — быстрая вставка готовых разделов.
 
-    Выпадающий список с шаблонами + кнопка «Вставить» добавляет
-    раздел в конец state['sections'] и переключает активный.
+    Выпадающий список с шаблонами + кнопка «Вставить». Титульный лист
+    вставляется в начало, остальные — в конец; приложения нумеруются
+    буквами по ГОСТ автоматически.
     """
     st.sidebar.markdown("---")
     st.sidebar.subheader("Раздел из шаблона")
@@ -2141,8 +2180,14 @@ def _render_section_templates_sidebar() -> None:
         state = _get_state()
         _, factory = _SECTION_TEMPLATES[sel]
         new_section = factory()
-        state["sections"].append(new_section)
-        state["active_section_index"] = len(state["sections"]) - 1
+        if sel == "appendix":
+            new_section["heading"] = f"Приложение {_next_appendix_letter(state['sections'])}"
+        if sel in _FRONT_TEMPLATES:
+            state["sections"].insert(0, new_section)
+            state["active_section_index"] = 0
+        else:
+            state["sections"].append(new_section)
+            state["active_section_index"] = len(state["sections"]) - 1
         st.rerun()
 
 
