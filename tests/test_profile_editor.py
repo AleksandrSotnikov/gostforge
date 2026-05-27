@@ -15,6 +15,7 @@ pytest.importorskip("streamlit")
 from gostforge.profile import load_profile
 from gostforge.profile.schema import Profile
 from gostforge.web.profile_editor import (
+    _flatten_changes,
     build_extends_profile_yaml,
     build_profile_yaml,
     delete_custom_profile,
@@ -23,6 +24,20 @@ from gostforge.web.profile_editor import (
     render_profile_editor,
     save_profile_to_registry,
 )
+
+
+def test_flatten_changes_reports_scalar_diff() -> None:
+    base = profile_to_data(load_profile("gost-7.32-2017"))
+    edited = profile_to_data(load_profile("gost-7.32-2017"))
+    edited["styles"]["body"]["size_pt"] = 13.0
+    lines = _flatten_changes(base.get("styles"), edited.get("styles"), "styles")
+    assert any("styles.body.size_pt" in line and "13.0" in line for line in lines)
+
+
+def test_flatten_changes_empty_when_identical() -> None:
+    base = profile_to_data(load_profile("gost-7.32-2017"))
+    same = profile_to_data(load_profile("gost-7.32-2017"))
+    assert _flatten_changes(base.get("styles"), same.get("styles"), "styles") == []
 
 
 def test_module_exposes_render() -> None:

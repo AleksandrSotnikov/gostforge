@@ -86,6 +86,30 @@ def _diff(base: Any, edited: Any) -> Any:
     return _UNCHANGED if base == edited else edited
 
 
+def _flatten_changes(base: Any, edited: Any, prefix: str = "") -> list[str]:
+    """Плоский список изменений ``edited`` относительно ``base``.
+
+    Возвращает строки вида ``путь: было → стало`` для скаляров и
+    ``путь: изменён список`` для списков. Для вложенных dict рекурсия.
+    """
+    changes: list[str] = []
+    if isinstance(base, dict) and isinstance(edited, dict):
+        for key, edited_value in edited.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            if key not in base:
+                changes.append(f"{path}: добавлено → {edited_value!r}")
+            else:
+                changes.extend(_flatten_changes(base[key], edited_value, path))
+        return changes
+    if isinstance(base, list) and isinstance(edited, list):
+        if base != edited:
+            changes.append(f"{prefix}: изменён список")
+        return changes
+    if base != edited:
+        changes.append(f"{prefix}: {base!r} → {edited!r}")
+    return changes
+
+
 def build_extends_profile_yaml(data: dict[str, Any], base_id: str) -> str:
     """YAML профиля-наследника: ``extends: base_id`` + только отличия.
 
@@ -551,6 +575,24 @@ def _render_yaml_and_save(data: dict[str, Any], base_id: str) -> None:
         ),
         key="pe_save_mode",
     )
+    # Что изменено относительно базового профиля — чтобы пользователь
+    # видел свои правки перед сохранением.
+    if base_id:
+        try:
+            base_styles = load_profile(base_id).model_dump()
+        except Exception:
+            base_styles = {}
+        if base_styles:
+            changes: list[str] = []
+            for key in ("styles", "checks"):
+                changes.extend(_flatten_changes(base_styles.get(key), data.get(key), key))
+            with st.expander(f"Отличия от базового «{base_id}» ({len(changes)})"):
+                if not changes:
+                    st.caption("Изменений нет — профиль совпадает с базовым.")
+                else:
+                    for line in changes:
+                        st.markdown(f"- `{line}`")
+
     try:
         if mode.startswith("Наследник") and base_id:
             yaml_text = build_extends_profile_yaml(data, base_id)
