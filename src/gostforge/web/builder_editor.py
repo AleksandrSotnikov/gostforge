@@ -3828,6 +3828,19 @@ def _move_block(blocks: list[dict[str, Any]], from_idx: int, to_idx: int) -> Non
     blocks.insert(to_idx, item)
 
 
+def _duplicate_block(blocks: list[dict[str, Any]], b_idx: int) -> None:
+    """Вставить глубокую копию блока сразу после оригинала.
+
+    Глубокая копия через json round-trip (блоки — dict/list примитивов,
+    включая data-URI картинок), чтобы правки копии не затрагивали оригинал.
+    No-op при индексе вне диапазона.
+    """
+    if b_idx < 0 or b_idx >= len(blocks):
+        return
+    clone = json.loads(json.dumps(blocks[b_idx]))
+    blocks.insert(b_idx + 1, clone)
+
+
 def _render_single_block(
     block: dict[str, Any],
     blocks: list[dict[str, Any]],
@@ -3923,8 +3936,8 @@ def _render_single_block(
             key=f"{base}_numbered",
         )
 
-    # Перемещение блока вверх/вниз (без drag-and-drop) + удаление.
-    move_cols = st.columns([1, 1, 3])
+    # Перемещение блока вверх/вниз (без drag-and-drop), дублирование, удаление.
+    move_cols = st.columns([1, 1, 1, 3])
     if move_cols[0].button(
         "↑", key=f"{base}_up", disabled=b_idx == 0, help="Переместить блок выше"
     ):
@@ -3938,7 +3951,10 @@ def _render_single_block(
     ):
         _move_block(blocks, b_idx, b_idx + 1)
         st.rerun()
-    if move_cols[2].button("Удалить блок", key=f"{base}_del"):
+    if move_cols[2].button("⎘", key=f"{base}_dup", help="Дублировать блок"):
+        _duplicate_block(blocks, b_idx)
+        st.rerun()
+    if move_cols[3].button("Удалить блок", key=f"{base}_del"):
         blocks.pop(b_idx)
         st.rerun()
 

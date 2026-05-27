@@ -1,4 +1,4 @@
-"""Тесты перемещения блоков в редакторе раздела конструктора."""
+"""Тесты перемещения и дублирования блоков в редакторе раздела."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pytest
 
 pytest.importorskip("streamlit")
 
-from gostforge.web.builder_editor import _move_block
+from gostforge.web.builder_editor import _duplicate_block, _move_block
 
 
 def _blocks() -> list[dict[str, str]]:
@@ -46,3 +46,25 @@ def test_move_block_out_of_range_and_empty() -> None:
     empty: list[dict[str, str]] = []
     _move_block(empty, 0, 1)  # пустой список — no-op
     assert empty == []
+
+
+def test_duplicate_block_inserts_after() -> None:
+    blocks = _blocks()
+    _duplicate_block(blocks, 0)
+    assert [b["kind"] for b in blocks] == ["a", "a", "b", "c"]
+
+
+def test_duplicate_block_is_deep_copy() -> None:
+    blocks: list[dict[str, object]] = [{"kind": "list", "items": ["x"]}]
+    _duplicate_block(blocks, 0)
+    # Правка копии не затрагивает оригинал.
+    clone = blocks[1]
+    assert isinstance(clone["items"], list)
+    clone["items"].append("y")
+    assert blocks[0]["items"] == ["x"]
+
+
+def test_duplicate_block_out_of_range_noop() -> None:
+    blocks = _blocks()
+    _duplicate_block(blocks, 9)
+    assert [b["kind"] for b in blocks] == ["a", "b", "c"]
