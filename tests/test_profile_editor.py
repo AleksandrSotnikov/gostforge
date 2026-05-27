@@ -16,6 +16,8 @@ from gostforge.profile import load_profile
 from gostforge.profile.schema import Profile
 from gostforge.web.profile_editor import (
     build_profile_yaml,
+    delete_custom_profile,
+    list_installed_custom_profiles,
     profile_to_data,
     render_profile_editor,
     save_profile_to_registry,
@@ -107,3 +109,24 @@ def test_save_profile_overwrite_guard(tmp_path: Path, monkeypatch: pytest.Monkey
         save_profile_to_registry(yaml_text, overwrite=False)
     # С overwrite — успех.
     assert save_profile_to_registry(yaml_text, overwrite=True) == "dup"
+
+
+def test_list_and_delete_custom_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GOSTFORGE_DB_PATH", str(tmp_path / "reg.db"))
+    assert list_installed_custom_profiles() == []
+
+    data = profile_to_data(load_profile("gost-7.32-2017"))
+    data["id"] = "kaf-1"
+    data["name"] = "Кафедра 1"
+    save_profile_to_registry(build_profile_yaml(data), overwrite=False)
+
+    installed = list_installed_custom_profiles()
+    ids = [p["id"] for p in installed]
+    assert "kaf-1" in ids
+    rec = next(p for p in installed if p["id"] == "kaf-1")
+    assert rec["name"] == "Кафедра 1"
+
+    # Удаление: True для существующего, False для отсутствующего.
+    assert delete_custom_profile("kaf-1") is True
+    assert delete_custom_profile("kaf-1") is False
+    assert list_installed_custom_profiles() == []

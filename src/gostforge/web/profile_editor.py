@@ -77,6 +77,40 @@ def save_profile_to_registry(yaml_content: str, *, overwrite: bool) -> str:
     return record.profile_id
 
 
+def list_installed_custom_profiles() -> list[dict[str, str]]:
+    """Список установленных пользовательских профилей из реестра (БД).
+
+    Возвращает [] при недоступной БД — чтобы UI не падал.
+    """
+    try:
+        from gostforge.db import get_connection, list_custom_profiles
+    except ImportError:
+        return []
+    try:
+        with get_connection() as conn:
+            records = list_custom_profiles(conn)
+    except Exception:
+        return []
+    return [
+        {
+            "id": r.profile_id,
+            "name": r.name,
+            "version": r.version,
+            "source": r.source,
+            "installed_at": r.installed_at,
+        }
+        for r in records
+    ]
+
+
+def delete_custom_profile(profile_id: str) -> bool:
+    """Удалить пользовательский профиль из реестра. True если был удалён."""
+    from gostforge.db import get_connection, uninstall_profile
+
+    with get_connection() as conn:
+        return uninstall_profile(conn, profile_id)
+
+
 # --- Streamlit-виджеты для групп параметров ---------------------------------
 
 
@@ -309,6 +343,41 @@ def _edit_checks(data: dict[str, Any]) -> None:
 # --- Точка входа режима -----------------------------------------------------
 
 
+def _render_installed_profiles() -> None:
+    """Список установленных пользовательских профилей + удаление."""
+    customs = list_installed_custom_profiles()
+    label = f"Установленные пользовательские профили ({len(customs)})"
+    with st.expander(label, expanded=False):
+        if not customs:
+            st.caption(
+                "Пока нет своих профилей. Отредактируйте параметры ниже и "
+                "сохраните — профиль появится здесь и в списках режимов."
+            )
+            return
+        st.table(
+            [
+                {
+                    "ID": c["id"],
+                    "Название": c["name"],
+                    "Версия": c["version"],
+                    "Установлен": c["installed_at"],
+                }
+                for c in customs
+            ]
+        )
+        to_delete = st.selectbox(
+            "Удалить профиль",
+            options=[c["id"] for c in customs],
+            key="pe_delete_select",
+        )
+        if st.button("Удалить выбранный профиль", key="pe_delete_btn"):
+            if delete_custom_profile(to_delete):
+                st.success(f"Профиль «{to_delete}» удалён из реестра.")
+                st.rerun()
+            else:
+                st.warning(f"Профиль «{to_delete}» не найден в реестре.")
+
+
 def render_profile_editor() -> None:
     """Главный рендер режима «Редактор профиля»."""
     st.title("Редактор профиля форматирования")
@@ -316,6 +385,8 @@ def render_profile_editor() -> None:
         "Загрузите профиль как основу, измените параметры и сохраните как "
         "свой профиль. Он появится в списке профилей нормоконтроля и конструктора."
     )
+
+    _render_installed_profiles()
 
     profiles = list_profiles()
     default_base = (
