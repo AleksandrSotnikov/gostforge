@@ -657,3 +657,62 @@ def test_u01_fixer_no_change_when_already_nbsp() -> None:
     profile = load_profile("gost-7.32-2017")
     applied = fix(doc, profile, codes=["U.01"])
     assert applied == []
+
+
+# --- T.01 / T.02: шрифт и кегль основного текста -----------------------------
+
+
+def test_t01_t02_fixers_registered() -> None:
+    assert {"T.01", "T.02"}.issubset(registered_fixers())
+
+
+def test_t01_fixer_sets_expected_font_keeps_inherited() -> None:
+    """T.01: явный неверный шрифт → Times New Roman; наследуемый (None) не трогаем."""
+    paragraph = Paragraph(
+        id="p1",
+        style_name="Normal",
+        content=[
+            TextRun(text="плохой шрифт", font="Arial"),
+            TextRun(text=" наследуемый", font=None),
+        ],
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.01"])
+    assert len(applied) == 1 and applied[0].fixer_code == "T.01"
+    runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert runs[0].font == "Times New Roman"
+    assert runs[1].font is None  # наследуемый не тронут
+
+
+def test_t02_fixer_sets_expected_body_size() -> None:
+    """T.02: явный неверный кегль тела → 14 pt; наследуемый (None) не трогаем."""
+    paragraph = Paragraph(
+        id="p1",
+        style_name="Normal",
+        content=[
+            TextRun(text="мелкий", size_pt=10.0),
+            TextRun(text=" наследуемый", size_pt=None),
+        ],
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.02"])
+    assert len(applied) == 1 and applied[0].fixer_code == "T.02"
+    runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert runs[0].size_pt == 14.0
+    assert runs[1].size_pt is None
+
+
+def test_t02_fixer_respects_caption_size() -> None:
+    """Для подписи (стиль Caption) ожидаемый кегль — 12 pt, не 14."""
+    paragraph = Paragraph(
+        id="cap1",
+        style_name="Caption",
+        content=[TextRun(text="Рисунок 1 — Схема", size_pt=10.0)],
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    fix(doc, profile, codes=["T.02"])
+    runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert runs[0].size_pt == 12.0

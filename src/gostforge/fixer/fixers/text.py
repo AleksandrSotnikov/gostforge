@@ -321,6 +321,89 @@ def fix_si_unit_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
     return applied
 
 
+@register("T.01")
+def fix_body_font(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести шрифт явно-заданных text-run-ов к ожидаемому (T.01).
+
+    Меняет только run-ы с явным `run.font`, отличным от эталона
+    (`profile.styles.body.font` или `checks.T.01.params.font`). Run-ы,
+    наследующие шрифт от стиля (`font is None`), не трогаем. Scope
+    зеркалит проверку T.01 (пропускаем колонтитулы).
+    """
+    from gostforge.validator.checks.text import _classify_paragraph
+
+    config = profile.checks.get("T.01")
+    expected_font = profile.styles.body.font
+    if config and config.params.get("font"):
+        expected_font = config.params["font"]
+
+    applied: list[FixApplied] = []
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) == "header_footer":
+            continue
+        paragraph_changed = False
+        for run in _text_runs(paragraph):
+            if not run.text or not run.text.strip():
+                continue
+            if run.font is not None and run.font != expected_font:
+                run.font = expected_font
+                paragraph_changed = True
+        if paragraph_changed:
+            applied.append(
+                FixApplied(
+                    fixer_code="T.01",
+                    location=_paragraph_location(paragraph),
+                    description=f"Шрифт текста приведён к «{expected_font}»",
+                )
+            )
+    return applied
+
+
+@register("T.02")
+def fix_body_font_size(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести кегль явно-заданных run-ов к ожидаемому по категории (T.02).
+
+    Категории: body / caption / footnote — со своими размерами. Заголовки
+    и колонтитулы пропускаются (их кегль — H.*/K.*). Run-ы без явного
+    `size_pt` (наследуют от стиля) не трогаем.
+    """
+    from gostforge.validator.checks.text import _SIZE_TOLERANCE_PT, _classify_paragraph
+
+    config = profile.checks.get("T.02")
+    params = config.params if config else {}
+    extra = profile.styles.extra
+    body_size = float(params.get("body_size", profile.styles.body.size_pt))
+    caption_size = float(params.get("caption_size", extra.get("caption_size_pt", 12)))
+    footnote_size = float(params.get("footnote_size", extra.get("footnote_size_pt", 10)))
+    expected_by_category = {
+        "body": body_size,
+        "caption": caption_size,
+        "footnote": footnote_size,
+    }
+
+    applied: list[FixApplied] = []
+    for paragraph in _all_paragraphs(document):
+        expected = expected_by_category.get(_classify_paragraph(paragraph))
+        if expected is None:
+            continue
+        paragraph_changed = False
+        for run in _text_runs(paragraph):
+            if not run.text or not run.text.strip():
+                continue
+            if run.size_pt is not None and abs(run.size_pt - expected) > _SIZE_TOLERANCE_PT:
+                run.size_pt = expected
+                paragraph_changed = True
+        if paragraph_changed:
+            applied.append(
+                FixApplied(
+                    fixer_code="T.02",
+                    location=_paragraph_location(paragraph),
+                    description=f"Кегль текста приведён к {expected} pt",
+                )
+            )
+    return applied
+
+
 @register("T.06")
 def fix_disable_auto_hyphenation(
     document: Document,
