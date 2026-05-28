@@ -312,7 +312,13 @@ def _can_redo() -> bool:
 
 # Минимальный интервал между авто-сохранениями. Меньше — лишняя нагрузка
 # на диск; больше — выше риск потерять прогресс.
-_AUTOSAVE_INTERVAL_SEC = 30.0
+# Минимальный интервал между записями на диск. Цель: ловить
+# изменения максимально близко к моменту правки (раньше — раз в 30с,
+# что давало риск потерять до полминуты при сбое браузера), но не
+# писать при каждом нажатии клавиши. 1.5 с — компромисс: пользователь
+# успевает напечатать слово, но если приостановится — сохранение
+# случается почти сразу.
+_AUTOSAVE_MIN_INTERVAL_SEC = 1.5
 
 
 def _autosave_dir() -> Path:
@@ -337,27 +343,56 @@ def _autosave_path() -> Path:
 
 
 def _autosave_now() -> None:
-    """Сохранить текущий state в autosave-файл. Не дороже одного раза в 30с.
+    """Сохранить state в autosave-файл — content-based debounce.
+
+    Стратегия: пишем только если state РЕАЛЬНО изменился относительно
+    прошлого сохранения (сверяемся по хэшу payload), но не чаще
+    ``_AUTOSAVE_MIN_INTERVAL_SEC`` (1.5 с). Это:
+
+    * минимизирует риск потери данных — сохранение происходит почти
+      сразу после правки (раньше был фиксированный 30-секундный
+      интервал, и при крахе браузера терялось до полминуты);
+    * не нагружает диск при быстром наборе (rerun на каждое нажатие
+      клавиши не вызывает запись, если не прошло 1.5 с от предыдущей);
+    * не пишет вовсе, если state не менялся (например, простое
+      переключение страницы Streamlit-навигации).
 
     Ошибки IO логируются и глотаются — UI продолжает работать даже
     если диск переполнен или каталог недоступен.
 
     Дополнительно: периодически (раз в 5 минут) кладёт snapshot в
     каталог версий ``~/.gostforge/state-versions/<title>-<timestamp>.json``.
-    Это даёт возможность откатиться к более ранней версии работы
-    через ``gostforge state-versions list/restore``.
     """
+    import hashlib
     import time
 
-    last = float(st.session_state.get("builder_autosave_ts", 0.0))
-    now = time.time()
-    if now - last < _AUTOSAVE_INTERVAL_SEC:
-        return
     try:
         state = _get_state()
-        payload = json.dumps(state, ensure_ascii=False, indent=2).encode("utf-8")
-        _autosave_path().write_bytes(payload)
+        payload = json.dumps(state, ensure_ascii=False, indent=2)
+    except Exception as exc:  # pragma: no cover - не валим UI
+        import logging
+
+        logging.getLogger(__name__).warning("autosave: state serialise failed: %s", exc)
+        return
+
+    new_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    last_hash = st.session_state.get("builder_autosave_hash")
+    if new_hash == last_hash:
+        # State не менялся с прошлой записи — не трогаем диск.
+        return
+
+    now = time.time()
+    last = float(st.session_state.get("builder_autosave_ts", 0.0))
+    if now - last < _AUTOSAVE_MIN_INTERVAL_SEC:
+        # Throttle: между записями не меньше 1.5 с. Следующий rerun
+        # уже не пройдёт по hash-check (если state ещё меняется) —
+        # тогда сохраним. Если набор остановится — на следующем
+        # rerun (когда throttle отпустит) сохраним.
+        return
+    try:
+        _autosave_path().write_bytes(payload.encode("utf-8"))
         st.session_state["builder_autosave_ts"] = now
+        st.session_state["builder_autosave_hash"] = new_hash
     except Exception as exc:  # pragma: no cover - не валим UI на диске
         import logging
 
