@@ -478,6 +478,56 @@ def _edit_lists(data: dict[str, Any]) -> None:
     )
 
 
+def _edit_check_params(code: str, params: dict[str, Any], prefix: str) -> None:
+    """Редактор params одной проверки. Подбирает widget по типу значения.
+
+    Простые типы — нативные widget-ы (int/float/bool/str). Списки строк —
+    text_area с одним элементом на строке. dict — JSON-editor (редко
+    нужно; пользователь обычно не лезет в такое).
+    """
+    import json
+
+    if not params:
+        st.caption("У этой проверки нет параметров.")
+        return
+    for param_name in sorted(params.keys()):
+        value = params[param_name]
+        widget_key = f"{prefix}_{param_name}"
+        if isinstance(value, bool):
+            params[param_name] = st.checkbox(param_name, value=value, key=widget_key)
+        elif isinstance(value, int) and not isinstance(value, bool):
+            params[param_name] = int(
+                st.number_input(param_name, value=value, step=1, key=widget_key)
+            )
+        elif isinstance(value, float):
+            params[param_name] = float(
+                st.number_input(param_name, value=value, step=0.5, key=widget_key)
+            )
+        elif isinstance(value, str):
+            params[param_name] = st.text_input(param_name, value=value, key=widget_key)
+        elif isinstance(value, list) and all(isinstance(x, str) for x in value):
+            # Список строк → text_area по одному пункту на строке.
+            new_text = st.text_area(
+                f"{param_name} (по одному на строке)",
+                value="\n".join(value),
+                key=widget_key,
+                height=80,
+            )
+            params[param_name] = [line.strip() for line in new_text.splitlines() if line.strip()]
+        else:
+            # Сложный тип (dict / список dict-ов / mixed) → JSON-редактор.
+            text = st.text_area(
+                f"{param_name} (JSON)",
+                value=json.dumps(value, ensure_ascii=False, indent=2),
+                key=widget_key,
+                height=80,
+            )
+            try:
+                params[param_name] = json.loads(text)
+            except json.JSONDecodeError:
+                st.warning(f"`{param_name}`: невалидный JSON — параметр не обновлён.")
+
+
 def _edit_checks(data: dict[str, Any]) -> None:
     checks: dict[str, Any] = data.get("checks") or {}
     if not checks:
@@ -485,7 +535,8 @@ def _edit_checks(data: dict[str, Any]) -> None:
         return
     st.caption(
         "Включение/выключение проверок и их важность. «(по профилю)» — "
-        "оставить severity, заданную в самой проверке."
+        "оставить severity, заданную в самой проверке. Раскройте код "
+        "проверки, чтобы отредактировать её параметры (`params`)."
     )
     rows: list[dict[str, Any]] = []
     for code in sorted(checks):
@@ -516,6 +567,20 @@ def _edit_checks(data: dict[str, Any]) -> None:
         checks[code]["enabled"] = bool(row["Включена"])
         sev = row["Важность"]
         checks[code]["severity"] = None if sev == _SEVERITY_DISPLAY[0] else sev
+
+    # Редактор params для каждой проверки, у которой они есть.
+    # Сворачиваем по умолчанию — params обычно меняют редко, не должны
+    # перегружать вкладку.
+    checks_with_params = sorted(c for c in checks if checks[c].get("params"))
+    if checks_with_params:
+        st.markdown("### Параметры проверок")
+        st.caption(
+            f"У {len(checks_with_params)} проверок есть настраиваемые параметры. "
+            "Раскрывайте по одной, чтобы изменить."
+        )
+        for code in checks_with_params:
+            with st.expander(f"`{code}` — параметры", expanded=False):
+                _edit_check_params(code, checks[code]["params"], prefix=f"pe_p_{code}")
 
 
 # --- Точка входа режима -----------------------------------------------------
@@ -608,6 +673,7 @@ def render_profile_editor() -> None:
             "Рисунки",
             "Списки",
             "Проверки",
+            "Шаблон секций",
             "YAML / Сохранить",
         ]
     )
@@ -629,7 +695,44 @@ def render_profile_editor() -> None:
     with tabs[6]:
         _edit_checks(data)
     with tabs[7]:
+        _view_sections_template(data)
+    with tabs[8]:
         _render_yaml_and_save(data, st.session_state.get(_SESSION_BASE, ""))
+
+
+def _view_sections_template(data: dict[str, Any]) -> None:
+    """Read-only обзор `sections_template` — типы секций, нумерация, колонтитулы.
+
+    Полноценный редактор для этой структуры пока не делается — вместо
+    него показываем содержимое и подсказку «менять через YAML». В UI
+    обычно достаточно унаследовать sections_template от базового
+    профиля; перекраивать его кафедры обычно не хотят.
+    """
+    import json
+
+    sections = data.get("sections_template") or []
+    st.subheader("Шаблон страничных секций")
+    st.caption(
+        "Описывает типы секций документа (титульник / основная часть / "
+        "приложения) с их колонтитулами и параметрами нумерации страниц. "
+        "**Read-only**: для редактирования сохраните как наследник и "
+        "поправьте YAML напрямую — UI-редактор этой структуры пока нет."
+    )
+    if not sections:
+        st.info(
+            "В этом профиле нет своего sections_template — наследуется от "
+            "родителя (или используется дефолт)."
+        )
+        return
+    for sec in sections:
+        name = sec.get("name", "(без названия)")
+        stype = sec.get("type", "?")
+        with st.expander(f"**{name}** · type=`{stype}`", expanded=False):
+            payload = {k: v for k, v in sec.items() if k not in ("name", "type") and v is not None}
+            if payload:
+                st.code(json.dumps(payload, ensure_ascii=False, indent=2), language="json")
+            else:
+                st.caption("Только name+type без дополнительных настроек.")
 
 
 def _render_yaml_and_save(data: dict[str, Any], base_id: str) -> None:
