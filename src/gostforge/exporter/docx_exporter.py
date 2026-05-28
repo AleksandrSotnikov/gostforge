@@ -851,30 +851,35 @@ def _apply_figure_paragraph_constraints(paragraph: Any) -> None:
 
 
 def _add_picture_with_max_width(run: Any, source: Any) -> None:
-    """Вставить картинку с ограничением максимальной ширины.
+    """Вставить картинку с ограничением максимальной ширины и высоты.
 
     По умолчанию add_picture(path) использует оригинальный размер,
     из-за чего большие сканы и скриншоты вылезают за поля страницы
-    или вообще выходят за лист. Сначала вставляем без явной ширины,
-    потом если она шире лимита из профиля — масштабируем
-    пропорционально (Word сам сохраняет aspect ratio при задании
-    одного измерения).
+    или вообще выходят за лист (а подпись съезжает на следующую
+    страницу — нарушение ГОСТ). Сначала вставляем без явной ширины,
+    потом если картинка шире или выше лимита из профиля — масштабируем
+    пропорционально (сохраняем aspect ratio).
     """
     if _current_profile is None:
         run.add_picture(source)
         return
     fig_cfg = _current_profile.styles.figure
     max_width_cm = float(fig_cfg.max_width_cm)
+    max_height_cm = float(fig_cfg.max_height_cm)
     picture = run.add_picture(source)
-    # picture.width — EMU (1 cm = 360000 EMU). Сравним с max.
+    # picture.width/height — EMU (1 cm = 360000 EMU). Сначала жмём по
+    # ширине, потом — если всё ещё высоковато — дожимаем по высоте.
     try:
-        max_emu = Cm(max_width_cm).emu
-        if picture.width > max_emu:
-            # Сохраняем aspect ratio: ставим ширину, высота
-            # пересчитается автоматически python-docx-ом.
+        max_w_emu = Cm(max_width_cm).emu
+        max_h_emu = Cm(max_height_cm).emu
+        if picture.width > max_w_emu:
             ratio = picture.height / picture.width
-            picture.width = max_emu
-            picture.height = int(max_emu * ratio)
+            picture.width = max_w_emu
+            picture.height = int(max_w_emu * ratio)
+        if picture.height > max_h_emu:
+            ratio = picture.width / picture.height
+            picture.height = max_h_emu
+            picture.width = int(max_h_emu * ratio)
     except (AttributeError, TypeError):  # pragma: no cover
         # На всякий случай — если picture не InlineShape (мок и пр.),
         # не падаем; картинка останется оригинального размера.
