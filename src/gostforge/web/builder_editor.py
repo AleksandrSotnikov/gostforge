@@ -1054,13 +1054,18 @@ def document_to_state(document: Any) -> dict[str, Any]:
                 "kind": "table",
                 "headers": [_heading_text(h) for h in block.headers],
                 "rows": [[_heading_text(c) for c in r] for r in block.rows],
-                "caption": _heading_text(block.caption),
+                # ВАЖНО: режем префикс «Таблица N — » на импорте, иначе при
+                # следующем экспорте builder добавит ещё один → «Таблица 1
+                # — Таблица 1 — caption».
+                "caption": _strip_caption_prefix(_heading_text(block.caption), kind="table"),
             }
         if isinstance(block, Figure):
             return {
                 "kind": "figure",
                 "image_path": block.image_path or "",
-                "caption": _heading_text(block.caption),
+                # См. комментарий выше — снимаем префикс на импорте,
+                # билдер добавит его обратно по profile.styles.figure.caption.format.
+                "caption": _strip_caption_prefix(_heading_text(block.caption), kind="figure"),
             }
         if isinstance(block, ListBlock):
             return {

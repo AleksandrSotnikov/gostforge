@@ -317,6 +317,34 @@ def _edit_caption(cap: dict[str, Any], prefix: str) -> None:
 
 def _edit_table(data: dict[str, Any]) -> None:
     t = data["styles"]["table"]
+    st.markdown("##### Нумерация и оформление шапки")
+    t["numbering"] = _select(
+        "Схема нумерации таблиц",
+        _NUMBERING_MODES,
+        t.get("numbering", "continuous"),
+        "pe_tb_num",
+        format_func=lambda v: _NUMBERING_LABELS.get(v, v),
+    )
+    st.caption(
+        "В приложениях («Приложение А», «Приложение Б», ...) "
+        "нумерация всегда буквенная (А.1, А.2, Б.1) независимо от выбора."
+    )
+    t["repeat_header"] = st.checkbox(
+        "Повторять шапку при переносе на новую страницу",
+        value=t.get("repeat_header", True),
+        key="pe_tb_repeat_h",
+        help="ГОСТ 7.32: шапка таблицы должна повторяться на каждой continuation-странице.",
+    )
+    t["continuation_caption"] = st.checkbox(
+        "Добавлять строку «Продолжение таблицы N»",
+        value=t.get("continuation_caption", False),
+        key="pe_tb_cont_cap",
+        help=(
+            "Word покажет строку и на первой странице, и на continuation. "
+            "Чисто-OOXML способа показывать её только на 2+ странице нет."
+        ),
+    )
+    st.markdown("##### Рамки и шрифт")
     t["border_style"] = _select("Стиль рамок", _BORDER, t["border_style"], "pe_tb_border")
     t["border_size"] = int(
         st.number_input(
@@ -349,28 +377,6 @@ def _edit_table(data: dict[str, Any]) -> None:
     t["header_alignment"] = _select(
         "Выравнивание шапки", _ALIGN_FULL, t["header_alignment"], "pe_tb_halign"
     )
-    t["numbering"] = _select(
-        "Нумерация таблиц",
-        _NUMBERING_MODES,
-        t.get("numbering", "continuous"),
-        "pe_tb_num",
-        format_func=lambda v: _NUMBERING_LABELS.get(v, v),
-    )
-    t["repeat_header"] = st.checkbox(
-        "Повторять шапку при переносе на новую страницу",
-        value=t.get("repeat_header", True),
-        key="pe_tb_repeat_h",
-        help="ГОСТ 7.32: шапка таблицы должна повторяться на каждой continuation-странице.",
-    )
-    t["continuation_caption"] = st.checkbox(
-        "Добавлять строку «Продолжение таблицы N»",
-        value=t.get("continuation_caption", False),
-        key="pe_tb_cont_cap",
-        help=(
-            "Word покажет строку и на первой странице, и на continuation. "
-            "Чисто-OOXML способа показывать её только на 2+ странице нет."
-        ),
-    )
     t["cell_alignment"] = _select(
         "Выравнивание ячеек", _ALIGN_FULL, t["cell_alignment"], "pe_tb_calign"
     )
@@ -388,7 +394,23 @@ def _edit_table(data: dict[str, Any]) -> None:
 
 def _edit_figure(data: dict[str, Any]) -> None:
     f = data["styles"]["figure"]
+    st.markdown("##### Нумерация и расположение")
+    f["numbering"] = _select(
+        "Схема нумерации рисунков",
+        _NUMBERING_MODES,
+        f.get("numbering", "continuous"),
+        "pe_fig_num",
+        format_func=lambda v: _NUMBERING_LABELS.get(v, v),
+    )
+    st.caption(
+        "В приложениях («Приложение А», «Приложение Б», ...) "
+        "нумерация всегда буквенная (А.1, А.2, Б.1) независимо от выбора."
+    )
     f["alignment"] = _select("Выравнивание рисунка", _ALIGN_FIG, f["alignment"], "pe_fig_align")
+    f["keep_with_next"] = st.checkbox(
+        "Не отрывать рисунок от подписи", value=f["keep_with_next"], key="pe_fig_kwn"
+    )
+    st.markdown("##### Размер")
     f["max_width_cm"] = _num(
         "Макс. ширина (см)", f["max_width_cm"], "pe_fig_mw", step=0.5, min_value=1.0
     )
@@ -398,18 +420,6 @@ def _edit_figure(data: dict[str, Any]) -> None:
         "pe_fig_mh",
         step=0.5,
         min_value=1.0,
-    )
-    # Схема нумерации: «Рисунок 1» (сквозная) или «Рисунок 3.1» (по главам).
-    # В приложениях нумерация всегда буквенная независимо от выбора.
-    f["numbering"] = _select(
-        "Нумерация рисунков",
-        _NUMBERING_MODES,
-        f.get("numbering", "continuous"),
-        "pe_fig_num",
-        format_func=lambda v: _NUMBERING_LABELS.get(v, v),
-    )
-    f["keep_with_next"] = st.checkbox(
-        "Не отрывать рисунок от подписи", value=f["keep_with_next"], key="pe_fig_kwn"
     )
     st.markdown("**Подпись рисунка**")
     _edit_caption(f["caption"], "pe_figcap")
