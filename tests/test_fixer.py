@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты движка автоисправлений и фиксеров T.08/T.09/T.10/T.11/T.12/T.13/H.03/H.08."""
 
 from __future__ import annotations
@@ -182,7 +180,7 @@ def test_t10_skips_multi_run_paragraph() -> None:
 
 
 def test_t11_hyphen_to_em_dash() -> None:
-    """ « - » → « — » в одном TextRun-е."""
+    """« - » → « — » в одном TextRun-е."""
     paragraph = Paragraph(
         id="p1",
         content=[TextRun(text="a - b")],
@@ -220,7 +218,7 @@ def test_t12_registered() -> None:
 
 
 def test_t12_inserts_nbsp_between_number_and_unit() -> None:
-    """ «5 кг» → «5<NBSP>кг»."""
+    """«5 кг» → «5<NBSP>кг»."""
     paragraph = Paragraph(
         id="p1",
         content=[TextRun(text="вес 5 кг и длина 10 м")],
@@ -274,7 +272,7 @@ def test_t13_registered() -> None:
 
 
 def test_t13_inserts_nbsp_between_initials_and_surname() -> None:
-    """ «И. И. Иванов» → «И.<NBSP>И.<NBSP>Иванов»."""
+    """«И. И. Иванов» → «И.<NBSP>И.<NBSP>Иванов»."""
     paragraph = Paragraph(
         id="p1",
         content=[TextRun(text="автор: И. И. Иванов и А. Б. Петров")],
@@ -287,10 +285,7 @@ def test_t13_inserts_nbsp_between_initials_and_surname() -> None:
     assert applied[0].fixer_code == "T.13"
     assert isinstance(applied[0], FixApplied)
     text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
-    assert (
-        text_runs[0].text
-        == "автор: И. И. Иванов и А. Б. Петров"
-    )
+    assert text_runs[0].text == "автор: И. И. Иванов и А. Б. Петров"
 
 
 def test_t13_no_change_when_already_nbsp() -> None:
@@ -325,7 +320,7 @@ def test_t13_no_change_without_pattern() -> None:
 
 
 def test_h03_removes_dot_after_number() -> None:
-    """ «1. Введение» → «1 Введение»."""
+    """«1. Введение» → «1 Введение»."""
     section = LogicalSection(
         id="s1",
         heading=[TextRun(text="1. Введение")],
@@ -344,7 +339,7 @@ def test_h03_removes_dot_after_number() -> None:
 
 
 def test_h08_removes_trailing_dot() -> None:
-    """ «Введение.» → «Введение»."""
+    """«Введение.» → «Введение»."""
     section = LogicalSection(
         id="s1",
         heading=[TextRun(text="Введение.")],
@@ -371,6 +366,195 @@ def test_h08_preserves_question_mark() -> None:
     assert applied == []
     runs = [el for el in section.heading if isinstance(el, TextRun)]
     assert runs[0].text == "Что такое?"
+
+
+# --- H.01/H.02: формат заголовков (шрифт/кегль/жирность/цвет) ----------------
+
+
+def test_h01_h02_fix_registered() -> None:
+    """Фиксеры формата заголовков зарегистрированы."""
+    codes = set(registered_fixers())
+    assert {"H.01", "H.02"}.issubset(codes)
+
+
+def test_h01_fixes_blue_cambria_heading() -> None:
+    """«Синий Cambria» заголовок 1 уровня приводится к профилю."""
+    section = LogicalSection(
+        id="s1",
+        heading=[
+            TextRun(
+                text="ВВЕДЕНИЕ",
+                font="Cambria",
+                size_pt=16.0,
+                bold=False,
+                color_hex="365F91",
+            )
+        ],
+        level=1,
+    )
+    doc = _doc_with_section(section)
+    profile = load_profile("gost-7.32-2017")
+
+    pre = [v for v in validate(doc, profile) if v.check_code == "H.01"]
+    assert pre, "тест должен начинаться с нарушениями H.01"
+
+    applied = fix(doc, profile, codes=["H.01"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "H.01"
+
+    runs = [el for el in section.heading if isinstance(el, TextRun)]
+    run = runs[0]
+    assert run.font == "Times New Roman"
+    assert run.size_pt == 14.0
+    assert run.bold is True
+    assert run.color_hex is None
+
+    post = [v for v in validate(doc, profile) if v.check_code == "H.01"]
+    assert post == []
+
+
+def test_h01_leaves_inherited_runs_untouched() -> None:
+    """Run с наследуемыми (None) атрибутами фиксер не трогает."""
+    section = LogicalSection(
+        id="s1",
+        heading=[TextRun(text="ГЛАВА 1", font=None, size_pt=None, bold=None, color_hex=None)],
+        level=1,
+    )
+    doc = _doc_with_section(section)
+    profile = load_profile("gost-7.32-2017")
+
+    applied = fix(doc, profile, codes=["H.01"])
+    assert applied == []
+
+    runs = [el for el in section.heading if isinstance(el, TextRun)]
+    run = runs[0]
+    assert run.font is None
+    assert run.size_pt is None
+    assert run.bold is None
+    assert run.color_hex is None
+
+
+def test_h01_does_not_change_uppercase() -> None:
+    """Регистр заголовка фиксер не меняет — это правка текста, не формата."""
+    section = LogicalSection(
+        id="s1",
+        heading=[TextRun(text="введение", font="Times New Roman", size_pt=14.0, bold=True)],
+        level=1,
+    )
+    doc = _doc_with_section(section)
+    profile = load_profile("gost-7.32-2017")
+
+    fix(doc, profile, codes=["H.01"])
+    runs = [el for el in section.heading if isinstance(el, TextRun)]
+    assert runs[0].text == "введение"
+
+
+def test_h02_fixes_heading_level_2_only() -> None:
+    """H.02 правит заголовки 2 уровня, не трогая 1 уровень."""
+    h1 = LogicalSection(
+        id="s1",
+        heading=[TextRun(text="ГЛАВА", font="Cambria", size_pt=16.0, bold=False)],
+        level=1,
+    )
+    h2 = LogicalSection(
+        id="s2",
+        heading=[TextRun(text="Подраздел", font="Cambria", size_pt=16.0, bold=False)],
+        level=2,
+    )
+    h1.children.append(h2)
+    doc = _doc_with_section(h1)
+    profile = load_profile("gost-7.32-2017")
+
+    applied = fix(doc, profile, codes=["H.02"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "H.02"
+
+    # Заголовок 1 уровня не тронут фиксером H.02.
+    runs1 = [el for el in h1.heading if isinstance(el, TextRun)]
+    assert runs1[0].font == "Cambria"
+    # Заголовок 2 уровня приведён к профилю.
+    runs2 = [el for el in h2.heading if isinstance(el, TextRun)]
+    assert runs2[0].font == "Times New Roman"
+
+
+# --- F.01/F.02/F.03: геометрия страницы --------------------------------------
+
+
+def _doc_with_page(page: PageGeometry, *, section_type: str = "main") -> Document:
+    """Документ с одной PageSection заданной геометрии."""
+    doc = Document()
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="Основная часть",
+            type=section_type,
+            page=page,
+            content=[],
+        )
+    )
+    return doc
+
+
+def test_f01_f02_f03_fix_registered() -> None:
+    """Фиксеры геометрии страницы зарегистрированы."""
+    codes = set(registered_fixers())
+    assert {"F.01", "F.02", "F.03"}.issubset(codes)
+
+
+def test_f01_fixes_wrong_margins() -> None:
+    """Поля 25/25/25/25 приводятся к профилю ГОСТ (20/15/20/30)."""
+    doc = _doc_with_page(
+        PageGeometry(margins_mm={"top": 25, "right": 25, "bottom": 25, "left": 25})
+    )
+    profile = load_profile("gost-7.32-2017")
+
+    pre = [v for v in validate(doc, profile) if v.check_code == "F.01"]
+    assert pre, "тест должен начинаться с нарушениями F.01"
+
+    applied = fix(doc, profile, codes=["F.01"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "F.01"
+
+    margins = doc.page_sections[0].page.margins_mm
+    assert margins == profile.styles.page.margins_mm
+    post = [v for v in validate(doc, profile) if v.check_code == "F.01"]
+    assert post == []
+
+
+def test_f01_no_change_when_within_tolerance() -> None:
+    """Отклонение ≤ 0.5 мм не считается нарушением — фиксер молчит."""
+    base = dict(load_profile("gost-7.32-2017").styles.page.margins_mm)
+    base["top"] = base["top"] + 0.3  # в пределах допуска
+    doc = _doc_with_page(PageGeometry(margins_mm=base))
+    profile = load_profile("gost-7.32-2017")
+    assert fix(doc, profile, codes=["F.01"]) == []
+
+
+def test_f02_fixes_paper_size() -> None:
+    """A5 → A4."""
+    doc = _doc_with_page(PageGeometry(paper="A5"))
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["F.02"])
+    assert len(applied) == 1
+    assert doc.page_sections[0].page.paper == "A4"
+
+
+def test_f03_fixes_orientation() -> None:
+    """landscape → portrait для обычной секции."""
+    doc = _doc_with_page(PageGeometry(orientation="landscape"))
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["F.03"])
+    assert len(applied) == 1
+    assert doc.page_sections[0].page.orientation == "portrait"
+
+
+def test_f03_skips_appendix() -> None:
+    """Приложение может быть альбомным — фиксер F.03 его не трогает."""
+    doc = _doc_with_page(PageGeometry(orientation="landscape"), section_type="appendix")
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["F.03"])
+    assert applied == []
+    assert doc.page_sections[0].page.orientation == "landscape"
 
 
 # --- end-to-end: export → parse → fix → export → parse → validate -----------
@@ -427,6 +611,7 @@ def test_fix_with_codes_filter() -> None:
 def test_t07_fix_registered() -> None:
     """T.07 фиксер зарегистрирован в реестре."""
     from gostforge.fixer.engine import registered_fixers
+
     assert "T.07" in registered_fixers()
 
 
@@ -439,7 +624,9 @@ def test_t07_removes_extra_empty_paragraphs() -> None:
     doc = Document()
     doc.page_sections.append(
         PageSection(
-            id="main", name="m", type="main",
+            id="main",
+            name="m",
+            type="main",
             content=[
                 Paragraph(id="p1", content=[TextRun(text="Раздел 1")]),
                 Paragraph(id="p2", content=[]),
@@ -466,7 +653,9 @@ def test_t07_keeps_single_empty_paragraph() -> None:
     doc = Document()
     doc.page_sections.append(
         PageSection(
-            id="main", name="m", type="main",
+            id="main",
+            name="m",
+            type="main",
             content=[
                 Paragraph(id="p1", content=[TextRun(text="A")]),
                 Paragraph(id="p2", content=[]),
@@ -484,6 +673,7 @@ def test_t07_keeps_single_empty_paragraph() -> None:
 
 def test_t06_fix_registered() -> None:
     from gostforge.fixer.engine import registered_fixers
+
     assert "T.06" in registered_fixers()
 
 
@@ -543,6 +733,7 @@ def test_export_writes_auto_hyphenation_setting(tmp_path: Path) -> None:
 
 def test_t03_fix_registered() -> None:
     from gostforge.fixer.engine import registered_fixers
+
     assert "T.03" in registered_fixers()
 
 
@@ -565,7 +756,9 @@ def test_t03_skips_heading() -> None:
     from gostforge.model import Document, PageSection, Paragraph, TextRun
     from gostforge.profile import load_profile
 
-    p = Paragraph(id="p1", content=[TextRun(text="Заголовок")], style_name="Heading 1", line_spacing=1.0)
+    p = Paragraph(
+        id="p1", content=[TextRun(text="Заголовок")], style_name="Heading 1", line_spacing=1.0
+    )
     doc = Document()
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
     profile = load_profile("gost-7.32-2017")
@@ -577,7 +770,9 @@ def test_t04_corrects_first_line_indent() -> None:
     from gostforge.model import Document, PageSection, Paragraph, TextRun
     from gostforge.profile import load_profile
 
-    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=0.0)
+    p = Paragraph(
+        id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=0.0
+    )
     doc = Document()
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
     profile = load_profile("gost-7.32-2017")
@@ -605,8 +800,108 @@ def test_t04_noop_when_already_correct() -> None:
     from gostforge.model import Document, PageSection, Paragraph, TextRun
     from gostforge.profile import load_profile
 
-    p = Paragraph(id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=1.25)
+    p = Paragraph(
+        id="p1", content=[TextRun(text="x")], style_name="Normal", first_line_indent_cm=1.25
+    )
     doc = Document()
     doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[p]))
     profile = load_profile("gost-7.32-2017")
     assert run_fix(doc, profile, codes=["T.04"]) == []
+
+
+# --- U.01: NBSP между числом и единицей СИ ----------------------------------
+
+
+def test_u01_fixer_registered() -> None:
+    """Фиксер U.01 присутствует в реестре."""
+    assert "U.01" in registered_fixers()
+
+
+def test_u01_inserts_nbsp_between_number_and_si_unit() -> None:
+    """U.01-фиксер: обычный пробел между числом и единицей СИ → NBSP."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="масса 10 кг")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.01"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "U.01"
+    assert isinstance(applied[0], FixApplied)
+    runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert "10 кг" in runs[0].text
+    assert "10 кг" not in runs[0].text  # обычного пробела больше нет
+
+
+def test_u01_fixer_no_change_when_already_nbsp() -> None:
+    """Если уже стоит NBSP — фиксер ничего не делает."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="ток 5 А")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.01"])
+    assert applied == []
+
+
+# --- T.01 / T.02: шрифт и кегль основного текста -----------------------------
+
+
+def test_t01_t02_fixers_registered() -> None:
+    assert {"T.01", "T.02"}.issubset(registered_fixers())
+
+
+def test_t01_fixer_sets_expected_font_keeps_inherited() -> None:
+    """T.01: явный неверный шрифт → Times New Roman; наследуемый (None) не трогаем."""
+    paragraph = Paragraph(
+        id="p1",
+        style_name="Normal",
+        content=[
+            TextRun(text="плохой шрифт", font="Arial"),
+            TextRun(text=" наследуемый", font=None),
+        ],
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.01"])
+    assert len(applied) == 1 and applied[0].fixer_code == "T.01"
+    runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert runs[0].font == "Times New Roman"
+    assert runs[1].font is None  # наследуемый не тронут
+
+
+def test_t02_fixer_sets_expected_body_size() -> None:
+    """T.02: явный неверный кегль тела → 14 pt; наследуемый (None) не трогаем."""
+    paragraph = Paragraph(
+        id="p1",
+        style_name="Normal",
+        content=[
+            TextRun(text="мелкий", size_pt=10.0),
+            TextRun(text=" наследуемый", size_pt=None),
+        ],
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["T.02"])
+    assert len(applied) == 1 and applied[0].fixer_code == "T.02"
+    runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert runs[0].size_pt == 14.0
+    assert runs[1].size_pt is None
+
+
+def test_t02_fixer_respects_caption_size() -> None:
+    """Для подписи (стиль Caption) ожидаемый кегль — 12 pt, не 14."""
+    paragraph = Paragraph(
+        id="cap1",
+        style_name="Caption",
+        content=[TextRun(text="Рисунок 1 — Схема", size_pt=10.0)],
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    fix(doc, profile, codes=["T.02"])
+    runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert runs[0].size_pt == 12.0

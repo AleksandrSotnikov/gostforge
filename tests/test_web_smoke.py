@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002
-
 """Smoke-тесты для веб-интерфейса (Streamlit).
 
 Полноценный e2e Streamlit-приложения за пределами Фазы 1: фреймворк
@@ -32,6 +30,22 @@ def test_app_module_importable() -> None:
     import gostforge.web.app as app_module
 
     assert hasattr(app_module, "render"), "В app.py должна быть функция render()"
+
+
+def test_app_renders_dashboard_by_default() -> None:
+    """По умолчанию (режим «Главная») приложение рисует дашборд без ошибок."""
+    pytest.importorskip("streamlit")
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.app import render\nrender()\n")
+    at.run(timeout=90)
+    assert not at.exception, [str(e) for e in at.exception]
+    # Дашборд — режим по умолчанию: есть заголовок и переключатель режимов.
+    assert at.title
+    assert any("Режим" in r.label for r in at.radio)
 
 
 def test_ui_command_without_streamlit_exits_2(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -78,3 +92,10 @@ def test_ui_command_invokes_streamlit_run(monkeypatch: pytest.MonkeyPatch) -> No
     assert cmd[cmd.index("--server.address") + 1] == "0.0.0.0"
     assert "--server.port" in cmd
     assert cmd[cmd.index("--server.port") + 1] == "9000"
+    # Флаги темы оформления
+    assert "--theme.base" in cmd
+    assert cmd[cmd.index("--theme.base") + 1] == "light"
+    assert "--theme.primaryColor" in cmd
+    assert cmd[cmd.index("--theme.primaryColor") + 1] == "#2F5496"
+    assert "--theme.font" in cmd
+    assert cmd[cmd.index("--theme.font") + 1] == "serif"

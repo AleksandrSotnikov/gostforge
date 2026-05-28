@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002
-
 """Тесты CLI-команды `gostforge diff` — сравнение двух .docx по нарушениям."""
 
 from __future__ import annotations

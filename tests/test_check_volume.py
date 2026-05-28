@@ -82,9 +82,7 @@ def test_v_01_empty_document_triggers_min_warning() -> None:
 # ----- V.02 --------------------------------------------------------------------
 
 
-def _section_with_text(
-    section_id: str, heading_text: str, paragraph_text: str
-) -> LogicalSection:
+def _section_with_text(section_id: str, heading_text: str, paragraph_text: str) -> LogicalSection:
     """Создать LogicalSection с одним заголовком и одним параграфом-телом."""
     section = LogicalSection(
         id=section_id,
@@ -174,9 +172,7 @@ def test_v_04_enough_figures_and_tables_no_violation() -> None:
     doc = Document()
     page = _make_section_with_words(30, 250)  # ~30 страниц
     for i in range(3):
-        page.content.append(
-            Figure(id=f"fig{i}", type=BlockType.FIGURE, image_path=f"img{i}.png")
-        )
+        page.content.append(Figure(id=f"fig{i}", type=BlockType.FIGURE, image_path=f"img{i}.png"))
         page.content.append(Table(id=f"tbl{i}", type=BlockType.TABLE))
     doc.page_sections.append(page)
     profile = load_profile("gost-7.32-2017")
@@ -203,9 +199,7 @@ def test_v_04_no_tables_yields_violation() -> None:
     doc = Document()
     page = _make_section_with_words(30, 250)
     for i in range(3):
-        page.content.append(
-            Figure(id=f"fig{i}", type=BlockType.FIGURE, image_path=f"img{i}.png")
-        )
+        page.content.append(Figure(id=f"fig{i}", type=BlockType.FIGURE, image_path=f"img{i}.png"))
     doc.page_sections.append(page)
     profile = load_profile("gost-7.32-2017")
     violations = [v for v in validate(doc, profile) if v.check_code == "V.04"]

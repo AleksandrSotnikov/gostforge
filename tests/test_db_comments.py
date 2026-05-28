@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты таблицы comments (миграция v3 — совместная работа)."""
 
 from __future__ import annotations
@@ -46,9 +44,7 @@ def test_migration_v3_creates_comments_table(db_path: Path) -> None:
         assert current_schema_version(conn) >= 3
         tables = {
             r[0]
-            for r in conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table'"
-            ).fetchall()
+            for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
         }
         assert "comments" in tables
 
@@ -74,9 +70,7 @@ def test_add_comment_returns_record(db_path: Path, submission_id: int) -> None:
 
 def test_add_comment_trims_body(db_path: Path, submission_id: int) -> None:
     with get_connection() as conn:
-        c = add_comment(
-            conn, submission_id=submission_id, body="   ok   ", role="student"
-        )
+        c = add_comment(conn, submission_id=submission_id, body="   ok   ", role="student")
     assert c.body == "ok"
 
 
@@ -89,23 +83,17 @@ def test_add_comment_rejects_empty_body(db_path: Path, submission_id: int) -> No
 
 
 def test_add_comment_rejects_invalid_role(db_path: Path, submission_id: int) -> None:
-    with get_connection() as conn:
-        with pytest.raises(ValueError, match="role"):
-            add_comment(
-                conn, submission_id=submission_id, body="x", role="admin"
-            )
+    with get_connection() as conn, pytest.raises(ValueError, match="role"):
+        add_comment(conn, submission_id=submission_id, body="x", role="admin")
 
 
 def test_add_comment_rejects_unknown_submission(db_path: Path) -> None:
     """submission_id должен существовать — иначе понятная ValueError."""
-    with get_connection() as conn:
-        with pytest.raises(ValueError, match="не существует"):
-            add_comment(conn, submission_id=999, body="x")
+    with get_connection() as conn, pytest.raises(ValueError, match="не существует"):
+        add_comment(conn, submission_id=999, body="x")
 
 
-def test_add_comment_default_role_anonymous(
-    db_path: Path, submission_id: int
-) -> None:
+def test_add_comment_default_role_anonymous(db_path: Path, submission_id: int) -> None:
     with get_connection() as conn:
         c = add_comment(conn, submission_id=submission_id, body="x")
     assert c.role == "anonymous"
@@ -141,9 +129,7 @@ def test_list_comments_filter_resolved(db_path: Path, submission_id: int) -> Non
         assert c2.id is not None
         resolve_comment(conn, c2.id)
         all_items = list_comments(conn, submission_id=submission_id)
-        only_open = list_comments(
-            conn, submission_id=submission_id, include_resolved=False
-        )
+        only_open = list_comments(conn, submission_id=submission_id, include_resolved=False)
     assert len(all_items) == 2
     assert len(only_open) == 1
     assert only_open[0].body == "open"
@@ -201,9 +187,7 @@ def test_delete_comment(db_path: Path, submission_id: int) -> None:
         assert delete_comment(conn, c.id) is False  # повторный — False
 
 
-def test_delete_submission_cascades_to_comments(
-    db_path: Path, submission_id: int
-) -> None:
+def test_delete_submission_cascades_to_comments(db_path: Path, submission_id: int) -> None:
     """ON DELETE CASCADE: удаление submission уносит свои комментарии."""
     from gostforge.db.submissions import delete_submission
 

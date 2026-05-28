@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """S.* — проверки структуры работы (наличие обязательных разделов, их порядок)."""
 
 from __future__ import annotations
@@ -104,7 +102,7 @@ def check_required_sections(document: Document, profile: Profile) -> list[Violat
     normalized_found = {_normalize(h) for h in found_headings if h}
 
     for expected in required:
-        candidates = [expected] + _HEADING_ALIASES.get(expected, [])
+        candidates = [expected, *_HEADING_ALIASES.get(expected, [])]
         if not any(_normalize(c) in normalized_found for c in candidates):
             aliases = _HEADING_ALIASES.get(expected, [])
             aliases_hint = f" (или: {', '.join(aliases)})" if aliases else ""
@@ -390,8 +388,29 @@ def check_no_empty_sections(
 # Регулярки для «допустимых» названий разделов, помимо явных expected:
 # - «Глава 1», «Глава 2», ...
 # - «Приложение А», «Приложение 1», «Приложение Б», ...
+# Структурные элементы ГОСТ 7.32, которые допустимы как названия разделов,
+# но не обязаны присутствовать (поэтому не в required/expected): титульный
+# лист, нормативные ссылки, определения и пр. Сравнение по _normalize.
+_ALWAYS_ALLOWED_STRUCTURAL: frozenset[str] = frozenset(
+    {
+        "титульный лист",
+        "реферат",
+        "содержание",
+        "нормативные ссылки",
+        "термины и определения",
+        "определения",
+        "обозначения и сокращения",
+        "перечень сокращений и обозначений",
+        "перечень сокращений",
+    }
+)
+
 _GENERIC_CHAPTER = re.compile(r"^глава\s+\S+", re.IGNORECASE)
 _GENERIC_APPENDIX = re.compile(r"^приложение(\s+\S+)?", re.IGNORECASE)
+# Нумерованный раздел основной части по ГОСТ: «1 Название», «1.1 …».
+# Такие разделы — содержательные, их название не сверяется со списком
+# структурных элементов.
+_NUMBERED_HEADING = re.compile(r"^\d+(\.\d+)*\.?\s+\S")
 
 
 def _default_s03_expected(profile: Profile) -> list[str]:
@@ -474,8 +493,16 @@ def check_section_names_match_profile(document: Document, profile: Profile) -> l
         norm = _normalize(heading)
         if norm in allowed_normalized:
             continue
+        # Структурные элементы ГОСТ, всегда допустимые как названия разделов
+        # (титульный лист, нормативные ссылки, определения и т. п.) — даже
+        # если не входят в required/expected профиля.
+        if norm in _ALWAYS_ALLOWED_STRUCTURAL or norm.startswith("задание"):
+            continue
         # «Глава N»
         if _GENERIC_CHAPTER.match(heading):
+            continue
+        # Нумерованный раздел основной части: «1 …», «1.1 …».
+        if _NUMBERED_HEADING.match(heading):
             continue
         # «Приложение Х»
         if _GENERIC_APPENDIX.match(heading):

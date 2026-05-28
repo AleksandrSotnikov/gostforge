@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты REST endpoints для submissions (Фаза 3).
 
 Изолируем БД через GOSTFORGE_DB_PATH в tmp_path. Каждый тест получает
@@ -44,9 +42,7 @@ def docx_bytes(tmp_path: Path) -> bytes:
 # --- POST /check: автозапись submission ------------------------------------
 
 
-def test_post_check_returns_submission_id_by_default(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_post_check_returns_submission_id_by_default(client: TestClient, docx_bytes: bytes) -> None:
     """По умолчанию /check записывает submission и возвращает его id."""
     r = client.post(
         "/check",
@@ -58,9 +54,7 @@ def test_post_check_returns_submission_id_by_default(
     assert body["submission_id"] > 0
 
 
-def test_post_check_record_false_skips_db(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_post_check_record_false_skips_db(client: TestClient, docx_bytes: bytes) -> None:
     """record=False → submission_id null, в БД ничего не появляется."""
     r = client.post(
         "/check",
@@ -82,9 +76,7 @@ def test_get_submissions_empty_returns_empty_list(client: TestClient) -> None:
     assert r.json() == []
 
 
-def test_get_submissions_returns_recent_records(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_get_submissions_returns_recent_records(client: TestClient, docx_bytes: bytes) -> None:
     # Запишем два submission через POST /check.
     for name in ("a.docx", "b.docx"):
         client.post(
@@ -100,9 +92,7 @@ def test_get_submissions_returns_recent_records(
     assert items[1]["filename"] == "a.docx"
 
 
-def test_get_submissions_limit_caps_at_200(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_get_submissions_limit_caps_at_200(client: TestClient, docx_bytes: bytes) -> None:
     """Параметр limit ограничен сверху значением 200."""
     # Реально 200 записей делать не будем — проверим через очень
     # большое limit, что API не упадёт.
@@ -116,9 +106,7 @@ def test_get_submissions_limit_caps_at_200(
     assert len(r.json()) == 1
 
 
-def test_get_submissions_filter_by_filename(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_get_submissions_filter_by_filename(client: TestClient, docx_bytes: bytes) -> None:
     for name in ("alpha.docx", "beta.docx", "alpha.docx"):
         client.post(
             "/check",
@@ -147,9 +135,7 @@ def test_get_submissions_does_not_include_violations_list(
 # --- GET /submissions/{id} -------------------------------------------------
 
 
-def test_get_submission_by_id_returns_full_payload(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_get_submission_by_id_returns_full_payload(client: TestClient, docx_bytes: bytes) -> None:
     r = client.post(
         "/check",
         files={"file": ("x.docx", docx_bytes, "application/octet-stream")},
@@ -174,9 +160,7 @@ def test_get_submission_unknown_id_returns_404(client: TestClient) -> None:
 # --- DELETE /submissions/{id} ----------------------------------------------
 
 
-def test_delete_submission_removes_record(
-    client: TestClient, docx_bytes: bytes
-) -> None:
+def test_delete_submission_removes_record(client: TestClient, docx_bytes: bytes) -> None:
     r = client.post(
         "/check",
         files={"file": ("x.docx", docx_bytes, "application/octet-stream")},

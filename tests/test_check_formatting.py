@@ -116,9 +116,7 @@ def test_f06_registered() -> None:
 
 def test_f06_correct_start_value_no_violation() -> None:
     """start_at=3 совпадает с ожидаемым profile.params.start_value=3."""
-    doc = _doc(
-        _section_with_numbering(visible=True, start_mode="start_at", start_value=3)
-    )
+    doc = _doc(_section_with_numbering(visible=True, start_mode="start_at", start_value=3))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
     assert found == []
@@ -126,9 +124,7 @@ def test_f06_correct_start_value_no_violation() -> None:
 
 def test_f06_wrong_start_value_violation() -> None:
     """start_at=5 при ожидании 3 — нарушение."""
-    doc = _doc(
-        _section_with_numbering(visible=True, start_mode="start_at", start_value=5)
-    )
+    doc = _doc(_section_with_numbering(visible=True, start_mode="start_at", start_value=5))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
     assert len(found) == 1
@@ -139,9 +135,7 @@ def test_f06_wrong_start_value_violation() -> None:
 
 def test_f06_continue_mode_skipped() -> None:
     """start_mode=continue — мягкая семантика, проверка не применяется."""
-    doc = _doc(
-        _section_with_numbering(visible=True, start_mode="continue", start_value=None)
-    )
+    doc = _doc(_section_with_numbering(visible=True, start_mode="continue", start_value=None))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
     assert found == []
@@ -149,9 +143,7 @@ def test_f06_continue_mode_skipped() -> None:
 
 def test_f06_invisible_numbering_skipped() -> None:
     """На титульном листе нумерация выключена — F.06 не применяется."""
-    doc = _doc(
-        _section_with_numbering(visible=False, start_mode="start_at", start_value=99)
-    )
+    doc = _doc(_section_with_numbering(visible=False, start_mode="start_at", start_value=99))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
     assert found == []
@@ -159,9 +151,7 @@ def test_f06_invisible_numbering_skipped() -> None:
 
 def test_f06_param_unset_skips_check() -> None:
     """Без params.start_value в профиле проверка пропускается."""
-    doc = _doc(
-        _section_with_numbering(visible=True, start_mode="start_at", start_value=42)
-    )
+    doc = _doc(_section_with_numbering(visible=True, start_mode="start_at", start_value=42))
     profile = load_profile("gost-7.32-2017")
     profile.checks["F.06"].params.pop("start_value", None)
     found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
@@ -170,9 +160,7 @@ def test_f06_param_unset_skips_check() -> None:
 
 def test_f06_profile_param_overrides_default() -> None:
     """Можно переопределить ожидаемое значение через params."""
-    doc = _doc(
-        _section_with_numbering(visible=True, start_mode="start_at", start_value=2)
-    )
+    doc = _doc(_section_with_numbering(visible=True, start_mode="start_at", start_value=2))
     profile = load_profile("gost-7.32-2017")
     profile.checks["F.06"].params["start_value"] = 2
     found = [v for v in validate(doc, profile) if v.check_code == "F.06"]
@@ -253,6 +241,7 @@ def test_f02_registered() -> None:
 
 def test_f02_a4_no_violation() -> None:
     from gostforge.model import PageGeometry
+
     section = PageSection(
         id="main",
         name="m",
@@ -267,6 +256,7 @@ def test_f02_a4_no_violation() -> None:
 
 def test_f02_a3_violation() -> None:
     from gostforge.model import PageGeometry
+
     section = PageSection(
         id="main",
         name="m",
@@ -289,6 +279,7 @@ def test_f03_registered() -> None:
 
 def test_f03_portrait_no_violation() -> None:
     from gostforge.model import PageGeometry
+
     section = PageSection(
         id="main",
         name="m",
@@ -303,6 +294,7 @@ def test_f03_portrait_no_violation() -> None:
 
 def test_f03_landscape_violation() -> None:
     from gostforge.model import PageGeometry
+
     section = PageSection(
         id="main",
         name="m",
@@ -318,6 +310,7 @@ def test_f03_landscape_violation() -> None:
 def test_f03_appendix_landscape_no_violation() -> None:
     """Альбомная ориентация в приложениях допустима."""
     from gostforge.model import PageGeometry
+
     section = PageSection(
         id="app",
         name="Приложение А",

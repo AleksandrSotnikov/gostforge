@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Streamlit-приложение gostforge.
 
 Минимальный веб-интерфейс Фазы 1: drag-and-drop загрузка одного или
@@ -25,7 +23,7 @@ try:
     import streamlit as st
 except ImportError as exc:  # pragma: no cover - проверяется при отсутствии пакета
     raise ImportError(
-        "Установите gostforge[ui] для веб-интерфейса: pip install -e \".[ui]\""
+        'Установите gostforge[ui] для веб-интерфейса: pip install -e ".[ui]"'
     ) from exc
 
 from gostforge import __version__
@@ -36,6 +34,7 @@ from gostforge.builder.templates import (
 )
 from gostforge.cli import _write_markdown_report, _write_xlsx_report
 from gostforge.exporter import export_docx
+from gostforge.fixer import FixApplied
 from gostforge.fixer import fix as run_fix
 from gostforge.fixer.engine import registered_fixers
 from gostforge.parser import parse_docx
@@ -64,6 +63,25 @@ def _violations_to_rows(violations: list[Violation]) -> list[dict[str, str]]:
     ]
 
 
+def _filter_violations(
+    violations: list[Violation],
+    severities: set[str],
+    categories: set[str],
+) -> list[Violation]:
+    """Отфильтровать нарушения по серьёзности и категории.
+
+    Категория — буква до точки в коде проверки (``"F.01"`` → ``"F"``).
+    Пустое множество означает «не фильтровать по этому измерению»: при
+    обоих пустых множествах возвращается исходный список без изменений.
+    """
+    return [
+        v
+        for v in violations
+        if (not severities or v.severity in severities)
+        and (not categories or v.check_code.split(".", 1)[0] in categories)
+    ]
+
+
 def _process_file(uploaded_file: Any, profile: Profile) -> tuple[Document, list[Violation]]:
     """Сохранить загруженный файл во временный путь, распарсить и проверить.
 
@@ -77,19 +95,31 @@ def _process_file(uploaded_file: Any, profile: Profile) -> tuple[Document, list[
     return document, validate(document, profile)
 
 
-def _build_fixed_docx_bytes(document: Document, profile: Profile) -> tuple[bytes, list[str]]:
+def _build_fixed_docx_bytes(document: Document, profile: Profile) -> tuple[bytes, list[FixApplied]]:
     """Применить автофиксы к документу и вернуть байты исправленного .docx.
 
-    Возвращает (bytes, fix_codes). fix_codes — список применённых кодов,
-    в порядке вызова фиксеров. Если ничего не исправлено — fix_codes пуст.
+    Возвращает (bytes, fixes_applied). fixes_applied — список записей
+    о правках (код, location, описание) в порядке вызова фиксеров.
+    Если ничего не исправлено — список пуст.
     """
     fixes_applied = run_fix(document, profile)
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         out_path = Path(tmp.name)
     export_docx(document, profile, out_path)
     data = out_path.read_bytes()
-    codes = [fa.fixer_code for fa in fixes_applied]
-    return data, codes
+    return data, fixes_applied
+
+
+def _group_fixes(fixes: list[FixApplied]) -> list[tuple[str, int, list[str]]]:
+    """Сгруппировать применённые правки по коду фиксера.
+
+    Возвращает список (код, количество, описания) с сортировкой по коду.
+    Порядок описаний внутри группы сохраняется (как применялись).
+    """
+    grouped: dict[str, list[str]] = {}
+    for fa in fixes:
+        grouped.setdefault(fa.fixer_code, []).append(fa.description)
+    return [(code, len(descs), descs) for code, descs in sorted(grouped.items())]
 
 
 def _build_pdf_bytes(uploaded_file: Any) -> bytes:
@@ -133,9 +163,7 @@ def _render_stats_table(name: str, document: Document) -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
-def _build_report_bytes(
-    results: dict[str, list[Violation]], profile_id: str, fmt: str
-) -> bytes:
+def _build_report_bytes(results: dict[str, list[Violation]], profile_id: str, fmt: str) -> bytes:
     """Сгенерировать отчёт во временный файл и вернуть его байты."""
     suffix = ".md" if fmt == "markdown" else ".xlsx"
     with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
@@ -170,9 +198,7 @@ def _render_sidebar(profiles: list[str]) -> str:
         f"**Будет запущено:** {len(runnable)} из {len(enabled_codes)} включённых"
     )
     if skipped:
-        st.sidebar.warning(
-            "Не реализованы: " + ", ".join(sorted(skipped))
-        )
+        st.sidebar.warning("Не реализованы: " + ", ".join(sorted(skipped)))
 
     with st.sidebar.expander("Показать параметры профиля"):
         st.json(json.loads(prof.model_dump_json()))
@@ -194,11 +220,36 @@ def _render_file_result(name: str, violations: list[Violation]) -> None:
         st.success("Нарушений не найдено")
         return
 
-    rows = _violations_to_rows(violations)
+    # Фильтры по серьёзности и категории. Метрики выше остаются на полном
+    # списке — фильтр влияет только на таблицу и детали ниже.
+    severity_internal = {"Ошибка": "error", "Предупреждение": "warning", "Инфо": "info"}
+    col_sev, col_cat = st.columns(2)
+    with col_sev:
+        sev_labels = st.multiselect(
+            "Серьёзность",
+            ["Ошибка", "Предупреждение", "Инфо"],
+            key=f"sev_{name}",
+        )
+    with col_cat:
+        cat_options = sorted({v.check_code.split(".", 1)[0] for v in violations})
+        cat_selected = st.multiselect(
+            "Категория",
+            options=cat_options,
+            key=f"cat_{name}",
+        )
+    selected_severities = {severity_internal[label] for label in sev_labels}
+    selected_categories = set(cat_selected)
+    filtered = _filter_violations(violations, selected_severities, selected_categories)
+
+    if not filtered:
+        st.caption("Под фильтр ничего не подходит.")
+        return
+
+    rows = _violations_to_rows(filtered)
     # pandas обычно идёт в зависимостях streamlit; используем её, если доступна,
     # иначе передаём список словарей — st.dataframe умеет и так.
     try:
-        import pandas as pd  # type: ignore[import-untyped]
+        import pandas as pd
 
         df: Any = pd.DataFrame(rows)
     except ImportError:  # pragma: no cover - pandas есть в зависимостях streamlit
@@ -206,7 +257,7 @@ def _render_file_result(name: str, violations: list[Violation]) -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     with st.expander("Детали (location)"):
-        for v in violations:
+        for v in filtered:
             loc = v.location or "(не указано)"
             st.markdown(f"- **{v.check_code}** — `{loc}`")
 
@@ -314,23 +365,28 @@ def _render_main(profile_id: str) -> None:
 
     with tab_fix:
         st.markdown(
-            "Эти правки **безопасны** и не меняют смысл текста: "
-            f"`{', '.join(sorted(registered_fixers()))}`."
+            f"Доступно **{len(registered_fixers())}** безопасных автофиксеров — "
+            "они исправляют форматирование, не меняя смысл текста: поля и "
+            "ориентация страницы, шрифт/кегль/цвет текста и заголовков, "
+            "пробелы и кавычки, точки в заголовках, единицы измерения."
         )
-        st.caption(
-            "Сводка по фиксерам: двойные пробелы, хвостовые пробелы, "
-            "прямые кавычки → «ёлочки», дефис → длинное тире, "
-            "точки в заголовках."
-        )
+        st.caption(f"Полный список: `{', '.join(sorted(registered_fixers()))}`.")
         for name, document in documents.items():
             st.subheader(name)
             try:
-                fixed_bytes, codes = _build_fixed_docx_bytes(document, prof)
+                fixed_bytes, applied = _build_fixed_docx_bytes(document, prof)
             except Exception as e:
                 st.error(f"Не удалось сгенерировать исправленный .docx: {e}")
                 continue
-            if codes:
-                st.success(f"Применено правок: {len(codes)} ({', '.join(codes)})")
+            if applied:
+                groups = _group_fixes(applied)
+                summary = ", ".join(f"{code} ×{count}" for code, count, _ in groups)
+                st.success(f"Применено правок: {len(applied)} ({summary})")
+                with st.expander("Что именно исправлено"):
+                    for code, count, descs in groups:
+                        st.markdown(f"**{code}** — {count} шт.")
+                        for desc in descs:
+                            st.markdown(f"- {desc}")
             else:
                 st.info("Нечего исправлять — документ уже без авто-исправимых нарушений.")
             stem = Path(name).stem or "document"
@@ -347,9 +403,7 @@ def _render_main(profile_id: str) -> None:
         _render_pdf_tab(uploads)
 
     total = sum(len(v) for v in results.values())
-    st.markdown(
-        f"**Итого:** проверено файлов {len(results)}, всего нарушений {total}."
-    )
+    st.markdown(f"**Итого:** проверено файлов {len(results)}, всего нарушений {total}.")
 
     col_md, col_xlsx = st.columns(2)
     with col_md:
@@ -441,9 +495,7 @@ def _render_builder_mode() -> None:
         "Шаблон",
         options=list(_TEMPLATE_LABELS.keys()),
         format_func=lambda key: _TEMPLATE_LABELS[key],
-        help=(
-            "Скелет работы: какие разделы будут предзаполнены плейсхолдерами."
-        ),
+        help=("Скелет работы: какие разделы будут предзаполнены плейсхолдерами."),
     )
 
     title = st.sidebar.text_input(
@@ -482,8 +534,7 @@ def _render_builder_mode() -> None:
     )
 
     st.markdown(
-        f"**Шаблон:** {_TEMPLATE_LABELS[template_id]}\n\n"
-        f"**Название:** {title or '_(не указано)_'}"
+        f"**Шаблон:** {_TEMPLATE_LABELS[template_id]}\n\n**Название:** {title or '_(не указано)_'}"
     )
 
     if not title.strip():
@@ -508,9 +559,7 @@ def _render_builder_mode() -> None:
             "Скачать болванку",
             data=data,
             file_name=f"{template_id}.docx",
-            mime=(
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            ),
+            mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
             key=f"download_builder_{template_id}",
         )
 
@@ -518,8 +567,10 @@ def _render_builder_mode() -> None:
 def render() -> None:
     """Главная функция рендера — точка входа streamlit-приложения."""
     st.set_page_config(
-        page_title="gostforge — нормоконтроль .docx",
+        page_title="gostforge — нормоконтроль и конструктор по ГОСТу",
+        page_icon="📄",
         layout="wide",
+        initial_sidebar_state="expanded",
     )
     profiles = list_profiles()
     if not profiles:
@@ -528,20 +579,42 @@ def render() -> None:
 
     mode = st.radio(
         "Режим",
-        options=["Нормоконтроль", "Конструктор", "История", "Документация"],
+        options=[
+            "Главная",
+            "Нормоконтроль",
+            "Конструктор",
+            "Редактор профиля",
+            "История",
+            "Документация",
+        ],
         horizontal=True,
         help=(
+            "Главная — обзор возможностей и быстрый старт. "
             "Нормоконтроль — проверка существующего .docx по ГОСТ. "
-            "Конструктор — генерация .docx-скелета по шаблону. "
+            "Конструктор — сборка работы по ГОСТу с нуля или из .docx. "
+            "Редактор профиля — настройка всех параметров оформления и "
+            "сохранение своего профиля. "
             "История — все прошлые проверки + обсуждение руководитель↔студент. "
             "Документация — встроенный просмотр руководства."
         ),
     )
 
+    if mode == "Главная":
+        from gostforge.web.dashboard import render_dashboard
+
+        render_dashboard()
+        return
+
     if mode == "Документация":
         from gostforge.web.docs_viewer import render_docs_viewer
 
         render_docs_viewer()
+        return
+
+    if mode == "Редактор профиля":
+        from gostforge.web.profile_editor import render_profile_editor
+
+        render_profile_editor()
         return
 
     if mode == "История":

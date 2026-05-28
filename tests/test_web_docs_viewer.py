@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты вкладки документации в Streamlit-UI.
 
 Стримлит-виджеты не дёргаем — проверяем чистые функции
@@ -118,8 +116,15 @@ def test_rewrite_handles_text_without_links() -> None:
 def test_real_docs_dir_has_expected_files() -> None:
     """В docs/ репозитория есть основные файлы из _MENU_ORDER."""
     p = _docs_dir()
-    expected = {"architecture", "builder", "checks-catalog", "profiles", "api",
-                "database", "roadmap"}
+    expected = {
+        "architecture",
+        "builder",
+        "checks-catalog",
+        "profiles",
+        "api",
+        "database",
+        "roadmap",
+    }
     actual = {f.stem for f in p.glob("*.md")}
     assert expected <= actual
 

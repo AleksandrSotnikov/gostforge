@@ -16,6 +16,7 @@
 - page_sections.py — K.* (колонтитулы)
 - volume.py — V.* (объём)
 - style.py — X.* (лингвистика)
+- units.py — U.* (единицы измерения, ГОСТ Р 8.000-2015)
 
 Импорт здесь нужен, чтобы декоратор @register сработал при загрузке валидатора.
 """
@@ -35,5 +36,6 @@ from . import (  # noqa: F401
     style,
     tables,
     text,
+    units,
     volume,
 )

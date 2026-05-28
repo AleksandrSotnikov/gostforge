@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Конвертация .docx → .pdf через LibreOffice headless.
 
 Требует установленного LibreOffice (``libreoffice`` / ``soffice``).
@@ -97,9 +95,68 @@ def convert_to_pdf(
         subprocess.run(cmd, check=True, timeout=timeout, capture_output=True)
         produced = Path(tmpdir) / (input_path.stem + ".pdf")
         if not produced.is_file():
-            raise RuntimeError(
-                f"LibreOffice не создал ожидаемый PDF: {produced}"
-            )
+            raise RuntimeError(f"LibreOffice не создал ожидаемый PDF: {produced}")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(produced), str(output_path))
+    return output_path
+
+
+def convert_document(
+    input_path: str | Path,
+    output_path: str | Path,
+    *,
+    target_format: str,
+    timeout: float = 120.0,
+) -> Path:
+    """Сконвертировать документ в произвольный формат через LibreOffice.
+
+    Обобщение :func:`convert_to_pdf` на любой целевой формат,
+    поддерживаемый LibreOffice: ``docx``, ``doc``, ``odt``, ``rtf``,
+    ``txt``, ``html``, ``pdf`` и др.
+
+    Главный сценарий — конвертация старого формата ``.doc`` в ``.docx``,
+    который понимает python-docx-парсер gostforge::
+
+        convert_document("work.doc", "work.docx", target_format="docx")
+
+    Параметры
+    ---------
+    input_path:
+        Исходный файл (любой формат, который читает LibreOffice).
+    output_path:
+        Куда сохранить результат (расширение должно соответствовать
+        target_format).
+    target_format:
+        Целевой формат LibreOffice (например, "docx", "pdf", "odt").
+    timeout:
+        Таймаут процесса в секундах.
+
+    Возвращает путь к созданному файлу.
+
+    Исключения — те же, что у :func:`convert_to_pdf`.
+    """
+    input_path = Path(input_path).resolve()
+    output_path = Path(output_path).resolve()
+    if not input_path.is_file():
+        raise FileNotFoundError(f"Файл не найден: {input_path}")
+    soffice = _find_soffice()
+    # Расширение результата = последний токен формата (docx:..., html:...).
+    ext = target_format.split(":", 1)[0]
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        cmd = [
+            soffice,
+            "--headless",
+            "--convert-to",
+            target_format,
+            "--outdir",
+            tmpdir,
+            str(input_path),
+        ]
+        subprocess.run(cmd, check=True, timeout=timeout, capture_output=True)
+        produced = Path(tmpdir) / (input_path.stem + "." + ext)
+        if not produced.is_file():
+            raise RuntimeError(f"LibreOffice не создал ожидаемый файл: {produced}")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(produced), str(output_path))
     return output_path

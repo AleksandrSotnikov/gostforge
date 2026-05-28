@@ -83,4 +83,8 @@ reports/
 *.gostforge-project
 
 # Внутренние артефакты Claude Code (worktrees агентов и пр.)
-.claude/
+.claude/*
+# но общий командный конфиг и хуки версионируем
+!.claude/settings.json
+!.claude/hooks/
+.claude/settings.local.json

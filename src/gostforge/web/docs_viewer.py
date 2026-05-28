@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Streamlit-страница для просмотра документации проекта.
 
 Третий режим веб-интерфейса (помимо «Нормоконтроль» и «Конструктор»):
@@ -47,9 +45,7 @@ _MENU_ORDER: list[tuple[str, str]] = [
     ("plugins", "Плагины проверок"),
     ("page-sections", "Колонтитулы и секции"),
     ("roadmap", "Roadmap"),
-    ("phase-2.5-spec", "ТЗ Фазы 2.5"),
-    ("phase-3-api-spec", "ТЗ Фазы 3 (API)"),
-    ("claude-code-workflow", "Работа с Claude Code"),
+    ("changelog", "История изменений"),
 ]
 
 
@@ -104,6 +100,7 @@ def _rewrite_relative_links(markdown_text: str) -> str:
     по ``[text](other.md)`` — мы конвертируем такие ссылки в подсказку
     «выберите раздел в меню слева».
     """
+
     # Ссылки вида [text](file.md) или [text](file.md#anchor) — заменяем на
     # markdown-курсив с подсказкой.
     def _replace(match: re.Match[str]) -> str:

@@ -1,0 +1,103 @@
+# Проверяет все .docx-файлы, изменённые в PR, через gostforge check
+# и публикует результат как PR-комментарий. Полезно для рецензирования
+# курсовых работ в pull-request workflow (студент-руководитель).
+#
+# Активируется только на pull_request — не запускается на push в main.
+
+name: Check .docx in PR
+
+on:
+  pull_request:
+    paths:
+      - "**/*.docx"
+      - "tests/fixtures/**"
+
+# Cancel-in-progress: новый push в тот же PR заменяет старый прогон.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  check-docx:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # для diff с base-веткой
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install gostforge
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Find changed .docx files
+        id: changed
+        run: |
+          # Список .docx, изменённых в этом PR.
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          CHANGED=$(git diff --name-only --diff-filter=AM "$BASE_SHA" HEAD | grep -E "\.docx$" || true)
+          echo "files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$CHANGED" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          if [ -z "$CHANGED" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run gostforge check on changed files
+        if: steps.changed.outputs.skip == 'false'
+        id: check
+        run: |
+          mkdir -p .gostforge-reports
+          REPORT_MD=".gostforge-reports/pr-check.md"
+          echo "# Результаты gostforge check" > "$REPORT_MD"
+          echo "" >> "$REPORT_MD"
+          EXIT_CODE=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            [ ! -f "$f" ] && continue
+            echo "## $f" >> "$REPORT_MD"
+            echo "" >> "$REPORT_MD"
+            echo '```' >> "$REPORT_MD"
+            if gostforge check "$f" --quiet 2>&1 >> "$REPORT_MD"; then
+              echo "$f: PASS"
+            else
+              EXIT_CODE=1
+              echo "$f: FAIL"
+            fi
+            echo '```' >> "$REPORT_MD"
+            echo "" >> "$REPORT_MD"
+          done <<< "${{ steps.changed.outputs.files }}"
+          cat "$REPORT_MD"
+          exit $EXIT_CODE
+        continue-on-error: true
+
+      - name: Post results as PR comment
+        if: steps.changed.outputs.skip == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = '.gostforge-reports/pr-check.md';
+            if (!fs.existsSync(path)) return;
+            const body = fs.readFileSync(path, 'utf8');
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            await github.rest.issues.createComment({
+              owner, repo, issue_number, body,
+            });
+
+      - name: Fail if check found errors
+        if: steps.check.outcome == 'failure'
+        run: exit 1

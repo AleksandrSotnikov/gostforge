@@ -1,7 +1,5 @@
 """Тесты A.01 — расшифровка аббревиатур при первом употреблении."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from gostforge.model import (
     Document,
     LogicalSection,
@@ -34,11 +32,7 @@ def test_a01_expanded_before_abbr_no_violation() -> None:
     """«Программное обеспечение (ПО)» — расшифровка перед, нет нарушения."""
     para = Paragraph(
         id="p-1",
-        content=[
-            TextRun(
-                text="Программное обеспечение (ПО) разрабатывается по ГОСТ."
-            )
-        ],
+        content=[TextRun(text="Программное обеспечение (ПО) разрабатывается по ГОСТ.")],
     )
     doc = _doc_with_content([para])
     profile = load_profile("gost-7.32-2017")
@@ -50,9 +44,7 @@ def test_a01_expanded_after_abbr_no_violation() -> None:
     """«ПО (программное обеспечение)» — расшифровка после, нет нарушения."""
     para = Paragraph(
         id="p-1",
-        content=[
-            TextRun(text="ПО (программное обеспечение) включает несколько модулей.")
-        ],
+        content=[TextRun(text="ПО (программное обеспечение) включает несколько модулей.")],
     )
     doc = _doc_with_content([para])
     profile = load_profile("gost-7.32-2017")
@@ -162,13 +154,7 @@ def test_a02_above_threshold_without_section_violation() -> None:
     """>5 аббревиатур без раздела «Список сокращений» — нарушение."""
     para = Paragraph(
         id="p-1",
-        content=[
-            TextRun(
-                text=(
-                    "ВКР, НИР, БД, ПО, КИС, СУБД, ОЗУ — семь аббревиатур."
-                )
-            )
-        ],
+        content=[TextRun(text=("ВКР, НИР, БД, ПО, КИС, СУБД, ОЗУ — семь аббревиатур."))],
     )
     doc = _doc_with_content([para])
     profile = load_profile("gost-7.32-2017")
@@ -182,9 +168,7 @@ def test_a02_above_threshold_with_section_no_violation() -> None:
     """>5 аббревиатур, но «Список сокращений» есть — нет нарушения."""
     para = Paragraph(
         id="p-1",
-        content=[
-            TextRun(text="ВКР, НИР, БД, ПО, КИС, СУБД, ОЗУ — семь аббр.")
-        ],
+        content=[TextRun(text="ВКР, НИР, БД, ПО, КИС, СУБД, ОЗУ — семь аббр.")],
     )
     abbr_section = LogicalSection(
         id="sec-abbr",
@@ -234,11 +218,7 @@ def test_a03_dotted_form_violation() -> None:
     """«ВКР» и «В.К.Р.» — два написания одной аббревиатуры."""
     para = Paragraph(
         id="p-1",
-        content=[
-            TextRun(
-                text="ВКР должна оформляться по ГОСТ. В.К.Р. имеет структуру."
-            )
-        ],
+        content=[TextRun(text="ВКР должна оформляться по ГОСТ. В.К.Р. имеет структуру.")],
     )
     doc = _doc_with_content([para])
     profile = load_profile("gost-7.32-2017")

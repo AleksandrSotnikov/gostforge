@@ -86,9 +86,7 @@ def test_load_plugin_registers_check(tmp_path: Path) -> None:
         sys.modules.pop("gostforge_plugin_my_dept", None)
 
 
-def test_load_plugin_handles_import_error(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_load_plugin_handles_import_error(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     """Плагин с синтаксической ошибкой не валит загрузку других плагинов."""
     from gostforge.validator.engine import _registry
 

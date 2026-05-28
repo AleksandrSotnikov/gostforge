@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002
-
 """Тесты CLI-команды `gostforge pdf`.
 
 LibreOffice реально не вызывается — все внешние процессы замоканы.
@@ -99,9 +97,7 @@ def test_pdf_command_libreoffice_error_exits_5(tmp_path: Path) -> None:
     out = tmp_path / "out.pdf"
 
     def fake_run(cmd: list[str], **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
-        raise subprocess.CalledProcessError(
-            returncode=77, cmd=cmd, stderr=b"libreoffice boom"
-        )
+        raise subprocess.CalledProcessError(returncode=77, cmd=cmd, stderr=b"libreoffice boom")
 
     runner = CliRunner()
     with (

@@ -1,11 +1,9 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """FastAPI-приложение для gostforge.
 
-Структура endpoints — см. docs/phase-3-api-spec.md. Главная фабрика
-`create_app()` собирает приложение и регистрирует все маршруты;
-объект `app` доступен на уровне модуля для прямого запуска
-``uvicorn gostforge.api.app:app``.
+Реестр endpoints и формат ответов — см. ``docs/api.md``. Главная
+фабрика `create_app()` собирает приложение и регистрирует все
+маршруты; объект `app` доступен на уровне модуля для прямого
+запуска ``uvicorn gostforge.api.app:app``.
 """
 
 from __future__ import annotations
@@ -23,15 +21,14 @@ try:
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.types import ASGIApp
 except ImportError as exc:  # pragma: no cover — extras [api] обязателен
-    raise ImportError(
-        'Установите gostforge[api] для REST API: pip install -e ".[api]"'
-    ) from exc
+    raise ImportError('Установите gostforge[api] для REST API: pip install -e ".[api]"') from exc
+
+import contextlib
 
 from gostforge import __version__
 from gostforge.profile import Profile, list_profiles, load_profile
 from gostforge.validator import validate
 from gostforge.validator.engine import registered_checks
-
 
 # --- Конфигурация из env ----------------------------------------------------
 
@@ -189,10 +186,8 @@ def _parse_uploaded_docx(data: bytes) -> Any:
     try:
         return parse_docx(tmp_path)
     finally:
-        try:
+        with contextlib.suppress(OSError):
             tmp_path.unlink()
-        except OSError:
-            pass
 
 
 # --- Фабрика приложения -----------------------------------------------------
@@ -209,7 +204,7 @@ def create_app() -> FastAPI:
         version=__version__,
         description=(
             "REST API нормоконтроля и автоисправления .docx по ГОСТу. "
-            "Полная спецификация: docs/phase-3-api-spec.md."
+            "Реестр endpoints — docs/api.md."
         ),
     )
 
@@ -287,9 +282,7 @@ def create_app() -> FastAPI:
         try:
             yaml_content = data.decode("utf-8")
         except UnicodeDecodeError as exc:
-            raise HTTPException(
-                status_code=400, detail=f"YAML должен быть UTF-8: {exc}"
-            ) from exc
+            raise HTTPException(status_code=400, detail=f"YAML должен быть UTF-8: {exc}") from exc
 
         from gostforge.db import get_connection
         from gostforge.db.custom_profiles import install_profile
@@ -344,10 +337,7 @@ def create_app() -> FastAPI:
 
         Категория — первая буква кода (F.01 → F).
         """
-        return [
-            {"code": code, "category": code.split(".")[0]}
-            for code in registered_checks()
-        ]
+        return [{"code": code, "category": code.split(".")[0]} for code in registered_checks()]
 
     @app.post("/check")
     async def post_check(
@@ -436,10 +426,8 @@ def create_app() -> FastAPI:
             output_bytes = dst_path.read_bytes()
         finally:
             for p in (src_path, dst_path):
-                try:
+                with contextlib.suppress(OSError):
                     p.unlink()
-                except OSError:
-                    pass
         return Response(
             content=output_bytes,
             media_type=_DOCX_MIME,
@@ -486,10 +474,8 @@ def create_app() -> FastAPI:
             output_bytes = dst_path.read_bytes()
         finally:
             for p in (src_path, dst_path):
-                try:
+                with contextlib.suppress(OSError):
                     p.unlink()
-                except OSError:
-                    pass
         return Response(
             content=output_bytes,
             media_type=_DOCX_MIME,
@@ -517,9 +503,7 @@ def create_app() -> FastAPI:
         return JSONResponse(stats.__dict__)
 
     @app.get("/submissions")
-    def get_submissions(
-        limit: int = 20, filename: str | None = None
-    ) -> list[dict[str, Any]]:
+    def get_submissions(limit: int = 20, filename: str | None = None) -> list[dict[str, Any]]:
         """История проверок из локальной БД.
 
         Лимит до 200 (защита от тяжёлых выгрузок). По filename — точное
@@ -599,9 +583,7 @@ def create_app() -> FastAPI:
         with get_connection() as conn:
             deleted = delete_submission(conn, submission_id)
         if not deleted:
-            raise HTTPException(
-                status_code=404, detail=f"Submission #{submission_id} не найден"
-            )
+            raise HTTPException(status_code=404, detail=f"Submission #{submission_id} не найден")
         return {"deleted": True}
 
     # --- Comments (Фаза 3, миграция v3) ------------------------------------
@@ -626,9 +608,7 @@ def create_app() -> FastAPI:
         return [_comment_to_dict(c) for c in items]
 
     @app.post("/submissions/{submission_id}/comments")
-    def add_comment_endpoint(
-        submission_id: int, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    def add_comment_endpoint(submission_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         """Добавить комментарий к submission.
 
         Body JSON: ``{"body": "...", "author": "...", "role": "supervisor"}``.
@@ -677,9 +657,7 @@ def create_app() -> FastAPI:
         with get_connection() as conn:
             ok = resolve_comment(conn, comment_id, resolved=resolved)
             if not ok:
-                raise HTTPException(
-                    status_code=404, detail=f"Комментарий #{comment_id} не найден"
-                )
+                raise HTTPException(status_code=404, detail=f"Комментарий #{comment_id} не найден")
             updated = get_comment(conn, comment_id)
         assert updated is not None  # сразу после resolve_comment — должен быть
         return _comment_to_dict(updated)
@@ -692,9 +670,7 @@ def create_app() -> FastAPI:
         with get_connection() as conn:
             deleted = delete_comment(conn, comment_id)
         if not deleted:
-            raise HTTPException(
-                status_code=404, detail=f"Комментарий #{comment_id} не найден"
-            )
+            raise HTTPException(status_code=404, detail=f"Комментарий #{comment_id} не найден")
         return {"deleted": True}
 
     return app

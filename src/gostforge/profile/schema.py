@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 class PageGeometryProfile(BaseModel):
     size: str = "A4"
     margins_mm: dict[str, float] = Field(
-        default_factory=lambda: {"top": 20, "right": 15, "bottom": 20, "left": 30}
+        default_factory=lambda: {"top": 20.0, "right": 15.0, "bottom": 20.0, "left": 30.0}
     )
 
 
@@ -29,13 +29,235 @@ class BodyTextProfile(BaseModel):
     first_line_indent_cm: float = 1.25
     alignment: Literal["left", "right", "center", "justify"] = "justify"
     hyphenation: bool = False
+    # Интервалы между абзацами обычного текста (pt). По ГОСТ Р
+    # 2.105-2019 и ГОСТ 7.32-2017 разделение абзацев достигается
+    # абзацным отступом первой строки + полуторным межстрочным —
+    # дополнительные интервалы НЕ требуются. Поэтому default = 0.
+    # Кафедральные методички могут требовать 6 или 8 pt — тогда
+    # переопределяется в YAML или через UI «Настройки стилей».
+    space_before_pt: float = 0
+    space_after_pt: float = 0
+
+
+class HeadingStyleProfile(BaseModel):
+    """Параметры одного уровня заголовка (применяются экспортёром
+    напрямую к стилям Heading1..N документа)."""
+
+    font: str = "Times New Roman"
+    size_pt: float = 14
+    bold: bool = True
+    italic: bool = False
+    uppercase: bool = False
+    # auto = «использовать default Word» (обычно чёрный). По ГОСТу — auto.
+    # Можно указать hex без # ("000000", "FF0000") для явного цвета.
+    color: str = "auto"
+    alignment: Literal["left", "right", "center", "justify"] = "left"
+    first_line_indent_cm: float = 0.0
+    line_spacing: float = 1.5
+    spacing_before_pt: float = 12
+    spacing_after_pt: float = 6
+    page_break_before: bool = False
+    keep_with_next: bool = True
+
+
+class CaptionStyleProfile(BaseModel):
+    """Параметры стиля подписи (для Caption и подписей рисунков/таблиц)."""
+
+    font: str = "Times New Roman"
+    size_pt: float = 12
+    italic: bool = False
+    bold: bool = False
+    alignment: Literal["left", "right", "center", "justify"] = "center"
+    spacing_before_pt: float = 6
+    spacing_after_pt: float = 6
+    # Шаблон форматирования номера и текста подписи.
+    # Доступные плейсхолдеры: {num}, {title}.
+    format: str = "{num} — {title}"
+    position: Literal["above", "below"] = "below"
+    # keep_together: все строки подписи на одной странице (Word
+    # не разорвёт длинную подпись пополам).
+    keep_together: bool = True
+    # keep_with_next: подпись не отрывается от следующего за ней
+    # параграфа. Для подписи таблицы (position=above) это значит
+    # «подпись и таблица всегда на одной странице»; для подписи
+    # рисунка (position=below) обычно не нужен (рисунок-параграф
+    # сам имеет keep_with_next перед подписью).
+    keep_with_next: bool = False
+
+
+class TableStyleProfile(BaseModel):
+    """Параметры таблиц: рамки, выравнивание, шрифт ячеек."""
+
+    # Стиль рамок: 'single' — обычные линии (по ГОСТу), 'none' — без рамок.
+    border_style: Literal["single", "double", "dashed", "dotted", "none"] = "single"
+    # Толщина рамки в 1/8 pt — стандартное значение Word. 4 = 0.5pt.
+    border_size: int = 4
+    # Цвет рамки: 'auto' (чёрный) или hex без #.
+    border_color: str = "auto"
+    # Шрифт ячеек таблицы. None = использовать body.font.
+    cell_font: str | None = None
+    # Кегль ячеек. None = использовать body.size_pt.
+    cell_size_pt: float | None = None
+    # Жирная шапка.
+    header_bold: bool = True
+    # Форматирование текста ячеек. Без явного контроля ячейки наследуют
+    # стиль Normal с justify, отступом красной строки 1.25 см и
+    # межстрочным 1.5 — в узких колонках это ломает читаемость.
+    # Стандартное оформление таблиц: текст слева/центр, без красной
+    # строки, single-spacing, без интервалов между параграфами.
+    cell_alignment: Literal["left", "right", "center", "justify"] = "left"
+    cell_first_line_indent_cm: float = 0.0
+    cell_line_spacing: float = 1.0
+    cell_space_before_pt: float = 0.0
+    cell_space_after_pt: float = 0.0
+    # Выравнивание текста в шапке — обычно центрирование.
+    header_alignment: Literal["left", "right", "center", "justify"] = "center"
+    # Схема нумерации (зеркально к FigureStyleProfile.numbering):
+    # * "continuous" — Таблица 1, Таблица 2, ... сквозь весь документ;
+    # * "by_chapter" — Таблица 1.1, 1.2, ..., 2.1, ... .
+    # Приложения — буквенно (Таблица А.1, ...) независимо от режима.
+    numbering: Literal["continuous", "by_chapter"] = "continuous"
+    # Шапка таблицы повторяется на каждой следующей странице, если
+    # таблица перенесена (Word/<w:tblHeader/>). По ГОСТ это обязательно.
+    repeat_header: bool = True
+    # Опционально: вставлять «Продолжение таблицы N» как первую строку
+    # таблицы, объединённую по всем колонкам и помеченную tblHeader. Word
+    # покажет её и на первой странице (рядом с обычной подписью НАД
+    # таблицей), и на каждой continuation-странице — это компромисс,
+    # т.к. чисто-OOXML способа показывать строку «только на 2+ странице»
+    # не существует. Включается на профиль, дефолт — выкл.
+    continuation_caption: bool = False
+    # Выравнивание подписи таблицы.
+    caption: CaptionStyleProfile = Field(
+        default_factory=lambda: CaptionStyleProfile(
+            alignment="left",
+            position="above",
+            format="Таблица {num} — {title}",
+            keep_with_next=True,  # подпись таблицы вверху не отрывается
+        )
+    )
+
+
+class FigureStyleProfile(BaseModel):
+    """Параметры рисунков: выравнивание, подпись, ограничение размера."""
+
+    # Выравнивание самого рисунка (центрирование — стандарт).
+    alignment: Literal["left", "center", "right"] = "center"
+    # Максимальная ширина рисунка в см. При полях A4 (top/right/bottom=20мм,
+    # left=30мм по ГОСТ 7.32) ширина текстового поля = 210 - 30 - 15 = 165 мм
+    # = 16.5 см. Изображения шире уменьшаются пропорционально; уже —
+    # остаются как есть.
+    max_width_cm: float = 16.5
+    # Максимальная высота рисунка в см. При A4 (297мм) с полями
+    # top/bottom=20мм по ГОСТ высота текстового поля ≈ 25.7 см. Чтобы
+    # рисунок не вылезал на следующую страницу вместе с подписью,
+    # ограничиваем по умолчанию 22 см (оставляем место под подпись и
+    # часть текста). Картинка крупнее — масштабируется пропорционально.
+    max_height_cm: float = 22.0
+    # Схема нумерации:
+    # * "continuous" — сквозная: Рисунок 1, Рисунок 2, ... через весь
+    #   документ (без главы);
+    # * "by_chapter" — по главам: Рисунок 1.1, 1.2, ..., 2.1, ... .
+    # В приложениях нумерация всегда буквенная (А.1, А.2, Б.1, ...)
+    # независимо от выбранного режима.
+    numbering: Literal["continuous", "by_chapter"] = "continuous"
+    # keep_with_next: параграф с рисунком не отрывается от подписи под
+    # ним (Word не переносит рисунок отдельно на следующую страницу,
+    # оставляя подпись внизу прежней).
+    keep_with_next: bool = True
+    caption: CaptionStyleProfile = Field(
+        default_factory=lambda: CaptionStyleProfile(
+            alignment="center",
+            position="below",
+            format="Рисунок {num} — {title}",
+        )
+    )
+
+
+class ListStyleProfile(BaseModel):
+    """Параметры маркированных и нумерованных списков."""
+
+    # Символ маркера для bullet-списков (•, –, *, ◦ и т. п.).
+    # По ГОСТ Р 7.32-2017 — тире (–). LibreOffice/Word нормально рендерит.
+    bullet_char: str = "–"
+    # Шаблон нумерации: {n} = номер. Примеры: "{n})", "{n}.", "{n}."
+    ordered_format: str = "{n})"
+    # Позиция текста и маркера элементов списка.
+    # По ГОСТ 7.32-2017 п. 6.5 — «запись производят с абзацного отступа»,
+    # то есть маркер должен быть ровно на позиции абзацного отступа
+    # (1,25 см), как и красная строка обычного абзаца.
+    #
+    # OOXML: <w:ind w:left=left_indent_cm w:hanging=hanging_indent_cm/>
+    # * Маркер выводится в позицию (left - hanging).
+    # * Текст первой строки начинается сразу за маркером.
+    # * Перенос строки выравнивается на позицию left.
+    #
+    # ГОСТ-совместимый default: маркер на 1.25 см (абзацный отступ),
+    # текст и перенос строки на 1.75 см — продолжение выровнено по
+    # тексту, не съезжает под маркер. Это классический hanging-list.
+    #
+    # Чтобы маркер и текст продолжения были на одной позиции (под
+    # маркером — «единый отступ»), задайте hanging_indent_cm=0 и
+    # left_indent_cm=1.25.
+    left_indent_cm: float = 1.75
+    # Выступ маркера относительно текста (в терминах диалога Word
+    # «Изменение отступов в списке»: Отступ текста − Положение маркера):
+    # >0 — маркер левее текста (hanging), <0 — правее (firstLine),
+    # 0 — совпадают.
+    hanging_indent_cm: float = 0.5
+    # Символ после маркера/номера: «Знак табуляции» (tab) / «Пробел»
+    # (space) / «Нет» (nothing) — соответствует полю «Символ после
+    # номера» диалога Word «Изменение отступов в списке».
+    marker_suffix: Literal["tab", "space", "nothing"] = "tab"
 
 
 class StylesProfile(BaseModel):
     page: PageGeometryProfile = Field(default_factory=PageGeometryProfile)
     body: BodyTextProfile = Field(default_factory=BodyTextProfile)
-    # ... другие стили: headings, captions, lists, tables, etc.
-    extra: dict[str, Any] = Field(default_factory=dict)  # для расширений плагинов
+    # Заголовки уровней 1-4. Уровень 1 — главы (введение, главы, заключение).
+    # Уровни 2-4 — параграфы / подразделы.
+    heading_1: HeadingStyleProfile = Field(
+        default_factory=lambda: HeadingStyleProfile(
+            uppercase=True,
+            alignment="center",
+            spacing_before_pt=18,
+            spacing_after_pt=12,
+            page_break_before=True,
+        )
+    )
+    heading_2: HeadingStyleProfile = Field(
+        default_factory=lambda: HeadingStyleProfile(
+            uppercase=False,
+            alignment="left",
+            first_line_indent_cm=1.25,
+            spacing_before_pt=12,
+            spacing_after_pt=6,
+        )
+    )
+    heading_3: HeadingStyleProfile = Field(
+        default_factory=lambda: HeadingStyleProfile(
+            uppercase=False,
+            alignment="left",
+            first_line_indent_cm=1.25,
+            spacing_before_pt=10,
+            spacing_after_pt=4,
+        )
+    )
+    heading_4: HeadingStyleProfile = Field(
+        default_factory=lambda: HeadingStyleProfile(
+            uppercase=False,
+            italic=True,
+            alignment="left",
+            first_line_indent_cm=1.25,
+            spacing_before_pt=8,
+            spacing_after_pt=2,
+        )
+    )
+    figure: FigureStyleProfile = Field(default_factory=FigureStyleProfile)
+    table: TableStyleProfile = Field(default_factory=TableStyleProfile)
+    lists: ListStyleProfile = Field(default_factory=ListStyleProfile)
+    # Резерв для расширений плагинов.
+    extra: dict[str, Any] = Field(default_factory=dict)
 
 
 class SectionsTemplate(BaseModel):
@@ -186,8 +408,7 @@ def _deep_merge(parent: Any, child: Any) -> Any:
 
 # Поля, которые должны браться у ребёнка как есть (не сливаются),
 # потому что идентифицируют сам профиль.
-_CHILD_OVERRIDE_FIELDS = {"id", "name", "version", "extends", "effective_from",
-                          "effective_until"}
+_CHILD_OVERRIDE_FIELDS = {"id", "name", "version", "extends", "effective_from", "effective_until"}
 
 
 def _merge_profile(parent: Profile, child: Profile) -> Profile:

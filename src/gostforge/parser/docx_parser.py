@@ -11,8 +11,6 @@
 - Фаза 3: полный разбор колонтитулов, приложений
 """
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 import re
@@ -20,10 +18,10 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
-import docx  # type: ignore[import-not-found]
-from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-not-found]
-from docx.table import Table as DocxTableCls  # type: ignore[import-not-found]
-from docx.text.paragraph import Paragraph as DocxParagraphCls  # type: ignore[import-not-found]
+import docx
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.table import Table as DocxTableCls
+from docx.text.paragraph import Paragraph as DocxParagraphCls
 from lxml import etree  # type: ignore[import-untyped]
 
 from gostforge.model import (
@@ -35,8 +33,10 @@ from gostforge.model import (
     Document,
     DocumentMetadata,
     Figure,
+    FootnoteRef,
     Formula,
     HeaderConfig,
+    Hyperlink,
     InlineElement,
     InlineFormula,
     ListBlock,
@@ -48,6 +48,9 @@ from gostforge.model import (
     Table,
     TextRun,
 )
+
+# Relationship-namespace для <w:hyperlink r:id="...">.
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
 if TYPE_CHECKING:
     DocxDocument = Any
@@ -68,6 +71,16 @@ NSMAP = {"w": W_NS, "m": M_NS, "a": A_NS, "r": R_NS}
 
 # Шаблон номера формулы в скобках в конце текста параграфа: «(3)» или «(3.1)».
 _FORMULA_NUMBER_RE = re.compile(r"\((\d+(?:\.\d+)?)\)\s*$")
+
+# Маркер «Продолжение таблицы N» — генерируется нашим экспортёром при
+# TableStyleProfile.continuation_caption=True. При обратном чтении мы
+# его отфильтровываем, чтобы при следующем экспорте экспортёр сам
+# добавил его заново и не было «Продолжение таблицы N — Продолжение
+# таблицы N — ...» через round-trip.
+_RE_CONTINUATION_TABLE = re.compile(
+    r"^продолжение\s+таблицы\s+[\dА-Яа-я.]+",
+    re.IGNORECASE,
+)
 
 # Соответствие WD_ALIGN_PARAGRAPH → строковая литералка модели
 _ALIGN_MAP: dict[int, ParagraphAlignment] = {
@@ -102,9 +115,7 @@ _BIB_STANDARD_RE = re.compile(r"\bГОСТ\b")
 _BIB_ARTICLE_RE = re.compile(r"(?:^|\s)//\s|\bЖурнал\b|журн\.|\bNo\.|№")
 _BIB_THESIS_RE = re.compile(r"\bдис\.|\bдиссертация\b|\bавтореф\.", re.IGNORECASE)
 _BIB_CONFERENCE_RE = re.compile(r"\bконференция\b|\bматериалы\b|\bсб\.\s*ст\.", re.IGNORECASE)
-_BIB_LAW_RE = re.compile(
-    r"\bзакон\b|\bфедер\.\s*закон\b|\bпостановление\b", re.IGNORECASE
-)
+_BIB_LAW_RE = re.compile(r"\bзакон\b|\bфедер\.\s*закон\b|\bпостановление\b", re.IGNORECASE)
 
 # Регэкспы для извлечения структурных полей библиографической записи
 # по ГОСТ Р 7.0.100-2018. Поля заполняются опционально — отсутствие
@@ -114,9 +125,7 @@ _BIB_AUTHOR_EN_RE = re.compile(r"^[A-Z][a-z]+,?\s[A-Z]\.\s?[A-Z]\.")
 _BIB_YEAR_RE = re.compile(r"\b(?:19|20)\d{2}\b")
 _BIB_URL_FULL_RE = re.compile(r"https?://\S+")
 _BIB_DOI_RE = re.compile(r"10\.\d{4,9}/[-._;()/:A-Za-z0-9]+")
-_BIB_ACCESS_DATE_RE = re.compile(
-    r"дата\s+обращения:\s*(\d{1,2}\.\d{1,2}\.\d{4})", re.IGNORECASE
-)
+_BIB_ACCESS_DATE_RE = re.compile(r"дата\s+обращения:\s*(\d{1,2}\.\d{1,2}\.\d{4})", re.IGNORECASE)
 # Эвристика места издания: «— Москва :», «— Санкт-Петербург :»,
 # «— Нижний Новгород :». Принимаем составные через дефис или пробел.
 _BIB_PLACE_RE = re.compile(r"—\s*([А-ЯЁ][а-яё]+(?:[ \-][А-ЯЁ][а-яё]+)?)\s*:")
@@ -202,13 +211,156 @@ def parse_docx(path: str | Path) -> Document:
     # bibliography, потому что эвристика «[N]» требует знать допустимый
     # диапазон N (валидный 1-based индекс в Document.bibliography).
     _annotate_citations([page_section], bibliography)
+    # Группировка маркированных параграфов в ListBlock. Делаем ПОСЛЕ
+    # извлечения библиографии, чтобы не сгруппировать references как
+    # элементы списка (в bib-разделе каждая запись = отдельный параграф).
+    _group_text_marker_lists(
+        page_section, exclude_section_ids=_bibliography_section_ids([page_section])
+    )
+    comments = _extract_comments(docx_doc)
+    # Сноски: извлекаем содержимое word/footnotes.xml и подставляем
+    # текст в FootnoteRef-элементы внутри параграфов.
+    footnotes = _extract_footnotes(docx_doc)
+    if footnotes:
+        _attach_footnote_text([page_section], footnotes)
 
     return Document(
         metadata=metadata,
         page_sections=[page_section],
         bibliography=bibliography,
         auto_hyphenation=auto_hyphenation,
+        comments=comments,
     )
+
+
+def _extract_footnotes(docx_doc: DocxDocument) -> dict[str, str]:
+    """Извлечь содержимое сносок из word/footnotes.xml.
+
+    Возвращает {footnote_id: text}. Идентификатор — целое число
+    как строка. Содержимое — склейка всех ``<w:t>`` внутри
+    ``<w:footnote w:id="N">``.
+
+    Если footnotes-part отсутствует (документ без сносок) —
+    пустой dict.
+    """
+    out: dict[str, str] = {}
+    rels = getattr(docx_doc.part, "rels", None)
+    if rels is None:
+        return out
+    footnotes_part = None
+    target_reltype = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes"
+    try:
+        for rel in rels.values():
+            if getattr(rel, "reltype", None) == target_reltype:
+                footnotes_part = rel.target_part
+                break
+    except (etree.XMLSyntaxError, KeyError, AttributeError):
+        return out
+    if footnotes_part is None:
+        return out
+
+    blob = getattr(footnotes_part, "blob", None)
+    if not blob:
+        return out
+    try:
+        root = etree.fromstring(blob)
+    except etree.XMLSyntaxError:
+        return out
+
+    for fn in root.findall(f"{{{W_NS}}}footnote"):
+        fn_id = fn.get(f"{{{W_NS}}}id", "")
+        if not fn_id:
+            continue
+        # Стандартные системные сноски (id=-1, 0): «separator» и
+        # «continuationSeparator» — пропускаем, они не текстовые.
+        fn_type = fn.get(f"{{{W_NS}}}type")
+        if fn_type in {"separator", "continuationSeparator"}:
+            continue
+        texts: list[str] = []
+        for t in fn.iter(f"{{{W_NS}}}t"):
+            if t.text:
+                texts.append(t.text)
+        out[fn_id] = "".join(texts).strip()
+
+    return out
+
+
+def _attach_footnote_text(page_sections: list[PageSection], footnotes: dict[str, str]) -> None:
+    """Заполнить FootnoteRef.text из карты footnotes.
+
+    Парсер inline-элементов создаёт FootnoteRef только с id; полный
+    текст подставляется здесь, чтобы избежать передачи footnotes-map
+    через сигнатуры _build_paragraph и далее.
+    """
+
+    def walk(items: list[Any]) -> None:
+        for item in items:
+            if hasattr(item, "content"):  # Paragraph
+                for el in item.content:
+                    if isinstance(el, FootnoteRef):
+                        el.text = footnotes.get(el.footnote_id, "")
+            if hasattr(item, "children"):  # LogicalSection
+                walk(item.children)
+
+    for ps in page_sections:
+        walk(ps.content)
+
+
+def _extract_comments(docx_doc: DocxDocument) -> list[Any]:
+    """Извлечь комментарии рецензента из word/comments.xml.
+
+    Возвращает list[Comment]. Если comments-part отсутствует
+    (документ без комментариев) — пустой список.
+
+    python-docx не предоставляет высокоуровневого API для
+    комментариев — обходимся прямым lxml-доступом к part-у.
+    """
+    from gostforge.model import Comment
+
+    out: list[Comment] = []
+    # python-docx предоставляет part через related_parts; ищем
+    # CommentsPart по reltype.
+    rels = getattr(docx_doc.part, "rels", None)
+    if rels is None:
+        return out
+    comments_part = None
+    target_reltype = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+    try:
+        for rel in rels.values():
+            if getattr(rel, "reltype", None) == target_reltype:
+                # rel.target_part может бросить XMLSyntaxError, если
+                # comments.xml сломан — поймаем здесь и вернём [].
+                comments_part = rel.target_part
+                break
+    except (etree.XMLSyntaxError, KeyError, AttributeError):
+        return out
+    if comments_part is None:
+        return out
+
+    blob = getattr(comments_part, "blob", None)
+    if not blob:
+        return out
+    try:
+        root = etree.fromstring(blob)
+    except etree.XMLSyntaxError:
+        return out
+
+    for cm in root.findall(f"{{{W_NS}}}comment"):
+        cid = cm.get(f"{{{W_NS}}}id", "")
+        author = cm.get(f"{{{W_NS}}}author", "")
+        date = cm.get(f"{{{W_NS}}}date", "")
+        # Текст: собираем все <w:t> внутри.
+        texts: list[str] = []
+        for t in cm.iter(f"{{{W_NS}}}t"):
+            if t.text:
+                texts.append(t.text)
+        text = "\n".join(texts).strip()
+        # Без section_id — для MVP. Привязка к разделу через
+        # commentRangeStart/End — отложена (требует обхода document.xml
+        # с трекингом текущей секции).
+        out.append(Comment(id=cid, author=author, date=date, text=text))
+
+    return out
 
 
 def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> None:
@@ -220,7 +372,7 @@ def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> No
     только info['dpi']).
     """
     try:
-        from PIL import Image  # type: ignore[import-not-found]
+        from PIL import Image
     except ImportError:
         return
 
@@ -237,7 +389,7 @@ def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> No
     for fig in figures:
         if not fig.image_path.startswith("embedded:"):
             continue
-        rid = fig.image_path[len("embedded:"):]
+        rid = fig.image_path[len("embedded:") :]
         try:
             image_part = docx_doc.part.related_parts.get(rid)
             if image_part is None:
@@ -247,7 +399,7 @@ def _populate_image_dpi(docx_doc: DocxDocument, page_section: PageSection) -> No
                 dpi_value = im.info.get("dpi")
                 if dpi_value:
                     fig.dpi = int(min(dpi_value))
-        except Exception:  # noqa: BLE001 — повреждённый media-file не должен валить парсер
+        except Exception:
             continue
 
 
@@ -268,16 +420,14 @@ def _extract_auto_hyphenation(docx_doc: DocxDocument) -> bool | None:
     settings_xml = settings_part.blob
     try:
         root = etree.fromstring(settings_xml)
-    except Exception:  # noqa: BLE001
+    except Exception:
         return None
     auto_hyph = root.find(f"{{{W_NS}}}autoHyphenation")
     if auto_hyph is None:
         return False
     val = auto_hyph.get(f"{{{W_NS}}}val")
     # По OOXML toggle: отсутствие val или val="1"/"true" → on; "0"/"false" → off.
-    if val in {"0", "false"}:
-        return False
-    return True
+    return val not in {"0", "false"}
 
 
 # --- метаданные --------------------------------------------------------------
@@ -411,7 +561,6 @@ def _extract_page_number_format(
     return _PAGE_FMT_MAP.get(fmt_attr)
 
 
-
 def _length_to_mm(length: object | None) -> float:
     """Перевести python-docx Length в миллиметры (округление до 0.1 мм)."""
     if length is None:
@@ -489,7 +638,7 @@ def _extract_header_or_footer(container: Any) -> HeaderConfig | None:
         if not _paragraph_has_page_field(fp):
             continue
         alignment = _alignment_to_literal(fp.paragraph_format.alignment)
-        slot_runs = [TextRun(text="{page}")]
+        slot_runs: list[InlineElement] = [TextRun(text="{page}")]
         # Распределение по слоту определяется выравниванием параграфа в
         # колонтитуле. None и justify трактуем как center — это типичный
         # случай отображения номера страницы.
@@ -560,6 +709,7 @@ class _Counters:
         self.table = 0
         self.list = 0
         self.formula = 0
+        self.toc = 0
 
 
 # Имена Word-стилей, обозначающих элемент списка (case-insensitive).
@@ -570,12 +720,11 @@ def _paragraph_list_kind(dp: DocxParagraph) -> str | None:
     """Определить, является ли параграф элементом списка.
 
     Возвращает 'ordered' | 'bulleted' | None. Эвристика:
-    - <w:numPr> в <w:pPr> → есть привязка к списку Word. Тип определяется
-      по стилю абзаца (List Number → ordered, List Bullet → bulleted),
-      иначе по умолчанию ordered (Word обычно так).
-    - Стиль абзаца начинается с 'List Number' → ordered.
-    - Стиль абзаца начинается с 'List Bullet' → bulleted.
-    - Иначе None — обычный параграф.
+    1. Стиль абзаца 'List Number*' → ordered, 'List Bullet*' → bulleted.
+    2. <w:numPr> → разрешаем numId через numbering.xml: ищем abstractNum
+       по numId, читаем w:numFmt уровня 0 — 'bullet' → bulleted,
+       'decimal'/'lowerLetter'/etc → ordered.
+    3. Иначе None.
     """
     p_xml = dp._p
     num_pr = p_xml.find(f"{{{W_NS}}}pPr/{{{W_NS}}}numPr")
@@ -585,9 +734,242 @@ def _paragraph_list_kind(dp: DocxParagraph) -> str | None:
     if style_name.startswith("list bullet"):
         return "bulleted"
     if num_pr is not None:
-        # Привязка к списку без указания типа в стиле — считаем ordered.
+        kind_via_num = _resolve_numpr_kind(dp, num_pr)
+        if kind_via_num is not None:
+            return kind_via_num
+        # numbering.xml не доступен или не нашлось — берём ordered как
+        # совместимое поведение (так делает дефолтный шаблон Word).
         return "ordered"
     return None
+
+
+def _resolve_numpr_kind(dp: DocxParagraph, num_pr: Any) -> str | None:
+    """Определить ordered/bulleted по numId через numbering.xml.
+
+    Идём: numPr/numId → numbering_part: num[numId] → abstractNumId →
+    abstractNum: lvl[ilvl=0]/numFmt. 'bullet' → bulleted, прочее → ordered.
+    """
+    w_ns = W_NS
+    num_id_el = num_pr.find(f"{{{w_ns}}}numId")
+    if num_id_el is None:
+        return None
+    num_id = num_id_el.get(f"{{{w_ns}}}val")
+    if not num_id:
+        return None
+    try:
+        numbering_part = dp.part.numbering_part
+    except (AttributeError, KeyError):
+        return None
+    numbering_elem = getattr(numbering_part, "element", None)
+    if numbering_elem is None:
+        return None
+    # Найти <w:num w:numId="N">.
+    num_match = None
+    for n in numbering_elem.findall(f"{{{w_ns}}}num"):
+        if n.get(f"{{{w_ns}}}numId") == num_id:
+            num_match = n
+            break
+    if num_match is None:
+        return None
+    abstract_ref = num_match.find(f"{{{w_ns}}}abstractNumId")
+    if abstract_ref is None:
+        return None
+    abstract_id = abstract_ref.get(f"{{{w_ns}}}val")
+    # Найти соответствующий abstractNum.
+    for an in numbering_elem.findall(f"{{{w_ns}}}abstractNum"):
+        if an.get(f"{{{w_ns}}}abstractNumId") == abstract_id:
+            lvl = an.find(f"{{{w_ns}}}lvl")
+            if lvl is None:
+                return None
+            num_fmt = lvl.find(f"{{{w_ns}}}numFmt")
+            if num_fmt is None:
+                return None
+            fmt_val = num_fmt.get(f"{{{w_ns}}}val", "")
+            if fmt_val == "bullet":
+                return "bulleted"
+            return "ordered"
+    return None
+
+
+def _paragraph_num_id(dp: DocxParagraph) -> str | None:
+    """Вернуть numId параграфа, если у него есть <w:numPr>. Иначе None."""
+    p_xml = dp._p
+    num_pr = p_xml.find(f"{{{W_NS}}}pPr/{{{W_NS}}}numPr")
+    if num_pr is None:
+        return None
+    num_id_el = num_pr.find(f"{{{W_NS}}}numId")
+    if num_id_el is None:
+        return None
+    return cast("str | None", num_id_el.get(f"{{{W_NS}}}val"))
+
+
+# Regex-маркеры элементов текстовых списков, написанных через builder/
+# экспортёр без <w:numPr> (например, кастомный bullet_char из профиля).
+# Группа 1 — собственно символ маркера, группа 2 — текст после маркера.
+# Поддерживаются:
+#   * «– <текст>» / «— <текст>»  — bullet (тире из ГОСТ),
+#   * «• <текст>» / «* <текст>» / «◦ <текст>»  — bullet (другие маркеры),
+#   * «1) <текст>» / «1. <текст>»  — ordered.
+_BULLET_MARKERS = re.compile(r"^([–—•*◦])\s+(.+)$")
+_ORDERED_MARKERS = re.compile(r"^(\d{1,3})[\.\)]\s+(.+)$")
+
+
+def _group_text_marker_lists(page_section: PageSection, *, exclude_section_ids: set[str]) -> None:
+    """Сгруппировать подряд идущие маркированные параграфы в ListBlock.
+
+    Builder/экспортёр сейчас пишет списки как обычные параграфы с
+    текстовым префиксом-маркером (из ``profile.styles.lists.bullet_char``,
+    например «– »). Парсер уже корректно собирает их как Paragraph,
+    но визуально это список — без этой постобработки round-trip
+    «builder → export → parse → builder» теряет list-блоки.
+
+    Алгоритм:
+    1. Обходим рекурсивно содержимое page_section (внутри LogicalSection).
+    2. Скользящим окном ищем последовательность Paragraph-ов, каждый
+       из которых начинается с одинакового lead-маркера. Минимум 2
+       параграфа подряд — иначе одиночный «– слово» в обычном тексте
+       не превратится в список из одного элемента.
+    3. Параграфы заменяются на один ``ListBlock`` с теми же items
+       (без маркера в начале).
+
+    Секции из ``exclude_section_ids`` пропускаются — обычно это
+    библиографический раздел, где каждый параграф — отдельная
+    запись, а не элемент списка.
+    """
+    from gostforge.model import LogicalSection, Paragraph
+
+    def process(items: list[Any], in_excluded_section: bool) -> list[Any]:
+        result: list[Any] = []
+        i = 0
+        while i < len(items):
+            item = items[i]
+            if isinstance(item, LogicalSection):
+                excluded = in_excluded_section or item.id in exclude_section_ids
+                item.children = process(item.children, excluded)
+                result.append(item)
+                i += 1
+                continue
+            if in_excluded_section or not isinstance(item, Paragraph):
+                result.append(item)
+                i += 1
+                continue
+            # Пытаемся захватить run-серию параграфов с одинаковым
+            # типом маркера (bulleted или ordered) и одним и тем же
+            # символом маркера для bullet-варианта.
+            group = _try_consume_marker_run(items, i)
+            if group is None:
+                result.append(item)
+                i += 1
+                continue
+            list_block, consumed = group
+            result.append(list_block)
+            i += consumed
+        return result
+
+    for ps_attr in ("content",):
+        items = getattr(page_section, ps_attr)
+        setattr(
+            page_section,
+            ps_attr,
+            process(items, in_excluded_section=False),
+        )
+
+
+def _try_consume_marker_run(items: list[Any], start: int) -> tuple[Any, int] | None:
+    """Попытаться захватить серию маркированных параграфов с позиции ``start``.
+
+    Возвращает (ListBlock, consumed) при успехе или None.
+    """
+    from gostforge.model import ListBlock, Paragraph, TextRun
+
+    first = items[start]
+    if not isinstance(first, Paragraph):
+        return None
+    first_text = _paragraph_plain_text(first)
+    bullet_match = _BULLET_MARKERS.match(first_text)
+    ordered_match = _ORDERED_MARKERS.match(first_text)
+    if bullet_match:
+        marker_char = bullet_match.group(1)
+        ordered = False
+    elif ordered_match:
+        marker_char = None  # для ordered не привязываемся к конкретному номеру
+        ordered = True
+    else:
+        return None
+
+    items_texts: list[str] = []
+    consumed = 0
+    for idx in range(start, len(items)):
+        item = items[idx]
+        if not isinstance(item, Paragraph):
+            break
+        text = _paragraph_plain_text(item)
+        if ordered:
+            m = _ORDERED_MARKERS.match(text)
+            if m is None:
+                break
+            try:
+                int(m.group(1))  # валидируем номер; значение не нужно
+            except ValueError:
+                break
+            # Допускаем сбой нумерации — лишь бы шла серия. Строгая
+            # проверка n+1 ломалась бы на «1) ..., 2) ..., 5) ...» —
+            # это всё равно список.
+            items_texts.append(m.group(2))
+            consumed += 1
+        else:
+            m = _BULLET_MARKERS.match(text)
+            if m is None or m.group(1) != marker_char:
+                break
+            items_texts.append(m.group(2))
+            consumed += 1
+
+    if consumed < 2:
+        # Одиночный «– слово» не считаем списком (ложные срабатывания
+        # на тире-сепаратор в обычном тексте).
+        return None
+
+    list_block = ListBlock(
+        id=f"list-{first.id}",
+        ordered=ordered,
+        items=[[TextRun(text=t)] for t in items_texts],
+    )
+    return list_block, consumed
+
+
+def _bibliography_section_ids(page_sections: list[PageSection]) -> set[str]:
+    """Найти id всех LogicalSection-ов с заголовком «Список ...».
+
+    Используется чтобы пропустить bib-секцию при группировке маркированных
+    параграфов в ListBlock (в bib каждая запись = отдельный параграф,
+    а не элемент списка).
+    """
+    from gostforge.model import LogicalSection, TextRun
+
+    aliases = {
+        "список использованных источников",
+        "список литературы",
+        "литература",
+        "список источников",
+        "библиографический список",
+        "references",
+    }
+
+    result: set[str] = set()
+
+    def walk(items: list[Any]) -> None:
+        for it in items:
+            if isinstance(it, LogicalSection):
+                heading = (
+                    "".join(el.text for el in it.heading if isinstance(el, TextRun)).strip().lower()
+                )
+                if heading in aliases:
+                    result.add(it.id)
+                walk(it.children)
+
+    for ps in page_sections:
+        walk(ps.content)
+    return result
 
 
 def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None:
@@ -605,25 +987,44 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
        снизу, таблицам — сверху; параграфы-подписи удаляются.
     """
     current_section: LogicalSection | None = None
+    # Стек открытых секций для построения иерархии (глава → подраздел
+    # → пункт). См. логику ниже при обработке заголовков.
+    section_stack: list[LogicalSection] = []
     counters = _Counters()
     body = docx_doc.element.body
 
     # Буфер для группировки последовательных list-параграфов в один ListBlock.
-    list_buffer: list[tuple[str, list[InlineElement]]] = []  # (kind, content)
+    # Элемент: (kind, num_id, content). num_id используется для разделения
+    # разных списков подряд (например, нумерованный + маркированный
+    # сразу — не сольются в один ListBlock).
+    list_buffer: list[tuple[str, str | None, list[InlineElement]]] = []
 
     def flush_list_buffer() -> None:
-        """Если в буфере накопились list-параграфы — сделать из них ListBlock."""
+        """Если в буфере накопились list-параграфы — сделать из них ListBlock.
+
+        Дополнительно разрезает буфер по сменам (kind, num_id), чтобы
+        два подряд идущих списка разных типов (например, ordered и
+        bulleted) не слились в один.
+        """
         if not list_buffer:
             return
-        # Тип ordered определяется по большинству элементов буфера
-        ordered = sum(1 for k, _ in list_buffer if k == "ordered") >= len(list_buffer) / 2
-        counters.list += 1
-        list_block = ListBlock(
-            id=f"list-{counters.list}",
-            ordered=ordered,
-            items=[content for _, content in list_buffer],
-        )
-        _append_block(list_block, page_section, current_section)
+        # Группируем по (kind, num_id).
+        groups: list[tuple[str, list[list[InlineElement]]]] = []
+        cur_key: tuple[str, str | None] | None = None
+        for kind, num_id, content in list_buffer:
+            key = (kind, num_id)
+            if cur_key != key:
+                groups.append((kind, []))
+                cur_key = key
+            groups[-1][1].append(content)
+        for kind, items in groups:
+            counters.list += 1
+            list_block = ListBlock(
+                id=f"list-{counters.list}",
+                ordered=(kind == "ordered"),
+                items=items,
+            )
+            _append_block(list_block, page_section, current_section)
         list_buffer.clear()
 
     for child in body.iterchildren():
@@ -634,12 +1035,34 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
             if heading_level is not None:
                 flush_list_buffer()
                 counters.heading += 1
+                # Собираем heading через ту же логику inline-разбора, что и
+                # обычный параграф: парсер пройдётся по <w:r>-ам, выполнит
+                # style-cascade (font/size/bold/italic от стиля Heading{N})
+                # и заполнит TextRun реальными атрибутами форматирования.
+                # Без этого H.01/H.02 «слепы» к стиле-уровневым настройкам
+                # синего Cambria из дефолтного шаблона Word.
+                heading_paragraph = _build_paragraph(dp, idx=counters.heading)
+                heading_content = heading_paragraph.content or [TextRun(text=dp.text)]
                 section = LogicalSection(
                     id=f"sec-{counters.heading}",
                     level=heading_level,
-                    heading=[TextRun(text=dp.text)],
+                    heading=heading_content,
                 )
-                page_section.content.append(section)
+                # Поддерживаем стек открытых секций для правильной
+                # иерархии. Новая секция уровня L закрывает (pop) все
+                # открытые секции с level>=L и становится child-ом
+                # текущей вершины стека (или попадает на top-level,
+                # если стек пуст).
+                # Без этого S.07/H.06 ложно срабатывали на главах:
+                # подразделы лежали на top-level рядом с главой, а у
+                # главы children=[].
+                while section_stack and section_stack[-1].level >= heading_level:
+                    section_stack.pop()
+                if section_stack:
+                    section_stack[-1].children.append(section)
+                else:
+                    page_section.content.append(section)
+                section_stack.append(section)
                 current_section = section
                 continue
 
@@ -647,13 +1070,12 @@ def _populate_content(docx_doc: DocxDocument, page_section: PageSection) -> None
             list_kind = _paragraph_list_kind(dp)
             if list_kind is not None:
                 # Собираем inline-контент параграфа как InlineElement-список
-                runs: list[InlineElement] = [
-                    TextRun(text=run.text) for run in dp.runs if run.text
-                ]
+                runs: list[InlineElement] = [TextRun(text=run.text) for run in dp.runs if run.text]
                 if not runs and dp.text:
                     runs = [TextRun(text=dp.text)]
                 if runs:
-                    list_buffer.append((list_kind, runs))
+                    num_id = _paragraph_num_id(dp)
+                    list_buffer.append((list_kind, num_id, runs))
                 continue
 
             # Обычный параграф или figure — сначала закрываем накопленный список
@@ -704,12 +1126,26 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
     """Конвертировать <w:p> в Figure / Formula / Paragraph.
 
     Приоритет распознавания:
-    1. <w:drawing> → Figure (рисунок).
-    2. <m:oMathPara> → блочная Formula (формула как отдельный блок).
+    1. <w:txbxContent> (текстбокс внутри drawing) → Paragraph с текстом.
+       Часто титульный лист или вынос помещают в текстбокс — без этой
+       ветки текст потерялся бы (drawing считался бы пустым рисунком).
+    2. <w:drawing> → Figure (рисунок).
+    3. <m:oMathPara> → блочная Formula (формула как отдельный блок).
        Голый <m:oMath> без <m:oMathPara> считается inline-формулой
        и обрабатывается в _build_paragraph.
-    3. Иначе — обычный Paragraph (возможно с InlineFormula в content).
+    4. Иначе — обычный Paragraph (возможно с InlineFormula в content).
     """
+    # Текстбокс: извлекаем текст из <w:txbxContent>, если он непустой.
+    # Это важнее, чем считать параграф рисунком — текст не должен
+    # теряться.
+    txbx_text = _extract_textbox_text(dp._p)
+    if txbx_text:
+        counters.paragraph += 1
+        return Paragraph(
+            id=f"p-{counters.paragraph}",
+            content=[TextRun(text=txbx_text)],
+            style_name=dp.style.name if dp.style is not None else None,
+        )
     drawings = dp._p.findall(f".//{{{W_NS}}}drawing")
     if drawings:
         counters.figure += 1
@@ -721,6 +1157,29 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
             caption=[],
             alignment=alignment,
         )
+    # TOC-field: <w:fldSimple w:instr=" TOC \o \"1-3\" \h \z "/>.
+    # При парсинге чужого .docx распознаём TOC-поле и возвращаем
+    # TableOfContents-блок, чтобы он переживал round-trip
+    # docx → state → docx без замены на текстовый плейсхолдер.
+    for fld in dp._p.findall(f".//{{{W_NS}}}fldSimple"):
+        instr = (fld.get(f"{{{W_NS}}}instr") or "").strip()
+        if instr.startswith("TOC"):
+            counters.toc = getattr(counters, "toc", 0) + 1
+            from gostforge.model import TableOfContents
+
+            min_lvl, max_lvl = 1, 3
+            m = re.search(r'\\o\s+"(\d+)-(\d+)"', instr)
+            if m:
+                try:
+                    min_lvl = int(m.group(1))
+                    max_lvl = int(m.group(2))
+                except ValueError:
+                    pass
+            return TableOfContents(
+                id=f"toc-{counters.toc}",
+                min_level=min_lvl,
+                max_level=max_lvl,
+            )
     # Блочная формула: <m:oMathPara> существует. Тогда весь параграф
     # становится Formula. Внутри <m:oMathPara> может быть несколько
     # <m:oMath>; склеиваем их текст.
@@ -734,6 +1193,27 @@ def _block_from_paragraph(dp: DocxParagraph, counters: _Counters) -> Block:
         )
     counters.paragraph += 1
     return _build_paragraph(dp, idx=counters.paragraph)
+
+
+def _extract_textbox_text(p_elem: Any) -> str:
+    """Извлечь текст из <w:txbxContent> внутри параграфа.
+
+    Текстбоксы в OOXML лежат как
+    ``<w:drawing>…<wps:txbx><w:txbxContent><w:p>…</w:p></w:txbxContent>``
+    (DrawingML) или ``<w:pict>…<v:textbox><w:txbxContent>`` (VML).
+    Извлекаем склейку всех <w:t> внутри любого <w:txbxContent>.
+
+    Возвращает пустую строку, если текстбокса нет или он пуст.
+    """
+    parts: list[str] = []
+    # txbxContent в любом namespace (DrawingML wps или VML) — ищем по
+    # localname через iter с проверкой тега.
+    for el in p_elem.iter():
+        if etree.QName(el.tag).localname == "txbxContent":
+            for t in el.iter(f"{{{W_NS}}}t"):
+                if t.text:
+                    parts.append(t.text)
+    return "".join(parts).strip()
 
 
 def _extract_drawing_rid(drawing_elem: Any) -> str:
@@ -810,25 +1290,185 @@ def _extract_formula_number(dp: DocxParagraph) -> int | None:
 def _build_table(dtable: DocxTable, *, idx: int) -> Table:
     """Сконвертировать docx-таблицу в модель Table.
 
-    Headers — первый ряд cells; rows — остальные ряды. Каждая ячейка
-    хранится как list[InlineElement] из текста первого параграфа
-    ячейки (без атрибутов форматирования — Фаза 1).
+    Шапка определяется по `<w:tblHeader/>` (Word: «повторять как шапку»):
+    * последняя tblHeader-строка → ``Table.headers`` (столбцы);
+    * предшествующие tblHeader-строки → ``Table.extra_header_rows``
+      (для двух/трёх-уровневой шапки по ГОСТ Р 2.105);
+    * остальные → ``Table.rows``.
+
+    Если ни одна строка не помечена tblHeader (legacy-документ), первая
+    строка берётся как ``headers`` (как было раньше).
+
+    Авто-фильтр строки-маркера «Продолжение таблицы N» (генерируется
+    нашим же экспортёром при `continuation_caption=True`) — она не нужна
+    в модели, потому что при следующем экспорте экспортёр сам её
+    добавит обратно.
+
+    Каждая ячейка — list[InlineElement] из текста первого параграфа
+    (без атрибутов форматирования). Заполняет ``merges`` информацией об
+    `<w:vMerge>` / `<w:gridSpan>`. Координаты row/col 0-based от
+    `extra_header_rows + headers + rows`.
     """
+    from gostforge.model import CellMerge
+
     rows_raw = list(dtable.rows)
+    if not rows_raw:
+        return Table(id=f"t-{idx}", caption=[], headers=[], rows=[], merges=[])
+
+    # Идентифицируем «Продолжение таблицы N»-строки (по содержимому
+    # первой ячейки) и пометки `<w:tblHeader/>`.
+    is_continuation: list[bool] = []
+    is_header_marked: list[bool] = []
+    for row in rows_raw:
+        cells = list(row.cells)
+        first_text = cells[0].text.strip() if cells else ""
+        is_continuation.append(bool(_RE_CONTINUATION_TABLE.match(first_text)))
+        is_header_marked.append(_row_has_tblheader(row))
+
+    # Отфильтруем continuation-строки целиком — они синтезируются на экспорте.
+    keep_indices = [i for i, cont in enumerate(is_continuation) if not cont]
+
+    # Среди оставшихся определим, какие являются шапкой.
+    header_indices: list[int] = []
+    if any(is_header_marked):
+        header_indices = [i for i in keep_indices if is_header_marked[i]]
+    else:
+        # Legacy: нет tblHeader-маркеров → первая строка считается шапкой.
+        if keep_indices:
+            header_indices = [keep_indices[0]]
+
+    extra_header_rows: list[list[list[InlineElement]]] = []
     headers: list[list[InlineElement]] = []
     body_rows: list[list[list[InlineElement]]] = []
 
-    if rows_raw:
-        headers = [_cell_inline(cell) for cell in rows_raw[0].cells]
-        for row in rows_raw[1:]:
-            body_rows.append([_cell_inline(cell) for cell in row.cells])
+    if header_indices:
+        # Последняя tblHeader-строка → headers; ранее идущие → extra_header_rows.
+        main_header_idx = header_indices[-1]
+        for i in header_indices[:-1]:
+            extra_header_rows.append([_cell_inline(c) for c in rows_raw[i].cells])
+        headers = [_cell_inline(c) for c in rows_raw[main_header_idx].cells]
+        body_start_pos = keep_indices.index(main_header_idx) + 1
+    else:
+        body_start_pos = 0
+
+    for i in keep_indices[body_start_pos:]:
+        body_rows.append([_cell_inline(c) for c in rows_raw[i].cells])
+
+    # Координаты merges считаем в исходных индексах, но потом сдвигаем
+    # с учётом удалённых continuation-строк и переупорядочивания.
+    raw_merges = _extract_cell_merges(rows_raw)
+    # Маппинг: исходный индекс ряда → новый индекс в (extra + headers + rows).
+    new_index: dict[int, int] = {}
+    n = 0
+    for i in header_indices[:-1] if header_indices else []:
+        new_index[i] = n
+        n += 1
+    if header_indices:
+        new_index[header_indices[-1]] = n
+        n += 1
+    for i in keep_indices[body_start_pos:]:
+        new_index[i] = n
+        n += 1
+    merges: list[CellMerge] = []
+    for m in raw_merges:
+        if m.row in new_index:
+            merges.append(
+                CellMerge(
+                    row=new_index[m.row],
+                    col=m.col,
+                    rowspan=m.rowspan,
+                    colspan=m.colspan,
+                )
+            )
 
     return Table(
         id=f"t-{idx}",
         caption=[],
         headers=headers,
+        extra_header_rows=extra_header_rows,
         rows=body_rows,
+        merges=merges,
     )
+
+
+def _row_has_tblheader(docx_row: Any) -> bool:
+    """True, если в `<w:trPr>` строки есть `<w:tblHeader/>`.
+
+    Word ставит этот атрибут на строки, которые помечены как «повторять
+    при переносе на новую страницу» (через UI или через наш экспортёр).
+    """
+    tr = getattr(docx_row, "_tr", None)
+    if tr is None:
+        return False
+    trPr = tr.find(f"{{{W_NS}}}trPr")
+    if trPr is None:
+        return False
+    return trPr.find(f"{{{W_NS}}}tblHeader") is not None
+
+
+def _extract_cell_merges(rows_raw: list[Any]) -> list[Any]:
+    """Извлечь информацию об объединённых ячейках из таблицы.
+
+    Алгоритм:
+    1. Для каждой ячейки читаем <w:tcPr>/<w:gridSpan w:val="N"/> (colspan).
+    2. <w:tcPr>/<w:vMerge w:val="restart"/> начинает вертикальное
+       объединение; <w:vMerge/> без val (или val="continue") — продолжение.
+    3. Считаем rowspan: для каждой restart-ячейки идём вниз по той же
+       колонке, считая continue-ячейки.
+
+    Возвращает CellMerge только для ячеек с rowspan>1 или colspan>1.
+    """
+    from gostforge.model import CellMerge
+
+    merges: list[CellMerge] = []
+    # Построим матрицу tc-элементов для удобного поиска.
+    tc_grid: list[list[Any]] = []
+    for row in rows_raw:
+        tc_grid.append([cell._tc for cell in row.cells])
+
+    n_rows = len(tc_grid)
+    for r, row_tcs in enumerate(tc_grid):
+        for c, tc in enumerate(row_tcs):
+            tcPr = tc.find(f"{{{W_NS}}}tcPr")
+            colspan = 1
+            v_merge_kind: str | None = None
+            if tcPr is not None:
+                grid_span = tcPr.find(f"{{{W_NS}}}gridSpan")
+                if grid_span is not None:
+                    try:
+                        colspan = int(grid_span.get(f"{{{W_NS}}}val", "1"))
+                    except ValueError:
+                        colspan = 1
+                v_merge = tcPr.find(f"{{{W_NS}}}vMerge")
+                if v_merge is not None:
+                    v_merge_kind = v_merge.get(f"{{{W_NS}}}val") or "continue"
+            # Continue-ячейки пропускаем — они уже учтены в restart выше.
+            if v_merge_kind == "continue":
+                continue
+            # Считаем rowspan: смотрим в ту же колонку (с учётом colspan
+            # — python-docx обычно возвращает физические ячейки, и
+            # continue-tc лежит в той же позиции в row_tcs).
+            rowspan = 1
+            if v_merge_kind == "restart":
+                for r2 in range(r + 1, n_rows):
+                    if c >= len(tc_grid[r2]):
+                        break
+                    next_tc = tc_grid[r2][c]
+                    next_tcPr = next_tc.find(f"{{{W_NS}}}tcPr")
+                    if next_tcPr is None:
+                        break
+                    next_vm = next_tcPr.find(f"{{{W_NS}}}vMerge")
+                    if next_vm is None:
+                        break
+                    val = next_vm.get(f"{{{W_NS}}}val")
+                    if val == "restart":
+                        # Новое объединение — текущее закончилось.
+                        break
+                    # val=None или 'continue' — продолжение.
+                    rowspan += 1
+            if rowspan > 1 or colspan > 1:
+                merges.append(CellMerge(row=r, col=c, rowspan=rowspan, colspan=colspan))
+    return merges
 
 
 def _cell_inline(cell: DocxCell) -> list[InlineElement]:
@@ -950,10 +1590,15 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
     line_spacing = _line_spacing_value(pf.line_spacing)
     indent_cm = _indent_cm(pf.first_line_indent)
     page_break_before = _page_break_before(p)
+    space_before_pt = _spacing_pt(pf.space_before)
+    space_after_pt = _spacing_pt(pf.space_after)
 
     content: list[InlineElement] = []
     style_font_name = _style_font_name(p)
     style_font_size_pt = _style_font_size_pt(p)
+    style_bold = _style_bold(p)
+    style_italic = _style_italic(p)
+    style_color_hex = _style_color_hex(p)
 
     p_xml = p._p
     for child in p_xml.iterchildren():
@@ -968,8 +1613,20 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
                 latex = _extract_inline_formula_latex(nested_omath)
                 content.append(InlineFormula(latex=latex))
                 continue
+            # <w:footnoteReference w:id="N"/> — ссылка на сноску.
+            fn_ref = child.find(f"{{{W_NS}}}footnoteReference")
+            if fn_ref is not None:
+                fn_id = fn_ref.get(f"{{{W_NS}}}id", "")
+                if fn_id:
+                    content.append(FootnoteRef(footnote_id=fn_id))
+                continue
             text_run = _text_run_from_w_r(
-                child, style_font_name=style_font_name, style_font_size_pt=style_font_size_pt
+                child,
+                style_font_name=style_font_name,
+                style_font_size_pt=style_font_size_pt,
+                style_bold=style_bold,
+                style_italic=style_italic,
+                style_color_hex=style_color_hex,
             )
             if text_run is not None:
                 content.append(text_run)
@@ -989,6 +1646,12 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
                 inner_text = _fld_simple_inner_text(child)
                 if inner_text:
                     content.append(TextRun(text=inner_text))
+        elif ns == W_NS and tag == "hyperlink":
+            # <w:hyperlink r:id="rIdN" w:anchor="bookmark">.
+            # Resolve URL через rels source-документа; anchor — внутренний.
+            hyperlink = _hyperlink_from_w_hyperlink(child, p)
+            if hyperlink is not None:
+                content.append(hyperlink)
         # Прочие элементы (`<w:pPr>`, `<w:bookmarkStart>`, и т. п.) — игнорируем.
 
     _attach_cross_ref_prefixes(content)
@@ -1001,6 +1664,8 @@ def _build_paragraph(p: DocxParagraph, *, idx: int) -> Paragraph:
         line_spacing=line_spacing,
         first_line_indent_cm=indent_cm,
         page_break_before=page_break_before,
+        space_before_pt=space_before_pt,
+        space_after_pt=space_after_pt,
     )
 
 
@@ -1009,14 +1674,22 @@ def _text_run_from_w_r(
     *,
     style_font_name: str | None,
     style_font_size_pt: float | None,
+    style_bold: bool | None = None,
+    style_italic: bool | None = None,
+    style_color_hex: str | None = None,
 ) -> TextRun | None:
     """Построить TextRun из `<w:r>` элемента, читая `<w:rPr>` и `<w:t>`.
 
     Возвращает None, если у run нет видимого текста — такие пустые run-ы
     Word оставляет после удаления (бывают, например, после bookmark-маркеров).
-    Атрибуты форматирования читаются ТОЛЬКО из `<w:rPr>` самого run-а;
-    унаследованные от стиля абзаца игнорируются, кроме font и size (для
-    обратной совместимости с предыдущим поведением парсера).
+
+    Style-cascade: атрибуты font, size, bold, italic читаются сначала из
+    `<w:rPr>` самого run-а; если на run-уровне атрибут не задан явно —
+    берётся из стиля абзаца (включая linked character-стиль и цепочку
+    наследования стилей). Это необходимо, чтобы такие проверки как
+    H.01 (формат заголовка 1: TNR, 14 pt, жирный) корректно срабатывали
+    на документах, сгенерированных через python-docx `add_heading()` —
+    он не пишет явные run-атрибуты, опирается на стиль Heading{N}.
     """
     # Текст: склейка всех <w:t> внутри run-а.
     texts: list[str] = []
@@ -1033,6 +1706,16 @@ def _text_run_from_w_r(
     italic = _rpr_toggle(rpr, "i")
     underline = _rpr_underline(rpr)
     color_hex = _rpr_color(rpr)
+
+    # Style-cascade: если на run-уровне атрибут не задан (None) — наследуем
+    # от стиля параграфа. Если на run-уровне явно False — оставляем False
+    # (явное «не жирный» поверх жирного стиля = реальное намерение автора).
+    if bold is None and style_bold is not None:
+        bold = style_bold
+    if italic is None and style_italic is not None:
+        italic = style_italic
+    if color_hex is None and style_color_hex is not None:
+        color_hex = style_color_hex
 
     # font и size: сначала из rPr, иначе из стиля абзаца.
     font_name = _rpr_font(rpr) or style_font_name
@@ -1131,6 +1814,41 @@ def _rpr_size_pt(rpr_elem: Any) -> float | None:
 # Парсер ищет инструкцию вида « REF <bookmark> [\h] ». Толерантно к лишним
 # пробелам и регистру (Word нормализует REF, но другие конвертеры — не всегда).
 _FLD_REF_INSTR_RE = re.compile(r"^\s*REF\s+([^\s\\]+)", re.IGNORECASE)
+
+
+def _hyperlink_from_w_hyperlink(hl_elem: Any, paragraph: Any) -> Hyperlink | None:
+    """Построить Hyperlink из ``<w:hyperlink r:id="..." w:anchor="...">``.
+
+    Алгоритм:
+    1. Собрать текст из всех вложенных ``<w:r>/<w:t>``.
+    2. Если есть ``r:id`` — разрешить URL через
+       paragraph.part.rels[r:id].target_ref.
+    3. Если есть ``w:anchor`` — внутренняя ссылка на bookmark.
+
+    Возвращает None если нет ни URL, ни anchor, или нет видимого текста.
+    """
+    # Текст: склейка всех <w:t> внутри.
+    texts: list[str] = []
+    for t in hl_elem.iter(f"{{{W_NS}}}t"):
+        if t.text:
+            texts.append(t.text)
+    text = "".join(texts)
+    if not text:
+        return None
+
+    r_id = hl_elem.get(f"{{{_R_NS}}}id")
+    anchor = hl_elem.get(f"{{{W_NS}}}anchor")
+    url = ""
+    if r_id:
+        try:
+            rels = paragraph.part.rels
+            if r_id in rels:
+                url = rels[r_id].target_ref
+        except AttributeError:
+            pass
+    if not url and not anchor:
+        return None
+    return Hyperlink(url=url or "", text=text, anchor=anchor)
 
 
 def _cross_ref_from_fld_simple(fld_elem: Any) -> CrossRef | None:
@@ -1272,6 +1990,21 @@ def _alignment_to_literal(value: object | None) -> ParagraphAlignment | None:
         return None
 
 
+def _spacing_pt(value: object | None) -> float | None:
+    """Преобразовать docx-spacing (EMU/Twips object) в pt.
+
+    python-docx возвращает либо docx.shared.Pt-like объект (с .pt
+    атрибутом), либо None если атрибут не задан. Возвращаем pt или
+    None.
+    """
+    if value is None:
+        return None
+    try:
+        return float(value.pt)  # type: ignore[attr-defined]
+    except (AttributeError, TypeError):
+        return None
+
+
 def _line_spacing_value(value: object | None) -> float | None:
     """Привести line_spacing к float (множитель) или None."""
     if value is None:
@@ -1310,6 +2043,93 @@ def _style_font_size_pt(p: DocxParagraph) -> float | None:
         size = style.font.size if style.font is not None else None
         if size is not None:
             return float(size.pt)
+        style = getattr(style, "base_style", None)
+    return None
+
+
+def _style_bold(p: DocxParagraph) -> bool | None:
+    """Жирность, заданная на стиле абзаца, с обходом цепочки наследования.
+
+    Возвращает True/False, если на каком-то уровне цепочки атрибут задан
+    явно. None — если ни на одном уровне явно не задан (наследуется
+    дальше от Word-defaults). Это позволяет различать «стиль не задал»
+    от «стиль явно сказал не жирный».
+    """
+    style = p.style
+    while style is not None:
+        bold = style.font.bold if style.font is not None else None
+        if bold is not None:
+            return bool(bold)
+        style = getattr(style, "base_style", None)
+    return None
+
+
+def _style_italic(p: DocxParagraph) -> bool | None:
+    """Курсив, заданный на стиле абзаца, с обходом цепочки наследования."""
+    style = p.style
+    while style is not None:
+        italic = style.font.italic if style.font is not None else None
+        if italic is not None:
+            return bool(italic)
+        style = getattr(style, "base_style", None)
+    return None
+
+
+def _style_color_hex(p: DocxParagraph) -> str | None:
+    """Цвет шрифта стиля абзаца (с обходом цепочки наследования и
+    linked character-стиля).
+
+    Word при рендере run-ов наследует форматирование сразу из двух мест:
+    параграф-стиля (Heading1) И его linked char-стиля (Heading1Char).
+    Парсер должен проверять оба места — иначе синий Cambria из
+    дефолтного шаблона остаётся незамеченным (синий обычно сидит
+    в Heading1Char, а не в Heading1).
+
+    Цвет читается через прямой XML — python-docx style.font.color может
+    возвращать None при themeColor (атрибут w:val при этом есть и
+    содержит реальный hex).
+    """
+
+    def _color_in_style_element(st_elem: Any) -> str | None:
+        if st_elem is None:
+            return None
+        rPr = st_elem.find(f"{{{W_NS}}}rPr")
+        if rPr is None:
+            return None
+        color = rPr.find(f"{{{W_NS}}}color")
+        if color is None:
+            return None
+        val = color.get(f"{{{W_NS}}}val")
+        if not val:
+            return None
+        return f"#{val.upper()}" if val.lower() != "auto" else None
+
+    style = p.style
+    styles_root = None
+    while style is not None:
+        st_elem = getattr(style, "element", None)
+        if st_elem is not None:
+            # 1. Прямой цвет в этом стиле.
+            direct = _color_in_style_element(st_elem)
+            if direct is not None:
+                return direct
+            # 2. Цвет в linked character-стиле (w:link).
+            link = st_elem.find(f"{{{W_NS}}}link")
+            if link is not None:
+                char_id = link.get(f"{{{W_NS}}}val")
+                if char_id:
+                    if styles_root is None:
+                        styles_root = st_elem.getparent()
+                    if styles_root is not None:
+                        for st in styles_root.findall(f"{{{W_NS}}}style"):
+                            if (
+                                st.get(f"{{{W_NS}}}type") == "character"
+                                and st.get(f"{{{W_NS}}}styleId") == char_id
+                            ):
+                                via_link = _color_in_style_element(st)
+                                if via_link is not None:
+                                    return via_link
+                                break
         style = getattr(style, "base_style", None)
     return None
 
@@ -1398,9 +2218,7 @@ def _detect_bibliography_type(
 # «12-15», «12, 17-20» (любые цифры, тире, запятые, пробелы). Запрещены
 # вложенные скобки.
 # Регистр «с»/«С» — нечувствительно.
-_CITATION_PATTERN_RE = re.compile(
-    r"\[(\d{1,3})(?:,\s*[сС]\.\s*([\d,\s\-–—]+?))?\]"
-)
+_CITATION_PATTERN_RE = re.compile(r"\[(\d{1,3})(?:,\s*[сС]\.\s*([\d,\s\-–—]+?))?\]")
 
 
 def _annotate_citations(
@@ -1478,9 +2296,7 @@ def _split_text_run_by_citations(
         if match.start() > cursor:
             pieces.append(_clone_text_run(run, text[cursor : match.start()]))
         template = "[{n}, с. {pages}]" if pages else "[{n}]"
-        pieces.append(
-            Citation(source_id=source_id, pages=pages, template=template)
-        )
+        pieces.append(Citation(source_id=source_id, pages=pages, template=template))
         cursor = match.end()
         changed = True
 

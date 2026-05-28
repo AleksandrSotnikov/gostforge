@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import itertools
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -80,6 +82,25 @@ class WorkBuilder:
         self._table_counter = itertools.count(1)
         self._formula_counter = itertools.count(1)
 
+        # Per-chapter счётчики и схема нумерации (из профиля).
+        # Ключ — метка главы ("1", "2", "А", "Б", ...).
+        self._figure_counters_by_chapter: dict[str, int] = {}
+        self._table_counters_by_chapter: dict[str, int] = {}
+        # Метка текущей главы, выставляется при каждом .section(...).
+        # Пустая строка — фигура/таблица добавлены до первого раздела.
+        self._current_chapter_label: str = ""
+        self._is_current_chapter_appendix: bool = False
+        # Счётчик обычных (не-приложений) глав — для нумерации «1», «2», ...
+        # в режиме by_chapter.
+        self._regular_chapter_counter = 0
+        # Режимы нумерации и форматы подписей читаем лениво из профиля.
+        (
+            self._figure_numbering_mode,
+            self._table_numbering_mode,
+            self._figure_caption_format,
+            self._table_caption_format,
+        ) = _resolve_caption_settings_from_profile(profile_id)
+
     # --- Внутренние утилиты для SectionBuilder ------------------------------
 
     def _next_id(self, prefix: str) -> str:
@@ -95,6 +116,41 @@ class WorkBuilder:
     def _next_formula_number(self) -> int:
         return next(self._formula_counter)
 
+    def _next_figure_label_with_ordinal(self) -> tuple[str, int]:
+        """Метка для подписи рисунка + сквозной ordinal-номер.
+
+        Метка зависит от схемы нумерации профиля и текущей главы:
+        * приложение → «А.1», «А.2», «Б.1», ... (буква главы);
+        * by_chapter (обычная глава) → «1.1», «1.2», ... (номер главы);
+        * continuous либо нет текущей главы → «1», «2», ... .
+
+        Ordinal — сквозной int независимо от схемы (1, 2, 3, ...) —
+        используется как `Figure.number` для матчинга xref-ов по позиции.
+        """
+        ordinal = self._next_figure_number()
+        chapter = self._current_chapter_label
+        use_chapter = chapter and (
+            self._is_current_chapter_appendix or self._figure_numbering_mode == "by_chapter"
+        )
+        if use_chapter:
+            n = self._figure_counters_by_chapter.get(chapter, 0) + 1
+            self._figure_counters_by_chapter[chapter] = n
+            return f"{chapter}.{n}", ordinal
+        return str(ordinal), ordinal
+
+    def _next_table_label_with_ordinal(self) -> tuple[str, int]:
+        """Зеркально к `_next_figure_label_with_ordinal`, но для таблиц."""
+        ordinal = self._next_table_number()
+        chapter = self._current_chapter_label
+        use_chapter = chapter and (
+            self._is_current_chapter_appendix or self._table_numbering_mode == "by_chapter"
+        )
+        if use_chapter:
+            n = self._table_counters_by_chapter.get(chapter, 0) + 1
+            self._table_counters_by_chapter[chapter] = n
+            return f"{chapter}.{n}", ordinal
+        return str(ordinal), ordinal
+
     def _set_active(self, builder: SectionBuilder) -> None:
         self._active = builder
 
@@ -109,15 +165,26 @@ class WorkBuilder:
         """
         sec = LogicalSection(
             id=self._next_id("sec"),
-            heading=[TextRun(
-                text=heading.upper(),
-                bold=True,
-                font="Times New Roman",
-                size_pt=14,
-            )],
+            heading=[
+                TextRun(
+                    text=heading.upper(),
+                    bold=True,
+                    font="Times New Roman",
+                    size_pt=14,
+                )
+            ],
             level=1,
         )
         self._sections.append(sec)
+        # Обновляем контекст текущей главы для нумерации рисунков/таблиц.
+        appendix_letter = _parse_appendix_letter(heading)
+        if appendix_letter is not None:
+            self._current_chapter_label = appendix_letter
+            self._is_current_chapter_appendix = True
+        else:
+            self._regular_chapter_counter += 1
+            self._current_chapter_label = str(self._regular_chapter_counter)
+            self._is_current_chapter_appendix = False
         builder = SectionBuilder(self, sec)
         self._active = builder
         return builder
@@ -147,21 +214,27 @@ class WorkBuilder:
             ),
         )
 
-        # Применяем «разрыв страницы перед» к первым параграфам разделов
-        # уровня 1, кроме самого первого раздела (он начинается на первой
-        # странице основной части).
-        for idx, section in enumerate(self._sections):
-            if idx == 0:
-                continue
-            first_para = _find_first_paragraph(section)
-            if first_para is not None:
-                first_para.page_break_before = True
+        # Разрыв страницы перед разделом level 1 ставится через
+        # стиль Heading 1 (profile.styles.heading_1.page_break_before = True),
+        # что применяется экспортёром через _apply_heading_styles.
+        # Раньше тут проставлялся page_break_before=True на «первый
+        # параграф» каждого раздела (кроме первого), но это давало баг
+        # для глав без вступительного текста: если глава начиналась
+        # сразу с подраздела 1.1 [текст], то page-break оседал на
+        # первом параграфе ПОДРАЗДЕЛА, и текст уезжал на новую
+        # страницу после заголовка 1.1. Удалено — стиль Heading 1
+        # делает свою работу корректнее, без зависимости от наличия
+        # параграфа сразу после заголовка.
 
-        # Создаём одну PageSection «main» с правильной геометрией, нумерацией
-        # страниц и футером «{page}». Параметры — по умолчанию для ГОСТ 7.32.
+        # Создаём одну PageSection «main». Параметры геометрии и нумерации
+        # читаем из профиля (если он указан и зарегистрирован) — иначе
+        # fallback на дефолты ГОСТ 7.32. Это закрывает F.01 (поля) и F.06
+        # (start_value) для всех профилей-наследников (ЕСКД с правым полем
+        # 10 мм, кафедра с start_value=4 и т. п.).
+        page_margins, start_value = _resolve_page_params_from_profile(self._profile_id)
         page = PageGeometry(
             paper="A4",
-            margins_mm={"top": 20, "right": 15, "bottom": 20, "left": 30},
+            margins_mm=page_margins,
             orientation="portrait",
         )
         footer = HeaderConfig(
@@ -171,7 +244,7 @@ class WorkBuilder:
             visible=True,
             format="arabic",
             start_mode="start_at",
-            start_value=3,
+            start_value=start_value,
         )
         content: list[LogicalSection | Block] = list(self._sections)
         page_section = PageSection(
@@ -229,9 +302,7 @@ class WorkBuilder:
         ]
         if errors:
             codes = sorted({v.check_code for v in errors})
-            raise ValueError(
-                "Документ не проходит валидацию: " + ", ".join(codes)
-            )
+            raise ValueError("Документ не проходит валидацию: " + ", ".join(codes))
 
         export_docx(document, resolved_profile, Path(path))
 
@@ -264,6 +335,99 @@ def work(
 
 
 # --- Хелперы -----------------------------------------------------------------
+
+
+_DEFAULT_MARGINS_MM = {"top": 20.0, "right": 15.0, "bottom": 20.0, "left": 30.0}
+_DEFAULT_START_VALUE = 3
+
+# Заголовок приложения по ГОСТ Р 2.105/7.32: «Приложение А», «Приложение Б», ...
+# Кириллические буквы кроме «Ё», «З», «Й», «О», «Ч», «Ъ», «Ы», «Ь» — но в
+# простой эвристике принимаем любые А-Я. Захватываем сам буквенный
+# идентификатор.
+_APPENDIX_HEADING_RE = re.compile(r"^\s*приложение\s+([А-Я])\b", re.IGNORECASE)
+
+
+def _parse_appendix_letter(heading: str) -> str | None:
+    """Если заголовок — «Приложение X[. ...]», вернуть букву X в верхнем регистре.
+
+    Иначе None — это обычная глава, не приложение.
+    """
+    match = _APPENDIX_HEADING_RE.match(heading)
+    if not match:
+        return None
+    return match.group(1).upper()
+
+
+def _resolve_caption_settings_from_profile(
+    profile_id: str,
+) -> tuple[
+    Literal["continuous", "by_chapter"],
+    Literal["continuous", "by_chapter"],
+    str,
+    str,
+]:
+    """Прочитать схемы нумерации и форматы подписей из профиля.
+
+    Возвращает кортеж (figure_mode, table_mode, figure_caption_format,
+    table_caption_format). При ошибке загрузки — («continuous»,
+    «continuous», «Рисунок {num} — {title}», «Таблица {num} — {title}»),
+    т.е. поведение до этой сессии остаётся обратносовместимым.
+    """
+    default_fig_fmt = "Рисунок {num} — {title}"
+    default_tbl_fmt = "Таблица {num} — {title}"
+    try:
+        from gostforge.profile import load_profile
+
+        profile = load_profile(profile_id)
+    except Exception:
+        return "continuous", "continuous", default_fig_fmt, default_tbl_fmt
+    fig_fmt = profile.styles.figure.caption.format or default_fig_fmt
+    tbl_fmt = profile.styles.table.caption.format or default_tbl_fmt
+    return (
+        profile.styles.figure.numbering,
+        profile.styles.table.numbering,
+        fig_fmt,
+        tbl_fmt,
+    )
+
+
+def _resolve_numbering_modes_from_profile(
+    profile_id: str,
+) -> tuple[Literal["continuous", "by_chapter"], Literal["continuous", "by_chapter"]]:
+    """Прочитать только схемы нумерации (back-compat-обёртка над
+    `_resolve_caption_settings_from_profile`)."""
+    fig, tbl, _, _ = _resolve_caption_settings_from_profile(profile_id)
+    return fig, tbl
+
+
+def _resolve_page_params_from_profile(
+    profile_id: str,
+) -> tuple[dict[str, float], int]:
+    """Извлечь поля страницы и start_value нумерации из профиля.
+
+    Если профиль не зарегистрирован или не удалось загрузить — возвращаем
+    дефолты ГОСТ 7.32-2017. Профиль может прийти с любого окружения
+    (тесты, пользовательский YAML), поэтому делаем мягко через
+    try/except — builder не должен падать на этапе build() из-за
+    конфига профиля.
+    """
+    try:
+        from gostforge.profile import load_profile
+
+        profile = load_profile(profile_id)
+    except Exception:
+        return dict(_DEFAULT_MARGINS_MM), _DEFAULT_START_VALUE
+
+    margins = dict(_DEFAULT_MARGINS_MM)
+    margins.update({k: float(v) for k, v in profile.styles.page.margins_mm.items()})
+
+    start_value = _DEFAULT_START_VALUE
+    f06 = profile.checks.get("F.06")
+    if f06 and f06.params.get("start_value") is not None:
+        with contextlib.suppress(TypeError, ValueError):
+            start_value = int(f06.params["start_value"])
+
+    return margins, start_value
 
 
 def _find_first_paragraph(section: LogicalSection) -> Paragraph | None:
@@ -325,7 +489,9 @@ _ALLOWED_ENTRY_TYPES: frozenset[str] = frozenset(
 )
 
 
-def _entry_type_from_id(para_id: str) -> Literal["book", "article", "web", "standard", "thesis", "conference", "law"]:
+def _entry_type_from_id(
+    para_id: str,
+) -> Literal["book", "article", "web", "standard", "thesis", "conference", "law"]:
     """Восстановить тип записи из id формата `ref:<type>-N`. По умолчанию — book."""
     if para_id.startswith("ref:"):
         rest = para_id[len("ref:") :]
@@ -336,5 +502,3 @@ def _entry_type_from_id(para_id: str) -> Literal["book", "article", "web", "stan
                 type_part,
             )
     return "book"
-
-

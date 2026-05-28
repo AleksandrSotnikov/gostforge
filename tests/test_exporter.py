@@ -84,7 +84,8 @@ def test_export_writes_heading_and_paragraph(tmp_path: Path) -> None:
 
     raw = python_docx.Document(str(out))
     texts = [p.text for p in raw.paragraphs]
-    assert "Введение" in texts
+    # Профиль gost-7.32 → heading_1 в верхнем регистре (uppercase=True).
+    assert any(t.upper() == "ВВЕДЕНИЕ" for t in texts)
     assert "Это вводный абзац." in texts
 
 
@@ -139,6 +140,7 @@ def test_export_applies_paragraph_level_alignment_and_break(tmp_path: Path) -> N
         )
     )
     from gostforge.profile import load_profile
+
     profile = load_profile("gost-7.32-2017")
     out = tmp_path / "out.docx"
     export_docx(doc, profile, out)
@@ -166,10 +168,9 @@ def test_export_writes_table_with_caption(tmp_path: Path) -> None:
             [[TextRun(text="3")], [TextRun(text="4")]],
         ],
     )
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=[table])
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[table]))
     from gostforge.profile import load_profile
+
     profile = load_profile("gost-7.32-2017")
     out = tmp_path / "out.docx"
     export_docx(doc, profile, out)
@@ -193,10 +194,9 @@ def test_export_writes_figure_placeholder_with_caption(tmp_path: Path) -> None:
         id="fig-1",
         caption=[TextRun(text="Рисунок 1 — Схема")],
     )
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=[fig])
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
     from gostforge.profile import load_profile
+
     profile = load_profile("gost-7.32-2017")
     out = tmp_path / "out.docx"
     export_docx(doc, profile, out)
@@ -212,6 +212,7 @@ def test_export_writes_footer_with_page_field(tmp_path: Path) -> None:
     """Footer с {page}-плейсхолдером превращается в <w:fldSimple w:instr=PAGE/>."""
     from gostforge.model import ContentTemplate, HeaderConfig, PageNumberingConfig
     from gostforge.profile import load_profile
+
     doc = Document()
     doc.page_sections.append(
         PageSection(
@@ -228,6 +229,7 @@ def test_export_writes_footer_with_page_field(tmp_path: Path) -> None:
 
     # Round-trip через парсер: footer с PAGE-полем должен быть восстановлен.
     from gostforge.parser import parse_docx
+
     reparsed = parse_docx(out)
     section = reparsed.page_sections[0]
     assert section.page_numbering.visible is True
@@ -241,15 +243,14 @@ def test_export_writes_pgnumtype_start(tmp_path: Path) -> None:
     """start_mode=start_at, start_value=3 → <w:pgNumType w:start=3/>."""
     from gostforge.model import PageNumberingConfig
     from gostforge.profile import load_profile
+
     doc = Document()
     doc.page_sections.append(
         PageSection(
             id="main",
             name="m",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="start_at", start_value=3
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=3),
         )
     )
     profile = load_profile("gost-7.32-2017")
@@ -257,6 +258,7 @@ def test_export_writes_pgnumtype_start(tmp_path: Path) -> None:
     export_docx(doc, profile, out)
 
     from gostforge.parser import parse_docx
+
     reparsed = parse_docx(out)
     section = reparsed.page_sections[0]
     assert section.page_numbering.start_mode == "start_at"
@@ -266,8 +268,10 @@ def test_export_writes_pgnumtype_start(tmp_path: Path) -> None:
 def test_export_roundtrip_preserves_f04_and_f06(tmp_path: Path) -> None:
     """Полный round-trip: parse → export → parse не теряет F.04/F.06 информацию."""
     import sys
+
     sys.path.insert(0, str(Path(__file__).parent))
     from conftest import make_docx
+
     from gostforge.parser import parse_docx
     from gostforge.profile import load_profile
     from gostforge.validator import validate
@@ -304,6 +308,7 @@ def test_export_writes_pgnumtype_format(tmp_path: Path) -> None:
     from gostforge.model import PageNumberingConfig
     from gostforge.parser import parse_docx
     from gostforge.profile import load_profile
+
     doc = Document()
     doc.page_sections.append(
         PageSection(
@@ -325,6 +330,7 @@ def test_export_roundtrip_paper_size_and_orientation(tmp_path: Path) -> None:
     from gostforge.model import PageGeometry
     from gostforge.parser import parse_docx
     from gostforge.profile import load_profile
+
     doc = Document()
     doc.page_sections.append(
         PageSection(
@@ -354,9 +360,7 @@ def test_export_writes_listblock_paragraphs(tmp_path: Path) -> None:
         ordered=True,
         items=[[TextRun(text="первый")], [TextRun(text="второй")]],
     )
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=[block])
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[block]))
     profile = load_profile("gost-7.32-2017")
     out = tmp_path / "out.docx"
     export_docx(doc, profile, out)
@@ -377,6 +381,7 @@ def test_export_inserts_real_picture_when_image_exists(tmp_path: Path) -> None:
         from PIL import Image  # type: ignore[import-not-found]
     except ImportError:
         import pytest
+
         pytest.skip("Pillow не установлен — тест требует генерации PNG")
     img = tmp_path / "pixel.png"
     Image.new("RGB", (10, 10), color="red").save(img)
@@ -387,15 +392,14 @@ def test_export_inserts_real_picture_when_image_exists(tmp_path: Path) -> None:
         image_path=str(img),
         caption=[TextRun(text="Рисунок 1 — Пиксель")],
     )
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=[fig])
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
     profile = load_profile("gost-7.32-2017")
     out = tmp_path / "out.docx"
     export_docx(doc, profile, out)
 
     # В document.xml должен быть w:drawing
     import zipfile
+
     with zipfile.ZipFile(str(out)) as z:
         document_xml = z.read("word/document.xml").decode("utf-8")
     assert "w:drawing" in document_xml
@@ -409,9 +413,7 @@ def test_export_roundtrip_formula(tmp_path: Path) -> None:
 
     doc = Document()
     fml = Formula(id="formula-1", latex="E=mc^2", number=3)
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=[fml])
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fml]))
     profile = load_profile("gost-7.32-2017")
     out = tmp_path / "out.docx"
     export_docx(doc, profile, out)
@@ -430,9 +432,7 @@ def test_export_formula_without_number(tmp_path: Path) -> None:
 
     doc = Document()
     fml = Formula(id="formula-1", latex="x+y", number=None)
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=[fml])
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fml]))
     profile = load_profile("gost-7.32-2017")
     out = tmp_path / "out.docx"
     export_docx(doc, profile, out)
@@ -455,6 +455,7 @@ def test_export_with_source_docx_preserves_image(tmp_path: Path) -> None:
         from PIL import Image  # type: ignore[import-not-found]
     except ImportError:
         import pytest
+
         pytest.skip("Pillow не установлен — тест требует генерации PNG")
 
     img = tmp_path / "pixel.png"
@@ -469,10 +470,7 @@ def test_export_with_source_docx_preserves_image(tmp_path: Path) -> None:
 
     document = parse_docx(src)
     figures = [
-        item
-        for ps in document.page_sections
-        for item in ps.content
-        if hasattr(item, "image_path")
+        item for ps in document.page_sections for item in ps.content if hasattr(item, "image_path")
     ]
     assert figures, "Парсер не нашёл ни одного рисунка"
     assert figures[0].image_path.startswith("embedded:"), (
@@ -484,6 +482,7 @@ def test_export_with_source_docx_preserves_image(tmp_path: Path) -> None:
     export_docx(document, profile, out, source_docx=src)
 
     import zipfile
+
     with zipfile.ZipFile(str(out)) as z:
         names = z.namelist()
         document_xml = z.read("word/document.xml").decode("utf-8")
@@ -509,9 +508,7 @@ def test_export_with_embedded_path_without_source_docx_uses_placeholder(tmp_path
         image_path="embedded:rId99",
         caption=[TextRun(text="Рисунок 7 — Должен стать placeholder-ом")],
     )
-    doc.page_sections.append(
-        PageSection(id="main", name="m", type="main", content=[fig])
-    )
+    doc.page_sections.append(PageSection(id="main", name="m", type="main", content=[fig]))
     profile = load_profile("gost-7.32-2017")
     out = tmp_path / "out.docx"
     export_docx(doc, profile, out)

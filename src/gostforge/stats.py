@@ -54,9 +54,7 @@ def _iter_blocks_recursive(
             _iter_blocks_recursive(item.children, stats)
         elif isinstance(item, Paragraph):
             stats.paragraphs += 1
-            text = "".join(
-                r.text for r in item.content if isinstance(r, TextRun)
-            )
+            text = "".join(r.text for r in item.content if isinstance(r, TextRun))
             if text.strip():
                 stats.paragraphs_non_empty += 1
                 stats.characters += len(text)

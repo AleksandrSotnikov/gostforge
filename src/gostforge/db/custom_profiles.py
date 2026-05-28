@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Локальный реестр пользовательских профилей (маркетплейс кафедр).
 
 Профили хранятся как YAML-текст прямо в БД — это упрощает бэкап
@@ -19,7 +17,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -64,9 +62,7 @@ def install_profile(
         raise ValueError(f"Невалидный YAML: {exc}") from exc
 
     if not isinstance(data, dict):
-        raise ValueError(
-            f"Профиль должен быть YAML-объектом, получено: {type(data).__name__}"
-        )
+        raise ValueError(f"Профиль должен быть YAML-объектом, получено: {type(data).__name__}")
 
     try:
         profile = Profile(**data)
@@ -80,7 +76,7 @@ def install_profile(
             " или сначала уберите его через uninstall."
         )
 
-    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ts = datetime.now(UTC).isoformat(timespec="seconds")
     if existing is None:
         cursor = conn.execute(
             """
@@ -117,16 +113,12 @@ def install_profile(
 
 def uninstall_profile(conn: sqlite3.Connection, profile_id: str) -> bool:
     """Удалить custom-профиль по id. True если был, False если не было."""
-    cursor = conn.execute(
-        "DELETE FROM custom_profiles WHERE profile_id = ?", (profile_id,)
-    )
+    cursor = conn.execute("DELETE FROM custom_profiles WHERE profile_id = ?", (profile_id,))
     conn.commit()
     return (cursor.rowcount or 0) > 0
 
 
-def get_custom_profile(
-    conn: sqlite3.Connection, profile_id: str
-) -> CustomProfileRecord | None:
+def get_custom_profile(conn: sqlite3.Connection, profile_id: str) -> CustomProfileRecord | None:
     """Получить custom-профиль по id или None."""
     row = conn.execute(
         "SELECT * FROM custom_profiles WHERE profile_id = ?", (profile_id,)
@@ -138,9 +130,7 @@ def get_custom_profile(
 
 def list_custom_profiles(conn: sqlite3.Connection) -> list[CustomProfileRecord]:
     """Все установленные пользовательские профили, по алфавиту id."""
-    rows = conn.execute(
-        "SELECT * FROM custom_profiles ORDER BY profile_id"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM custom_profiles ORDER BY profile_id").fetchall()
     return [_row_to_record(r) for r in rows]
 
 

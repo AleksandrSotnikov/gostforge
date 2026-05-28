@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002, RUF003
-
 """REST API для gostforge поверх FastAPI.
 
 Опциональная зависимость (`pip install -e ".[api]"`). Импорт самого

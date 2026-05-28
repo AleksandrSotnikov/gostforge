@@ -5,8 +5,12 @@
 Профиль — YAML-файл, описывающий три аспекта одного стандарта оформления:
 
 1. **Стили** — параметры вёрстки (шрифты, поля, интервалы, форматы подписей).
+   Типизированы через Pydantic-классы: `BodyTextProfile`,
+   `HeadingStyleProfile` (×4), `CaptionStyleProfile`,
+   `TableStyleProfile`, `FigureStyleProfile`, `ListStyleProfile`.
 2. **Шаблон секций** — типовая структура PageSection с колонтитулами.
-3. **Правила проверок** — какие из ~75 проверок включены и с какими параметрами.
+3. **Правила проверок** — какие из 106 проверок включены и с какими
+   параметрами.
 
 Один профиль — один стандарт. Профиль `gost-7.32-2017` — базовый, профиль `mguu-2025` — кафедра МГУ управления, унаследованный от базового с переопределениями.
 
@@ -96,6 +100,48 @@ styles:
     first_line_indent_cm: 1.25
     alignment: justify
     hyphenation: false
+    # По ГОСТу — 0 pt между абзацами. Разделение достигается красной
+    # строкой + полуторным межстрочным. Если кафедра хочет 6/8 pt —
+    # переопределяется.
+    space_before_pt: 0
+    space_after_pt: 0
+  heading_1:
+    font: Times New Roman
+    size_pt: 14
+    bold: true
+    uppercase: true
+    color: auto          # 'auto' = чёрный; иначе hex без # (например, '000080')
+    alignment: center
+    spacing_before_pt: 18
+    spacing_after_pt: 12
+    page_break_before: true
+  heading_2:
+    bold: true
+    alignment: left
+    first_line_indent_cm: 1.25
+    spacing_before_pt: 12
+    spacing_after_pt: 6
+  figure:
+    alignment: center    # рисунок по центру страницы
+    caption:
+      alignment: center  # подпись «Рисунок 1 — ...» по центру
+      position: below
+      format: "Рисунок {num} — {title}"
+  table:
+    border_style: single  # 'single' / 'double' / 'dashed' / 'none'
+    border_size: 4        # 1/8 pt; 4 = 0.5 pt
+    border_color: auto
+    header_bold: true
+    caption:
+      alignment: left
+      position: above     # подпись над таблицей по ГОСТу
+      format: "Таблица {num} — {title}"
+  lists:
+    bullet_char: "–"            # тире по ГОСТ Р 7.32-2017
+    ordered_format: "{n})"      # «1)», «2)», ...
+    left_indent_cm: 1.75        # «Отступ текста» (куда переносится строка)
+    hanging_indent_cm: 0.5      # выступ маркера: >0 — маркер левее текста
+    marker_suffix: tab          # символ после маркера: tab | space | nothing
   # ... (см. полный пример в profiles/gost-7.32-2017.yaml)
 
 sections_template:

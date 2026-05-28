@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """SQL-миграции схемы локальной БД.
 
 Каждая миграция — кортеж ``(version, sql)``. ``apply_migrations`` идёт
@@ -136,9 +134,7 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
 
     Безопасно вызывать многократно — повторный вызов будет noop.
     """
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)"
-    )
+    conn.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER PRIMARY KEY)")
     row = conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version").fetchone()
     current = int(row[0]) if row else 0
 
@@ -156,9 +152,7 @@ def apply_migrations(conn: sqlite3.Connection) -> int:
 def current_schema_version(conn: sqlite3.Connection) -> int:
     """Вернуть максимальную применённую версию схемы (0 если БД пуста)."""
     try:
-        row = conn.execute(
-            "SELECT COALESCE(MAX(version), 0) FROM schema_version"
-        ).fetchone()
+        row = conn.execute("SELECT COALESCE(MAX(version), 0) FROM schema_version").fetchone()
         return int(row[0]) if row else 0
     except sqlite3.OperationalError:
         # Таблицы ещё нет — БД свежая, не инициализированная.

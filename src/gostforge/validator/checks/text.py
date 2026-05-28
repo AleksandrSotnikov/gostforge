@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """T.* — проверки основного текста (шрифт, кегль, интервалы)."""
 
 from __future__ import annotations
@@ -53,7 +51,8 @@ def _all_paragraphs(document: Document) -> list[Paragraph]:
 
 
 def _classify_paragraph(paragraph: Paragraph) -> str:
-    """Классифицировать абзац: 'body', 'caption', 'footnote', 'header_footer', 'heading'.
+    """Классифицировать абзац: 'body', 'caption', 'footnote',
+    'header_footer', 'heading', 'figure_placeholder'.
 
     Используется проверками для выбора применимых параметров профиля.
     """
@@ -66,6 +65,12 @@ def _classify_paragraph(paragraph: Paragraph) -> str:
         return "header_footer"
     if style.startswith("heading"):
         return "heading"
+    # Placeholder для отсутствующего файла-рисунка: «[Рисунок: fig-1]»
+    # или «[Таблица: tbl-1]». Не должен проверяться body-правилами —
+    # это не абзац основного текста.
+    text = "".join(el.text for el in paragraph.content if isinstance(el, TextRun)).strip()
+    if text.startswith("[Рисунок:") or text.startswith("[Таблица:"):
+        return "figure_placeholder"
     return "body"
 
 
@@ -321,9 +326,7 @@ def check_alignment(document: Document, profile: Profile) -> list[Violation]:
 
 
 @register("T.07")
-def check_no_consecutive_empty_paragraphs(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_no_consecutive_empty_paragraphs(document: Document, profile: Profile) -> list[Violation]:
     """В тексте не должно быть подряд идущих пустых абзацев.
 
     Параметр `checks.T.07.params.max_consecutive_empty` (int, по умолчанию 1)
@@ -349,9 +352,7 @@ def check_no_consecutive_empty_paragraphs(
                 run_length += 1
             else:
                 if run_length > max_empty:
-                    violations.append(
-                        _t07_violation(run_length, max_empty, chain_start_id)
-                    )
+                    violations.append(_t07_violation(run_length, max_empty, chain_start_id))
                 run_length = 0
                 chain_start_id = None
         if run_length > max_empty:
@@ -368,9 +369,7 @@ def _paragraph_text(paragraph: Paragraph) -> str:
 
 
 @register("T.08")
-def check_no_double_spaces(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_no_double_spaces(document: Document, profile: Profile) -> list[Violation]:
     """В абзаце не должно быть двух и более пробелов подряд внутри run-а.
 
     Проверяет только текст внутри отдельного TextRun (не склеивает соседние:
@@ -391,9 +390,7 @@ def check_no_double_spaces(
                     Violation(
                         check_code="T.08",
                         severity="warning",
-                        message=(
-                            f"Двойной пробел в абзаце «{_preview(paragraph.content)}»"
-                        ),
+                        message=(f"Двойной пробел в абзаце «{_preview(paragraph.content)}»"),
                         location=f"page_sections.*.paragraph[{paragraph.id}]",
                         suggestion="Заменить множественные пробелы на одинарный",
                     )
@@ -403,9 +400,7 @@ def check_no_double_spaces(
 
 
 @register("T.09")
-def check_no_trailing_spaces(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_no_trailing_spaces(document: Document, profile: Profile) -> list[Violation]:
     """В конце абзаца не должно быть хвостовых пробельных символов.
 
     Хвостовой пробел — это пробел/таб в самом конце последнего непустого
@@ -427,9 +422,7 @@ def check_no_trailing_spaces(
                 Violation(
                     check_code="T.09",
                     severity="info",
-                    message=(
-                        f"Хвостовой пробел в конце абзаца «{_preview(paragraph.content)}»"
-                    ),
+                    message=(f"Хвостовой пробел в конце абзаца «{_preview(paragraph.content)}»"),
                     location=f"page_sections.*.paragraph[{paragraph.id}]",
                     suggestion="Удалить пробельные символы в конце абзаца",
                 )
@@ -438,9 +431,7 @@ def check_no_trailing_spaces(
 
 
 @register("T.10")
-def check_typographic_quotes(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_typographic_quotes(document: Document, profile: Profile) -> list[Violation]:
     """В русском тексте должны использоваться «ёлочки», не ASCII-кавычки.
 
     Параметры `checks.T.10.params`:
@@ -471,9 +462,7 @@ def check_typographic_quotes(
             continue
         preview = _preview(paragraph.content)
         if quote_count >= 2:
-            message = (
-                f"В абзаце «{preview}» использованы прямые ASCII-кавычки вместо «ёлочек»"
-            )
+            message = f"В абзаце «{preview}» использованы прямые ASCII-кавычки вместо «ёлочек»"
         else:
             message = f"В абзаце «{preview}» обнаружена непарная ASCII-кавычка"
         violations.append(
@@ -503,13 +492,25 @@ _HYPHEN_BETWEEN_SPACES_RE = re.compile(r" - ")
 # свёрстанном тексте должен стоять неразрывный пробел (U+00A0), а не
 # обычный.
 _DEFAULT_UNITS: list[str] = [
-    "г", "кг", "мг", "т",
-    "м", "см", "мм", "км",
-    "л", "мл",
-    "ч", "мин", "с",
-    "°C", "%",
-    "шт", "руб",
-    "год", "лет",
+    "г",
+    "кг",
+    "мг",
+    "т",
+    "м",
+    "см",
+    "мм",
+    "км",
+    "л",
+    "мл",
+    "ч",
+    "мин",
+    "с",
+    "°C",
+    "%",
+    "шт",
+    "руб",
+    "год",
+    "лет",
 ]
 
 
@@ -538,9 +539,7 @@ _DEFAULT_NUMBER_UNIT_RE = _build_number_unit_re(_DEFAULT_UNITS)
 
 
 @register("T.12")
-def check_nbsp_between_number_and_unit(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_nbsp_between_number_and_unit(document: Document, profile: Profile) -> list[Violation]:
     """Между числом и единицей измерения должен стоять неразрывный пробел.
 
     Эвристика: ищем шаблон «<число><обычный пробел><единица>» в склеенном
@@ -578,8 +577,7 @@ def check_nbsp_between_number_and_unit(
                 ),
                 location=f"page_sections.*.paragraph[{paragraph.id}]",
                 suggestion=(
-                    "Заменить обычные пробелы на неразрывные между числом и "
-                    "единицей измерения"
+                    "Заменить обычные пробелы на неразрывные между числом и единицей измерения"
                 ),
                 details={"count": str(len(matches))},
             )
@@ -590,14 +588,13 @@ def check_nbsp_between_number_and_unit(
 # T.13: инициалы и фамилия (И. И. Иванов). Между ними должен быть NBSP,
 # а не обычный пробел. Пробелы в шаблоне — обычные (U+0020), NBSP сюда
 # не попадает.
-_INITIALS_SURNAME_RE = re.compile(
-    r"[А-ЯЁ]\. [А-ЯЁ]\. [А-ЯЁ][а-яё]+"
-)
+_INITIALS_SURNAME_RE = re.compile(r"[А-ЯЁ]\. [А-ЯЁ]\. [А-ЯЁ][а-яё]+")
 
 
 @register("T.13")
 def check_nbsp_between_initials_and_surname(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Между инициалами и фамилией должен стоять неразрывный пробел.
 
@@ -626,10 +623,7 @@ def check_nbsp_between_initials_and_surname(
                     f"(найдено: {len(matches)})"
                 ),
                 location=f"page_sections.*.paragraph[{paragraph.id}]",
-                suggestion=(
-                    "Заменить обычные пробелы на неразрывные между инициалами "
-                    "и фамилией"
-                ),
+                suggestion=("Заменить обычные пробелы на неразрывные между инициалами и фамилией"),
                 details={"count": str(len(matches))},
             )
         )
@@ -637,9 +631,7 @@ def check_nbsp_between_initials_and_surname(
 
 
 @register("T.11")
-def check_em_dash_instead_of_hyphen(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_em_dash_instead_of_hyphen(document: Document, profile: Profile) -> list[Violation]:
     """В русском тексте на месте тире должно стоять « — » (U+2014), не « - ».
 
     Эвристика Фазы 1: ищем шаблон « - » (пробел–дефис–пробел) в склеенном
@@ -670,17 +662,11 @@ def check_em_dash_instead_of_hyphen(
 
 
 def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violation:
-    location = (
-        f"page_sections.*.paragraph[{location_id}]"
-        if location_id
-        else "page_sections.*"
-    )
+    location = f"page_sections.*.paragraph[{location_id}]" if location_id else "page_sections.*"
     return Violation(
         check_code="T.07",
         severity="warning",
-        message=(
-            f"Подряд идущих пустых абзацев: {count} (допустимо не более {allowed})"
-        ),
+        message=(f"Подряд идущих пустых абзацев: {count} (допустимо не более {allowed})"),
         location=location,
         suggestion="Удалить лишние пустые абзацы; для отступа использовать spacing_before/after",
         details={"count": str(count), "allowed": str(allowed)},
@@ -689,7 +675,8 @@ def _t07_violation(count: int, allowed: int, location_id: str | None) -> Violati
 
 @register("T.06")
 def check_auto_hyphenation_disabled(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """По ГОСТ автоматические переносы в работе должны быть отключены.
 
@@ -704,13 +691,100 @@ def check_auto_hyphenation_disabled(
                 severity="error",
                 message="В документе включён автоматический перенос слов",
                 location="document.auto_hyphenation",
-                suggestion=(
-                    "В Word: Разметка страницы → Расстановка переносов → Нет"
-                ),
+                suggestion=("В Word: Разметка страницы → Расстановка переносов → Нет"),
                 details={"actual": "True"},
             )
         ]
     return []
+
+
+@register("T.14")
+def check_paragraph_spacing(document: Document, profile: Profile) -> list[Violation]:
+    """Проверка интервалов перед/после абзаца основного текста.
+
+    По ГОСТ Р 2.105-2019 и ГОСТ 7.32-2017 разделение абзацев
+    основного текста достигается красной строкой + полуторным
+    межстрочным интервалом — дополнительные ``w:spacing w:before``/
+    ``w:after`` должны быть 0. Если в документе у Normal-параграфов
+    задан space > 0 — нарушение.
+
+    Параметры профиля ``checks.T.14.params``:
+    * ``expected_before_pt`` (по умолчанию 0);
+    * ``expected_after_pt`` (по умолчанию 0);
+    * ``tolerance_pt`` (по умолчанию 0.5) — допуск из-за округлений.
+
+    Проверяются только Normal-параграфы (стиль не Heading*/Caption/
+    List*) — для заголовков spacing идёт через H.07.
+    """
+    config = profile.checks.get("T.14")
+    body = profile.styles.body
+    expected_before = float(body.space_before_pt)
+    expected_after = float(body.space_after_pt)
+    tolerance = 0.5
+    if config:
+        if config.params.get("expected_before_pt") is not None:
+            expected_before = float(config.params["expected_before_pt"])
+        if config.params.get("expected_after_pt") is not None:
+            expected_after = float(config.params["expected_after_pt"])
+        if config.params.get("tolerance_pt") is not None:
+            tolerance = float(config.params["tolerance_pt"])
+
+    violations: list[Violation] = []
+    for paragraph in _all_paragraphs(document):
+        # Только обычные абзацы — заголовки/подписи/списки имеют
+        # собственные правила интервалов.
+        style = (paragraph.style_name or "Normal").lower()
+        if any(
+            style.startswith(prefix)
+            for prefix in ("heading", "caption", "list", "footer", "header", "title")
+        ):
+            continue
+        # None = атрибут не задан, унаследован — пропускаем.
+        if paragraph.space_before_pt is not None:
+            diff = abs(paragraph.space_before_pt - expected_before)
+            if diff > tolerance:
+                violations.append(
+                    Violation(
+                        check_code="T.14",
+                        severity="warning",
+                        message=(
+                            f"Интервал перед абзацем {paragraph.space_before_pt:g} pt "
+                            f"вместо {expected_before:g} pt"
+                        ),
+                        location=f"paragraphs.{paragraph.id}.space_before_pt",
+                        suggestion=(
+                            f"Установить интервал перед абзацем = {expected_before:g} pt "
+                            "в стиле Normal"
+                        ),
+                        details={
+                            "expected": f"{expected_before:g}",
+                            "actual": f"{paragraph.space_before_pt:g}",
+                        },
+                    )
+                )
+        if paragraph.space_after_pt is not None:
+            diff = abs(paragraph.space_after_pt - expected_after)
+            if diff > tolerance:
+                violations.append(
+                    Violation(
+                        check_code="T.14",
+                        severity="warning",
+                        message=(
+                            f"Интервал после абзаца {paragraph.space_after_pt:g} pt "
+                            f"вместо {expected_after:g} pt"
+                        ),
+                        location=f"paragraphs.{paragraph.id}.space_after_pt",
+                        suggestion=(
+                            f"Установить интервал после абзаца = {expected_after:g} pt "
+                            "в стиле Normal"
+                        ),
+                        details={
+                            "expected": f"{expected_after:g}",
+                            "actual": f"{paragraph.space_after_pt:g}",
+                        },
+                    )
+                )
+    return violations
 
 
 __all__ = [
@@ -726,5 +800,6 @@ __all__ = [
     "check_no_consecutive_empty_paragraphs",
     "check_no_double_spaces",
     "check_no_trailing_spaces",
+    "check_paragraph_spacing",
     "check_typographic_quotes",
 ]

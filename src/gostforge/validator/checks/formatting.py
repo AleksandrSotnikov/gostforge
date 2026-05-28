@@ -7,7 +7,6 @@ from gostforge.profile import Profile
 
 from ..engine import Violation, register
 
-
 # Плейсхолдер, который парсер ставит в footer/header, когда находит
 # поле PAGE в OOXML (instrText="PAGE" или fldSimple).
 _PAGE_PLACEHOLDER = "{page}"
@@ -33,10 +32,7 @@ def _placeholder_at(template: ContentTemplate | None, slot: str, placeholder: st
     content = getattr(template, slot, None)
     if content is None:
         return False
-    for el in content:
-        if isinstance(el, TextRun) and placeholder in el.text:
-            return True
-    return False
+    return any(isinstance(el, TextRun) and placeholder in el.text for el in content)
 
 
 @register("F.01")
@@ -258,8 +254,7 @@ def check_paper_size(document: Document, profile: Profile) -> list[Violation]:
                 check_code="F.02",
                 severity="error",
                 message=(
-                    f"Формат бумаги в секции «{section.name}» — «{actual}», "
-                    f"ожидается «{expected}»"
+                    f"Формат бумаги в секции «{section.name}» — «{actual}», ожидается «{expected}»"
                 ),
                 location=f"page_sections.{section.id}.page.paper",
                 suggestion=f"Установить формат бумаги «{expected}»",

@@ -1,4 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
 """Тесты inline-аннотации .docx."""
 
 from __future__ import annotations
@@ -44,16 +43,12 @@ def bad_margins_docx(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
                 id="main",
                 name="Основная часть",
                 type="main",
-                page=PageGeometry(
-                    margins_mm={"top": 25, "right": 15, "bottom": 20, "left": 30}
-                ),
+                page=PageGeometry(margins_mm={"top": 25, "right": 15, "bottom": 20, "left": 30}),
             )
         )
         return doc
 
-    monkeypatch.setattr(
-        "gostforge.annotator.docx_annotator.parse_docx", fake_parse
-    )
+    monkeypatch.setattr("gostforge.annotator.docx_annotator.parse_docx", fake_parse)
     return p
 
 
@@ -64,18 +59,14 @@ def test_annotate_creates_output_file(bad_margins_docx: Path, tmp_path: Path) ->
     assert out.exists()
 
 
-def test_annotate_returns_count_positive(
-    bad_margins_docx: Path, tmp_path: Path
-) -> None:
+def test_annotate_returns_count_positive(bad_margins_docx: Path, tmp_path: Path) -> None:
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
     n = annotate_docx(bad_margins_docx, out, profile, style="inline")
     assert n > 0
 
 
-def test_annotate_inserts_marker_text(
-    bad_margins_docx: Path, tmp_path: Path
-) -> None:
+def test_annotate_inserts_marker_text(bad_margins_docx: Path, tmp_path: Path) -> None:
     out = tmp_path / "annotated.docx"
     profile = load_profile("gost-7.32-2017")
     annotate_docx(bad_margins_docx, out, profile, style="inline")
@@ -95,9 +86,7 @@ def test_annotate_inserts_marker_text(
     assert found, "В аннотированном документе не найден маркер [F.01:"
 
 
-def test_annotate_returns_count_matches_violations(
-    clean_docx: Path, tmp_path: Path
-) -> None:
+def test_annotate_returns_count_matches_violations(clean_docx: Path, tmp_path: Path) -> None:
     """Counts of inserted markers ≤ count of violations (some могут не разрешиться
     в конкретный параграф и попадают в первый параграф как fallback)."""
     from gostforge.parser import parse_docx
@@ -114,6 +103,4 @@ def test_annotate_returns_count_matches_violations(
 def test_annotate_raises_on_missing_input(tmp_path: Path) -> None:
     profile = load_profile("gost-7.32-2017")
     with pytest.raises(FileNotFoundError):
-        annotate_docx(
-            tmp_path / "nope.docx", tmp_path / "out.docx", profile, style="inline"
-        )
+        annotate_docx(tmp_path / "nope.docx", tmp_path / "out.docx", profile, style="inline")

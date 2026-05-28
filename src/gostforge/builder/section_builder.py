@@ -1,13 +1,13 @@
-# ruff: noqa: RUF002
-
 """Fluent-builder для одного логического раздела."""
 
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from gostforge.model import (
+    CellMerge,
     Document,
     Figure,
     Formula,
@@ -16,6 +16,7 @@ from gostforge.model import (
     LogicalSection,
     Paragraph,
     Table,
+    TableOfContents,
     TextRun,
 )
 
@@ -62,9 +63,7 @@ class SectionBuilder:
 
     # --- Контент -------------------------------------------------------------
 
-    def paragraph(
-        self, text: str, *, bold: bool = False, italic: bool = False
-    ) -> SectionBuilder:
+    def paragraph(self, text: str, *, bold: bool = False, italic: bool = False) -> SectionBuilder:
         """Добавить параграф в текущий раздел.
 
         Высокоуровневая обёртка для случая «один абзац = одна строка с
@@ -72,9 +71,7 @@ class SectionBuilder:
         перекрёстных ссылок и mixed-форматирования используйте
         :meth:`rich_paragraph`.
         """
-        return self.rich_paragraph(
-            [TextRun(text=text, bold=bold, italic=italic)]
-        )
+        return self.rich_paragraph([TextRun(text=text, bold=bold, italic=italic)])
 
     def rich_paragraph(self, elements: list[InlineElement]) -> SectionBuilder:
         """Добавить параграф с готовым набором inline-элементов.
@@ -96,13 +93,19 @@ class SectionBuilder:
 
         Если `image_path` указывает на существующий файл, экспортёр вставит
         реальное изображение; иначе — placeholder-параграф `[Рисунок: id]`.
+
+        Формат метки зависит от ``profile.styles.figure.numbering`` и
+        текущей главы: «1» (сквозная), «3.1» (by_chapter), «А.1» (приложение).
+        Поле `Figure.number` хранит сквозной порядковый int — для xref-ов
+        и валидатора, которые матчатся по позиции (а не по строковой метке).
         """
-        number = self._root._next_figure_number()
+        label, ordinal = self._root._next_figure_label_with_ordinal()
+        caption_text = _format_caption(self._root._figure_caption_format, num=label, title=caption)
         fig = Figure(
             id=self._root._next_id("fig"),
             image_path=image_path,
-            caption=[TextRun(text=f"Рисунок {number} — {caption}")],
-            number=number,
+            caption=[TextRun(text=caption_text)],
+            number=ordinal,
         )
         self._section.children.append(fig)
         return self
@@ -115,7 +118,7 @@ class SectionBuilder:
         image_path: str,
         caption: str,
         *,
-        width_cm: float | None = None,  # noqa: ARG002
+        width_cm: float | None = None,
     ) -> SectionBuilder:
         """Добавить рисунок (синоним `figure` с дополнительным параметром width_cm)."""
         return self.figure(image_path, caption)
@@ -130,6 +133,36 @@ class SectionBuilder:
             id=self._root._next_id("list"),
             ordered=ordered,
             items=[[TextRun(text=item)] for item in items],
+        )
+        self._section.children.append(block)
+        return self
+
+    def table_of_contents(
+        self,
+        *,
+        min_level: int = 1,
+        max_level: int = 3,
+    ) -> SectionBuilder:
+        """Вставить автоматическое оглавление документа.
+
+        Реализуется через Word TOC-field. При открытии .docx Word
+        предложит обновить оглавление (или F9), и сформирует список
+        заголовков с номерами страниц.
+
+        Параметры:
+        * ``min_level`` / ``max_level`` — диапазон уровней заголовков
+          в оглавлении (default 1-3 — главы, подразделы, пункты).
+
+        Пример::
+
+            work("Курсовая", year=2026) \\
+                .section("Содержание").table_of_contents() \\
+                .section("Введение").paragraph("...")
+        """
+        block = TableOfContents(
+            id=self._root._next_id("toc"),
+            min_level=min_level,
+            max_level=max_level,
         )
         self._section.children.append(block)
         return self
@@ -152,18 +185,36 @@ class SectionBuilder:
 
     def table(
         self,
-        headers: list[str],
-        rows: list[list[str]],
+        headers: builtins.list[str],
+        rows: builtins.list[builtins.list[str]],
         caption: str,
+        *,
+        extra_header_rows: builtins.list[builtins.list[str]] | None = None,
+        merges: builtins.list[CellMerge] | None = None,
     ) -> SectionBuilder:
-        """Добавить таблицу с автонумерованной подписью."""
-        number = self._root._next_table_number()
+        """Добавить таблицу с автонумерованной подписью.
+
+        Формат метки — как у figure (continuous / by_chapter / appendix).
+        Поле `Table.number` — сквозной int (для xref-ов).
+
+        Для двух/трёх-уровневой шапки (ГОСТ Р 2.105):
+        * ``extra_header_rows`` — дополнительные ряды НАД основной шапкой,
+          сверху вниз. Каждый ряд — список строк-ячеек.
+        * ``merges`` — объединения колонок (обычно colspan у группирующих
+          ячеек верхних рядов). Координаты — в (extra_header_rows + headers
+          + rows).
+        """
+        label, ordinal = self._root._next_table_label_with_ordinal()
+        extra = extra_header_rows or []
+        caption_text = _format_caption(self._root._table_caption_format, num=label, title=caption)
         tbl = Table(
             id=self._root._next_id("tbl"),
-            caption=[TextRun(text=f"Таблица {number} — {caption}")],
+            caption=[TextRun(text=caption_text)],
             headers=[[TextRun(text=h)] for h in headers],
+            extra_header_rows=[[[TextRun(text=c)] for c in row] for row in extra],
             rows=[[[TextRun(text=cell)] for cell in row] for row in rows],
-            number=number,
+            merges=list(merges or []),
+            number=ordinal,
         )
         self._section.children.append(tbl)
         return self
@@ -215,6 +266,40 @@ class SectionBuilder:
         """Закрыть текущий раздел и открыть новый раздел уровня 1."""
         return self._root.section(heading)
 
+    # --- Нормоконтроль раздела ----------------------------------------------
+
+    def skip_checks(self, *codes: str) -> SectionBuilder:
+        """Отключить указанные проверки для этого раздела.
+
+        Пример::
+
+            (work("Курсовая", year=2026)
+                .section("Титульный лист")
+                    .paragraph("...")
+                    .skip_checks("H.01", "T.04", "T.05")
+                .section("Введение")
+                    .paragraph("..."))
+
+        Принятые коды добавляются к ``LogicalSection.disabled_checks``,
+        дубликаты игнорируются. Валидатор не сообщит о нарушениях с
+        этими кодами для содержимого раздела (и его дочерних узлов).
+        """
+        existing = set(self._section.disabled_checks)
+        for code in codes:
+            existing.add(code)
+        self._section.disabled_checks = sorted(existing)
+        return self
+
+    def skip_all_checks(self) -> SectionBuilder:
+        """Отключить ВСЕ проверки для этого раздела.
+
+        Спецзначение ``"*"`` в ``disabled_checks``. Удобно для титульного
+        листа, реферата и приложений, которые оформляются по своим
+        правилам (или по шаблону кафедры), не по ГОСТу.
+        """
+        self._section.disabled_checks = ["*"]
+        return self
+
     # --- Терминальные операции ----------------------------------------------
 
     def build(self) -> Document:
@@ -224,6 +309,25 @@ class SectionBuilder:
     def save(self, path: str | Path, profile: str | Profile | None = None) -> None:
         """Делегирует корневому WorkBuilder."""
         self._root.save(path, profile)
+
+
+def _format_caption(template: str, *, num: str, title: str) -> str:
+    """Подставить ``{num}``/``{title}`` в шаблон подписи из профиля.
+
+    Если в шаблоне нет ни ``{num}``, ни ``{title}`` (например, профиль
+    кастомный без плейсхолдеров) — возвращаем шаблон + " — " + title
+    как мягкий fallback, чтобы заголовок не потерялся.
+
+    Любые KeyError-исключения (опечатки в шаблоне) перехватываются и
+    возвращается дефолтная форма «num — title», чтобы билдер не падал.
+    """
+    if "{num}" not in template and "{title}" not in template:
+        return f"{template} — {title}".strip()
+    try:
+        return template.format(num=num, title=title)
+    except (KeyError, IndexError):
+        # Кастомный шаблон с неизвестным плейсхолдером → fallback.
+        return f"{num} — {title}".strip()
 
 
 def _heading_text(section: LogicalSection) -> str:

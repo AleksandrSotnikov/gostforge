@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты inline-парсера (Фаза 2.5, §4.5).
 
 Покрытие: TextRun.underline / color_hex из <w:rPr>, InlineFormula

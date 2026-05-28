@@ -1,7 +1,5 @@
 """M.* — проверки формул."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 import re
@@ -66,9 +64,7 @@ def _paragraph_text(paragraph: Paragraph) -> str:
 
 
 @register("M.01")
-def check_formula_has_number(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_formula_has_number(document: Document, profile: Profile) -> list[Violation]:
     """Нумерация формулы оформлена номером в круглых скобках справа.
 
     Параметры:
@@ -97,14 +93,9 @@ def check_formula_has_number(
             Violation(
                 check_code="M.01",
                 severity=severity,
-                message=(
-                    f"У формулы «{formula.id}» отсутствует номер в круглых "
-                    "скобках"
-                ),
+                message=(f"У формулы «{formula.id}» отсутствует номер в круглых скобках"),
                 location=f"page_sections.{page_section.id}.formula[{formula.id}]",
-                suggestion=(
-                    "Указать номер формулы в круглых скобках справа: «(1)»"
-                ),
+                suggestion=("Указать номер формулы в круглых скобках справа: «(1)»"),
                 details={"formula_id": formula.id},
             )
         )
@@ -112,9 +103,7 @@ def check_formula_has_number(
 
 
 @register("M.03")
-def check_formula_numbering_continuous(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_formula_numbering_continuous(document: Document, profile: Profile) -> list[Violation]:
     """Сквозная нумерация формул: номера должны идти 1, 2, 3, ...
 
     Формулы без номера (`number is None`) пропускаются — это случай M.01.
@@ -142,13 +131,11 @@ def check_formula_numbering_continuous(
                     check_code="M.03",
                     severity="error",
                     message=(
-                        f"Номер {num} встречается у двух формул: "
-                        f"«{previous.id}» и «{formula.id}»"
+                        f"Номер {num} встречается у двух формул: «{previous.id}» и «{formula.id}»"
                     ),
                     location=f"formula[{formula.id}]",
                     suggestion=(
-                        "Перенумеровать формулы так, чтобы каждая имела "
-                        "уникальный сквозной номер"
+                        "Перенумеровать формулы так, чтобы каждая имела уникальный сквозной номер"
                     ),
                     details={
                         "formula_id": formula.id,
@@ -165,14 +152,10 @@ def check_formula_numbering_continuous(
                     check_code="M.03",
                     severity="error",
                     message=(
-                        f"После формулы {expected - 1} ожидается формула "
-                        f"{expected}, найдено {num}"
+                        f"После формулы {expected - 1} ожидается формула {expected}, найдено {num}"
                     ),
                     location=f"formula[{formula.id}]",
-                    suggestion=(
-                        f"Перенумеровать формулу: «({expected})» вместо "
-                        f"«({num})»"
-                    ),
+                    suggestion=(f"Перенумеровать формулу: «({expected})» вместо «({num})»"),
                     details={
                         "formula_id": formula.id,
                         "expected": str(expected),
@@ -202,9 +185,7 @@ def _formula_reference_patterns(num: int) -> list[re.Pattern[str]]:
 
 
 @register("M.04")
-def check_formula_referenced_in_text(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_formula_referenced_in_text(document: Document, profile: Profile) -> list[Violation]:
     """На каждую нумерованную формулу должна быть ссылка в тексте.
 
     Для каждой Formula с непустым `number` ищем в склеенном тексте всех
@@ -229,13 +210,10 @@ def check_formula_referenced_in_text(
             Violation(
                 check_code="M.04",
                 severity="warning",
-                message=(
-                    f"В тексте отсутствует ссылка на формулу {num} «{formula.id}»"
-                ),
+                message=(f"В тексте отсутствует ссылка на формулу {num} «{formula.id}»"),
                 location=f"page_sections.{page_section.id}.formula[{formula.id}]",
                 suggestion=(
-                    f"Добавить в текст ссылку вида «по формуле ({num})» или "
-                    f"«в формуле {num}»"
+                    f"Добавить в текст ссылку вида «по формуле ({num})» или «в формуле {num}»"
                 ),
                 details={"formula_id": formula.id, "number": str(num)},
             )
@@ -245,9 +223,7 @@ def check_formula_referenced_in_text(
 
 # M.02: распознаём «где: ...» или «здесь: ...» в начале параграфа.
 # Поддерживаем варианты с двоеточием/запятой/тире/пробелом следом.
-_VARIABLES_EXPLAIN_RE = re.compile(
-    r"^\s*(где|здесь)\b", re.IGNORECASE
-)
+_VARIABLES_EXPLAIN_RE = re.compile(r"^\s*(где|здесь)\b", re.IGNORECASE)
 
 
 def _flatten_blocks(items: Sequence[LogicalSection | Block]) -> list[Block]:
@@ -276,9 +252,7 @@ def _all_blocks_linear(document: Document) -> list[Block]:
 
 
 @register("M.02")
-def check_formula_variables_explained(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_formula_variables_explained(document: Document, profile: Profile) -> list[Violation]:
     """После нумерованной формулы должны идти пояснения переменных.
 
     Эвристика Фазы 1: для каждой Formula с `number is not None` смотрим
@@ -342,9 +316,7 @@ def check_formula_variables_explained(
 
 
 @register("M.05")
-def check_formula_centered(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_formula_centered(document: Document, profile: Profile) -> list[Violation]:
     """Формула должна быть выровнена по центру.
 
     На Фазе 1 у Formula нет поля alignment в модели — проверка

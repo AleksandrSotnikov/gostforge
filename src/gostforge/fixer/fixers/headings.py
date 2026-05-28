@@ -1,10 +1,9 @@
-# ruff: noqa: RUF002, RUF003
-
 """H.* — фиксеры заголовков логических разделов."""
 
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from gostforge.model import (
     Block,
@@ -13,12 +12,23 @@ from gostforge.model import (
     TextRun,
 )
 from gostforge.profile import Profile
+from gostforge.profile.schema import HeadingStyleProfile
 
 from ..engine import FixApplied, register
 
 # Шаблон «номер заголовка с точкой»: «1. Введение», «1.2. Анализ».
 # Группы: 1 — номер, 2 — точка, 3 — следующий пробельный символ.
 _NUMBER_WITH_DOT = re.compile(r"^(\d+(?:\.\d+)*)(\.)(\s)")
+
+# Ведущая нумерация заголовка, которую нужно срезать перед авто-простановкой:
+# - чистый номер: «1 », «1. », «1.2 », «1.2.1. »;
+# - со словесной меткой раздела: «ГЛАВА 1. », «Глава 2 », «Раздел 3. ».
+# Без метки ГОСТ 7.32 нумерует разделы просто числом, поэтому «ГЛАВА N»
+# воспринимаем как уже-нумерацию и заменяем её на канонический номер.
+_LEADING_NUMBER_RE = re.compile(
+    r"^(?:(?:глава|раздел|часть)\s+)?\d+(?:\.\d+)*\.?\s+",
+    re.IGNORECASE,
+)
 
 
 def _iter_logical_sections(
@@ -51,10 +61,99 @@ def _heading_location(section: LogicalSection) -> str:
     return f"page_sections.*.logical_section[{section.id}].heading"
 
 
-@register("H.03")
-def fix_dot_after_heading_number(
-    document: Document, profile: Profile
+# Допуск кегля (pt) — как в проверке H.01/H.02.
+_HEADING_SIZE_TOLERANCE_PT = 0.1
+
+
+def _fix_heading_format(
+    document: Document,
+    *,
+    level: int,
+    fixer_code: str,
+    hstyle: HeadingStyleProfile,
+    legacy: dict[str, Any],
 ) -> list[FixApplied]:
+    """Привести формат заголовков уровня ``level`` к профилю.
+
+    Исправляет ЯВНЫЕ шрифт/кегль/жирность/цвет run-ов (наследуемые
+    значения не трогает). UPPERCASE не меняем — это правка текста, а не
+    форматирования. Предикат цвета берётся из проверки, чтобы фиксер
+    исправлял ровно то, что она находит.
+    """
+    from gostforge.validator.checks.headings import _color_violates_expected
+
+    expected_font: str | None = legacy.get("font", hstyle.font)
+    expected_size: float | None = legacy.get("size_pt", hstyle.size_pt)
+    expected_bold: bool | None = legacy.get("bold", hstyle.bold)
+    expected_color: str | None = legacy.get("color", hstyle.color)
+
+    applied: list[FixApplied] = []
+    for section in _all_logical_sections(document):
+        if section.level != level:
+            continue
+        changed = False
+        for run in _heading_runs(section):
+            if not run.text or not run.text.strip():
+                continue
+            if expected_font and run.font and run.font != expected_font:
+                run.font = expected_font
+                changed = True
+            if (
+                expected_size is not None
+                and run.size_pt is not None
+                and abs(run.size_pt - float(expected_size)) > _HEADING_SIZE_TOLERANCE_PT
+            ):
+                run.size_pt = float(expected_size)
+                changed = True
+            if expected_bold is True and run.bold is False:
+                run.bold = True
+                changed = True
+            if _color_violates_expected(run.color_hex, expected_color):
+                if not expected_color or expected_color == "auto":
+                    run.color_hex = None
+                else:
+                    run.color_hex = str(expected_color).lstrip("#").upper()
+                changed = True
+        if changed:
+            applied.append(
+                FixApplied(
+                    fixer_code=fixer_code,
+                    location=_heading_location(section),
+                    description=(
+                        f"Формат заголовка {level} уровня приведён к профилю "
+                        f"(шрифт/кегль/жирность/цвет)"
+                    ),
+                )
+            )
+    return applied
+
+
+@register("H.01")
+def fix_heading_1_format(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести формат заголовков 1 уровня к профилю (без UPPERCASE)."""
+    return _fix_heading_format(
+        document,
+        level=1,
+        fixer_code="H.01",
+        hstyle=profile.styles.heading_1,
+        legacy=profile.styles.extra.get("heading_1", {}) or {},
+    )
+
+
+@register("H.02")
+def fix_heading_2_format(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести формат заголовков 2 уровня к профилю (без UPPERCASE)."""
+    return _fix_heading_format(
+        document,
+        level=2,
+        fixer_code="H.02",
+        hstyle=profile.styles.heading_2,
+        legacy=profile.styles.extra.get("heading_2", {}) or {},
+    )
+
+
+@register("H.03")
+def fix_dot_after_heading_number(document: Document, profile: Profile) -> list[FixApplied]:
     """Убрать точку после номера в заголовке.
 
     Заменяет «1. Введение» → «1 Введение», «1.2. Анализ» → «1.2 Анализ».
@@ -90,9 +189,7 @@ def fix_dot_after_heading_number(
 
 
 @register("H.08")
-def fix_heading_trailing_dot(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_heading_trailing_dot(document: Document, profile: Profile) -> list[FixApplied]:
     """Убрать точку (или многоточие) в конце заголовка.
 
     Не трогает `?` и `:` — они по ГОСТ допустимы. Работает с последним
@@ -141,7 +238,143 @@ def fix_heading_trailing_dot(
     return applied
 
 
+@register("H.04")
+def fix_heading_auto_numbering(
+    document: Document,
+    profile: Profile,
+) -> list[FixApplied]:
+    """Авто-нумерация содержательных разделов: '1', '1.1', '1.1.1'.
+
+    По ГОСТ 7.32-2017 п. 6.2: разделы и подразделы основной части
+    нумеруются арабскими цифрами. Структурные разделы (Введение,
+    Заключение, Содержание, Реферат, Список источников, Приложения)
+    не нумеруются.
+
+    Алгоритм симметричен UI-кнопке «Авто-нумерация» в bulk-операциях
+    Streamlit-конструктора, но реализован на уровне модели Document
+    через рекурсивный обход иерархии секций.
+
+    Не активен по умолчанию (`profile.checks.H.04.enabled` контролирует).
+    """
+    config = profile.checks.get("H.04")
+    if not (config and config.enabled):
+        return []
+
+    applied: list[FixApplied] = []
+    top_idx = 0
+    for ps in document.page_sections:
+        for sec in ps.content:
+            if not isinstance(sec, LogicalSection):
+                continue
+            heading_text = _heading_text(sec)
+            if _is_structural_heading(heading_text):
+                # Нормализуем — убираем случайную нумерацию.
+                _set_heading_text(sec, _strip_existing_number(heading_text))
+                # Подразделы внутри Содержание/Введение и т. п. тоже не нумеруются.
+                continue
+            top_idx += 1
+            base = _strip_existing_number(heading_text)
+            new_text = f"{top_idx} {base}"
+            if new_text != heading_text:
+                _set_heading_text(sec, new_text)
+                applied.append(
+                    FixApplied(
+                        fixer_code="H.04",
+                        location=_heading_location(sec),
+                        description=f"«{heading_text}» → «{new_text}»",
+                    )
+                )
+            # Рекурсивно нумеруем подразделы.
+            _renumber_subsections(sec, prefix=str(top_idx), applied=applied)
+    return applied
+
+
+def _renumber_subsections(
+    parent: LogicalSection,
+    *,
+    prefix: str,
+    applied: list[FixApplied],
+) -> None:
+    """Простановка номеров 'prefix.K' для подразделов parent и
+    'prefix.K.M' для их подподразделов."""
+    sub_idx = 0
+    for child in parent.children:
+        if not isinstance(child, LogicalSection):
+            continue
+        old_text = _heading_text(child)
+        if _is_structural_heading(old_text):
+            _set_heading_text(child, _strip_existing_number(old_text))
+            continue
+        sub_idx += 1
+        base = _strip_existing_number(old_text)
+        new_text = f"{prefix}.{sub_idx} {base}"
+        if new_text != old_text:
+            _set_heading_text(child, new_text)
+            applied.append(
+                FixApplied(
+                    fixer_code="H.04",
+                    location=_heading_location(child),
+                    description=f"«{old_text}» → «{new_text}»",
+                )
+            )
+        _renumber_subsections(child, prefix=f"{prefix}.{sub_idx}", applied=applied)
+
+
+def _heading_text(section: LogicalSection) -> str:
+    """Склейка inline-элементов заголовка в строку."""
+    return "".join(el.text for el in section.heading if isinstance(el, TextRun))
+
+
+def _set_heading_text(section: LogicalSection, text: str) -> None:
+    """Заменить весь heading на один TextRun(text=...).
+
+    Существующее форматирование heading-runs теряется — это OK
+    для авто-нумерации (Heading-стиль применяется к всему параграфу
+    в экспортёре).
+    """
+    section.heading = [TextRun(text=text)]
+
+
+# Структурные разделы (Введение, Заключение, Приложение, ...) — не нумеруются.
+_STRUCTURAL = frozenset(
+    {
+        "введение",
+        "заключение",
+        "содержание",
+        "реферат",
+        "список использованных источников",
+        "список литературы",
+        "литература",
+        "список источников",
+        "библиографический список",
+        "оглавление",
+        "перечень сокращений",
+        "перечень обозначений и сокращений",
+    }
+)
+
+
+def _is_structural_heading(heading: str) -> bool:
+    cleaned = _strip_existing_number(heading).strip().lower()
+    if cleaned in _STRUCTURAL:
+        return True
+    return bool(cleaned.startswith("приложение"))
+
+
+def _strip_existing_number(heading: str) -> str:
+    """Убрать существующую нумерацию с начала заголовка.
+
+    Распознаёт как чистый номер («1», «1.», «1.1»), так и словесную метку
+    раздела с номером («ГЛАВА 1.», «Раздел 2») — чтобы авто-нумерация не
+    давала «1 ГЛАВА 1. …».
+    """
+    return _LEADING_NUMBER_RE.sub("", heading).strip()
+
+
 __all__ = [
     "fix_dot_after_heading_number",
+    "fix_heading_1_format",
+    "fix_heading_2_format",
+    "fix_heading_auto_numbering",
     "fix_heading_trailing_dot",
 ]

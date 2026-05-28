@@ -30,17 +30,32 @@ Document
 │  ├─ page_numbering: PageNumberingConfig
 │  │  └─ visible, format (arabic/roman/letter), start_mode, start_value
 │  └─ content: (LogicalSection | Block)[]
-│     ├─ LogicalSection               # раздел: heading, level, children
+│     ├─ LogicalSection               # раздел: heading, level, children,
+│     │                                # disabled_checks (skip-checks для секции)
 │     ├─ Paragraph                    # style_name, alignment, line_spacing,
 │     │                                # first_line_indent_cm, page_break_before,
+│     │                                # space_before_pt, space_after_pt,
 │     │                                # content: InlineElement[]
 │     ├─ Table                        # caption, headers, rows
 │     ├─ Figure                       # image_path, caption, dpi, alignment
 │     ├─ Formula                      # latex (блочная, через m:oMathPara)
-│     └─ ListBlock / CodeBlock        # ordered, items
+│     └─ ListBlock                    # ordered, items, item_levels
 ├─ bibliography: BibliographyEntry[] # id, type, fields
+├─ comments: Comment[]                # рецензент-комментарии из word/comments.xml
 └─ abbreviations: dict[str, str]
 ```
+
+**Новое в актуальной версии:**
+
+* `LogicalSection.disabled_checks: list[str]` — список кодов проверок,
+  не применяемых к разделу (или `["*"]` чтобы отключить все). Фича
+  конструктора — для титульного, реферата, приложений.
+* `Paragraph.space_before_pt` / `space_after_pt: float | None` —
+  межабзацные интервалы. Используется проверкой T.14 и автофиксером.
+* `ListBlock.item_levels: list[int]` — уровень вложенности каждого
+  элемента (0..N) для multilevel-numbering. Пустой = плоский (default).
+* `Comment` (новый dataclass): id, author, date, text, section_id —
+  комментарии рецензента, извлечённые парсером из `word/comments.xml`.
 
 **InlineElement** (`Paragraph.content` и `Caption`) — union из 4 типов
 (Фаза 2.5, `SCHEMA_VERSION = 0.3.0`):
@@ -67,8 +82,22 @@ LogicalSection. См. [page-sections.md](page-sections.md).
 
 YAML-файл, объединяющий три аспекта стандарта:
 
-1. **Стили** (`styles.page`, `styles.body`, `styles.extra.heading_1`...) —
-   для экспортёра.
+1. **Стили** (`styles.page`, `styles.body`, `styles.heading_1..4`,
+   `styles.figure`, `styles.table`, `styles.lists`) — для экспортёра.
+   Типизированы как Pydantic-классы:
+   * `BodyTextProfile`: font, size_pt, line_spacing,
+     first_line_indent_cm, alignment, hyphenation,
+     **space_before_pt**, **space_after_pt** (0 по ГОСТу).
+   * `HeadingStyleProfile`: font, size_pt, bold, italic, uppercase,
+     **color** (auto/hex), alignment, spacing_before/after_pt,
+     page_break_before, keep_with_next.
+   * `CaptionStyleProfile` для рисунков и таблиц (alignment,
+     position, format).
+   * `TableStyleProfile`: border_style, border_size, border_color,
+     header_bold + nested caption.
+   * `FigureStyleProfile`: alignment (center) + nested caption.
+   * `ListStyleProfile`: bullet_char, ordered_format,
+     left_indent_cm, hanging_indent_cm.
 2. **Шаблон секций** (`sections_template`) — какие PageSection создавать
    по умолчанию, с какими колонтитулами и нумерацией.
 3. **Правила проверок** (`checks.X.NN: {enabled, params}`) — реестр и
@@ -81,6 +110,15 @@ YAML-файл, объединяющий три аспекта стандарта
 Загрузка: `gostforge.profile.load_profile(id)` ищет в `profiles/`
 репозитория и в `~/.gostforge/profiles/`.
 
+**Style overrides в UI:** в Streamlit-конструкторе sidebar содержит
+секцию «Настройки стилей» — переопределения профиля для текущего
+документа без правки YAML. Хранятся в `state["style_overrides"]` и
+применяются через `_apply_style_overrides(profile, overrides)` перед
+экспортом. Поддерживаются: поля страницы, шрифт основного текста,
+кегль, межстрочный, отступ красной строки, **интервалы между абзацами**,
+ВЕРХНИЙ-регистр / цвет / spacing для heading_1, символ маркера и
+шаблон нумерации списков, стиль рамок таблиц.
+
 Подробнее: [profiles.md](profiles.md) — пошаговый гайд по созданию
 профиля кафедры.
 
@@ -92,28 +130,61 @@ w:pageBreakBefore через цепочку стилей).
 
 Текущее покрытие:
 - Поля страницы, формат бумаги (A4/A3/A5/Letter/Legal), ориентация.
-- Метаданные из `docProps`.
-- Параграфы со стилями и runs (font, size, bold, italic).
+- Метаданные из `docProps` (включая **year** из `core.created`).
+- Параграфы со стилями и runs (font, size, bold, italic, underline,
+  color, space_before/after).
+- **Style-cascade**: для run-ов без явных rPr-атрибутов наследует
+  font/size/bold/italic/color от стиля параграфа (Heading{N}, Normal)
+  и от его linked character-стиля (Heading1Char и т. д.). Без этого
+  H.01/H.02 были бы «слепы» к стилевому форматированию.
 - Заголовки `Heading 1..4` → LogicalSection с вложением.
-- Таблицы и рисунки со склейкой подписей (Caption-стиль или regex).
-- Header/footer с полем PAGE (`<w:fldSimple>` и `fldChar+instrText`).
+- Реконструкция иерархии разделов из плоского списка по level
+  (`_reconstruct_section_hierarchy`).
+- Таблицы и рисунки со склейкой подписей.
+- Header/footer с полем PAGE.
 - `<w:pgNumType>` с `w:start` и `w:fmt`.
-- `<w:pageBreakBefore>` (включая наследование от Word-стиля).
+- `<w:pageBreakBefore>` (включая наследование).
+- Списки: `<w:numPr>` → `ListBlock` с правильным `ordered`-флагом
+  (через `numFmt` в numbering.xml), группировка по `numId`,
+  fallback на эвристику текстовых маркеров для документов
+  без numbering.xml (`_group_text_marker_lists`).
 - Раздел «Список использованных источников» → `BibliographyEntry`.
-
-Не покрыто: формулы (OMML), перекрёстные ссылки, реальные растровые
-изображения (только метаданные `<w:drawing>`).
+- **Комментарии рецензента** из `word/comments.xml` (id, author,
+  date, text) — в `Document.comments`.
+- Inline-formula (OMML внутри `<w:r>`), CrossRef
+  (`<w:fldSimple w:instr=" REF ... "/>`), Citation.
 
 ### Exporter (`src/gostforge/exporter/`)
 
 Преобразует `Document → .docx`. python-docx + lxml для записи
-sectPr/footer/pgNumType. Round-trip parse → export → parse сохраняет
-все поддерживаемые атрибуты.
+sectPr/footer/pgNumType/numbering.xml. Round-trip parse → export →
+parse сохраняет все поддерживаемые атрибуты.
 
-Покрытие зеркалит парсер: поля, формат бумаги, ориентация, стиль Normal,
-параграфы (включая alignment / line_spacing / first_line_indent / break),
-заголовки, таблицы с подписями, рисунки как placeholder-параграфы (на
-Фазе 1 без реальных изображений), footer с полем PAGE, pgNumType.
+Покрытие зеркалит парсер. Дополнительно:
+- **`_apply_heading_styles`** переписывает стили Heading 1..4 из
+  python-docx-дефолтов (синие Cambria) под профиль: явный
+  Times New Roman через `_clear_theme_fonts`, `color=auto`,
+  spacing_before/after из профиля, page_break_before, keep_with_next.
+  Также через `_sync_linked_char_style` — соответствующие
+  HeadingNChar character-стили (иначе синий цвет лезет через них).
+- **`_apply_normal_style`** ставит `space_before/after = 0` явно
+  (по дефолту Word наследует 10 pt → между абзацами вылезает
+  лишнее белое поле).
+- **`_apply_caption_style`** — выравнивание подписи рисунка (центр)
+  vs. таблицы (слева) согласно ГОСТу.
+- **`_apply_table_borders`** — все 6 сторон `<w:tblBorders>`
+  (top/left/bottom/right/insideH/insideV) — Word-дефолт без
+  рамок не годится.
+- **`_ensure_list_num_in_numbering`** — настоящие numPr-списки
+  через `word/numbering.xml`: добавляет abstractNum + num, с
+  multiLevelType=singleLevel (для плоских) или multilevel (если
+  `item_levels` содержит >0). suff=space между маркером и текстом.
+- **`_sync_page_section_with_profile`** — на этапе экспорта согласует
+  margins_mm и `F.06.start_value` с активным профилем (закрывает
+  баг, когда builder.build() ставит дефолты, а export через ESCD
+  даёт F.06).
+- Год работы пишется в `core.created` (1 января указанного года),
+  чтобы парсер прочитал его обратно при import-docx.
 
 ### Validator (`src/gostforge/validator/`)
 
@@ -184,6 +255,18 @@ Builder автоматически расставляет `page_break_before` у
 Изолирован от парсера и экспортёра — это отдельный артефакт «финальной»
 сборки документа после автофиксов.
 
+### PDF-Importer (`src/gostforge/pdf_importer.py`)
+
+`import_pdf_to_state(pdf_path)` извлекает структуру (заголовки +
+параграфы) из PDF через pdfplumber и строит state-словарь
+конструктора. Заголовки распознаются эвристикой: структурные разделы
+(«Введение», «Заключение», «Список…»), нумерация «1.1 X», ВЕРХНИЙ
+регистр. Библиография складывается в `references`; внутри неё
+нумерованные строки («1. Иванов…») остаются ссылками, а не считаются
+заголовками. Форматирование не переносится — структура довёрстывается
+в UI по ГОСТу. pdfplumber — опциональный extra `[import-formats]`; без
+него поднимается `PdfImportError`.
+
 ### CLI (`src/gostforge/cli.py`)
 
 ```bash
@@ -199,7 +282,8 @@ gostforge ui
 
 Exit codes: `0` — нарушений нет; `1` — найдены error; `2` — ошибка
 загрузки профиля; для `pdf` дополнительно: `3` — LibreOffice не найден,
-`4` — таймаут, `5` — LibreOffice вернул ошибку.
+`4` — таймаут, `5` — LibreOffice вернул ошибку. Для `import-pdf`: `3` —
+не установлен pdfplumber (extra `[import-formats]`).
 
 ### Web (`src/gostforge/web/`)
 

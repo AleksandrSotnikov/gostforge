@@ -1,7 +1,5 @@
 """B.* — проверки таблиц."""
 
-# ruff: noqa: RUF001, RUF002
-
 from __future__ import annotations
 
 import re
@@ -22,14 +20,10 @@ from gostforge.profile import Profile
 from ..engine import Violation, register
 
 # Формат подписи таблицы по ГОСТ 7.32-2017: «Таблица N — Название».
-_TABLE_CAPTION_RE = re.compile(
-    r"^Таблица\s+\d+(?:\.\d+)?\s+[—–-]\s+\S"
-)
+_TABLE_CAPTION_RE = re.compile(r"^Таблица\s+\d+(?:\.\d+)?\s+[—–-]\s+\S")
 
 # Альтернативный вариант: «Таблица 1. Название».
-_TABLE_CAPTION_DOT_RE = re.compile(
-    r"^Таблица\s+\d+(?:\.\d+)?\.\s+\S"
-)
+_TABLE_CAPTION_DOT_RE = re.compile(r"^Таблица\s+\d+(?:\.\d+)?\.\s+\S")
 
 
 def _iter_tables(items: Sequence[LogicalSection | Block]) -> list[Table]:
@@ -54,15 +48,13 @@ def _all_tables(document: Document) -> list[tuple[PageSection, Table]]:
 
 def _has_text(elements: Sequence[InlineElement]) -> bool:
     """True, если в списке есть хотя бы один TextRun с непустым текстом."""
-    return any(
-        isinstance(el, TextRun) and el.text and el.text.strip() for el in elements
-    )
+    return any(isinstance(el, TextRun) and el.text and el.text.strip() for el in elements)
 
 
 @register("B.02")
 def check_table_caption_above(
-    document: Document,  # noqa: ARG001
-    profile: Profile,  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Подпись таблицы должна располагаться над таблицей (заглушка Фазы 2).
 
@@ -79,8 +71,8 @@ def check_table_caption_above(
 
 @register("B.04")
 def check_table_continuation_header(
-    document: Document,  # noqa: ARG001
-    profile: Profile,  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """При переносе таблицы на новую страницу должен быть заголовок «Продолжение таблицы N» (заглушка Фазы 2).
 
@@ -94,8 +86,8 @@ def check_table_continuation_header(
 
 @register("B.05")
 def check_table_header_repeats(
-    document: Document,  # noqa: ARG001
-    profile: Profile,  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Шапка таблицы должна повторяться при переносе на новую страницу (заглушка Фазы 2).
 
@@ -110,7 +102,8 @@ def check_table_header_repeats(
 
 @register("B.01")
 def check_table_has_caption(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Каждая таблица должна иметь подпись «Таблица N — Название»."""
     violations: list[Violation] = []
@@ -136,9 +129,7 @@ def _caption_text(elements: Sequence[InlineElement]) -> str:
 
 
 @register("B.03")
-def check_table_caption_format(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_table_caption_format(document: Document, profile: Profile) -> list[Violation]:
     """Подпись таблицы должна быть в формате «Таблица N — Название».
 
     Параметры:
@@ -167,13 +158,11 @@ def check_table_caption_format(
                 check_code="B.03",
                 severity="error",
                 message=(
-                    f"Подпись таблицы «{text}» не соответствует формату "
-                    f"«Таблица N — Название»"
+                    f"Подпись таблицы «{text}» не соответствует формату «Таблица N — Название»"
                 ),
                 location=f"page_sections.{page_section.id}.table[{table.id}]",
                 suggestion=(
-                    "Использовать формат «Таблица 1 — Название» "
-                    "(длинное тире —, не дефис)"
+                    "Использовать формат «Таблица 1 — Название» (длинное тире —, не дефис)"
                 ),
                 details={"table_id": table.id, "caption": text},
             )
@@ -216,7 +205,8 @@ def _paragraph_text(paragraph: Paragraph) -> str:
 
 @register("B.09")
 def check_table_numbering_continuous(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Сквозная нумерация таблиц: номера должны идти 1, 2, 3, ...
 
@@ -254,13 +244,11 @@ def check_table_numbering_continuous(
                     check_code="B.09",
                     severity="error",
                     message=(
-                        f"Номер {num} встречается у двух таблиц: "
-                        f"«{previous.id}» и «{table.id}»"
+                        f"Номер {num} встречается у двух таблиц: «{previous.id}» и «{table.id}»"
                     ),
                     location=f"table[{table.id}]",
                     suggestion=(
-                        "Перенумеровать таблицы так, чтобы каждая имела "
-                        "уникальный сквозной номер"
+                        "Перенумеровать таблицы так, чтобы каждая имела уникальный сквозной номер"
                     ),
                     details={
                         "table_id": table.id,
@@ -277,13 +265,11 @@ def check_table_numbering_continuous(
                     check_code="B.09",
                     severity="error",
                     message=(
-                        f"После таблицы {expected - 1} ожидается таблица "
-                        f"{expected}, найдено {num}"
+                        f"После таблицы {expected - 1} ожидается таблица {expected}, найдено {num}"
                     ),
                     location=f"table[{table.id}]",
                     suggestion=(
-                        f"Перенумеровать таблицу: «Таблица {expected}» вместо "
-                        f"«Таблица {num}»"
+                        f"Перенумеровать таблицу: «Таблица {expected}» вместо «Таблица {num}»"
                     ),
                     details={
                         "table_id": table.id,
@@ -311,7 +297,8 @@ def _table_reference_patterns(num: int) -> list[re.Pattern[str]]:
 
 @register("B.08")
 def check_table_referenced_in_text(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """На каждую таблицу должна быть ссылка в тексте.
 
@@ -345,13 +332,10 @@ def check_table_referenced_in_text(
             Violation(
                 check_code="B.08",
                 severity="error",
-                message=(
-                    f"В тексте отсутствует ссылка на таблицу {num} «{table.id}»"
-                ),
+                message=(f"В тексте отсутствует ссылка на таблицу {num} «{table.id}»"),
                 location=f"page_sections.{page_section.id}.table[{table.id}]",
                 suggestion=(
-                    f"Добавить в текст ссылку вида «см. таблицу {num}» или "
-                    f"«в таблице {num}»"
+                    f"Добавить в текст ссылку вида «см. таблицу {num}» или «в таблице {num}»"
                 ),
                 details={"table_id": table.id, "number": str(num)},
             )
@@ -360,10 +344,85 @@ def check_table_referenced_in_text(
     return violations
 
 
+def _document_blocks_linear(document: Document) -> list[Block]:
+    """Все Block-и документа в порядке появления (для проверок порядка)."""
+    blocks: list[Block] = []
+    for ps in document.page_sections:
+        blocks.extend(_iter_linear_blocks(ps.content))
+    return blocks
+
+
+def _iter_linear_blocks(items: Sequence[LogicalSection | Block]) -> list[Block]:
+    """Линейный список Block-ов; рекурсивно обходит LogicalSection.children."""
+    result: list[Block] = []
+    for item in items:
+        if isinstance(item, LogicalSection):
+            result.extend(_iter_linear_blocks(item.children))
+        elif isinstance(item, Block):
+            result.append(item)
+    return result
+
+
+@register("B.11")
+def check_table_reference_precedes(document: Document, profile: Profile) -> list[Violation]:
+    """Таблица должна располагаться ПОСЛЕ первого упоминания в тексте.
+
+    ГОСТ 7.32-2017 п. 6.5.2: таблицу помещают после абзаца с первой
+    ссылкой на неё. Аналог I.07 для рисунков (severity=warning). Если
+    ссылок на таблицу нет совсем — это случай B.08, здесь не дублируем.
+    """
+    violations: list[Violation] = []
+    blocks = _document_blocks_linear(document)
+
+    for idx, block in enumerate(blocks):
+        if not isinstance(block, Table):
+            continue
+        text = _caption_text(block.caption)
+        if not text:
+            continue
+        match = _TABLE_NUMBER_RE.match(text)
+        if not match:
+            continue
+        try:
+            num = int(match.group(1))
+        except ValueError:
+            continue
+
+        before_text = "\n".join(
+            _paragraph_text(b) for b in blocks[:idx] if isinstance(b, Paragraph)
+        )
+        after_text = "\n".join(
+            _paragraph_text(b) for b in blocks[idx + 1 :] if isinstance(b, Paragraph)
+        )
+        patterns = _table_reference_patterns(num)
+        if any(p.search(before_text) for p in patterns):
+            continue
+        if not any(p.search(after_text) for p in patterns):
+            # Ссылок нет ни до, ни после — случай B.08, не дублируем.
+            continue
+
+        violations.append(
+            Violation(
+                check_code="B.11",
+                severity="warning",
+                message=(
+                    f"Ссылка на таблицу {num} в тексте идёт после самой "
+                    f"таблицы — она должна предшествовать таблице"
+                ),
+                location=f"table[{block.id}]",
+                suggestion=(
+                    f"Перенесите упоминание «таблица {num}» в текст ДО самой "
+                    f"таблицы (например, «В таблице {num} приведены ...»)"
+                ),
+                details={"table_id": block.id, "number": str(num)},
+            )
+        )
+
+    return violations
+
+
 @register("B.06")
-def check_table_cell_font_size(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_table_cell_font_size(document: Document, profile: Profile) -> list[Violation]:
     """В ячейках таблицы шрифт должен быть `cell_font_size_pt` (по умолчанию 12pt).
 
     Параметры:
@@ -411,10 +470,7 @@ def check_table_cell_font_size(
                     f"{wrong_size} pt, ожидается {expected_size} pt"
                 ),
                 location=f"page_sections.{page_section.id}.table[{table.id}]",
-                suggestion=(
-                    f"Выставить шрифту в ячейках таблицы размер "
-                    f"{expected_size} pt"
-                ),
+                suggestion=(f"Выставить шрифту в ячейках таблицы размер {expected_size} pt"),
                 details={
                     "table_id": table.id,
                     "expected_pt": str(expected_size),
@@ -427,8 +483,11 @@ def check_table_cell_font_size(
 
 
 def _iter_table_cells(table: Table) -> list[list[InlineElement]]:
-    """Все ячейки таблицы (headers + rows) как плоский список."""
+    """Все ячейки таблицы (extra_header_rows + headers + rows) как плоский список."""
     cells: list[list[InlineElement]] = []
+    for extra_row in table.extra_header_rows:
+        for cell in extra_row:
+            cells.append(cell)
     for header_cell in table.headers:
         cells.append(header_cell)
     for row in table.rows:
@@ -446,9 +505,7 @@ def _cell_is_empty(cell: list[InlineElement]) -> bool:
 
 
 @register("B.07")
-def check_table_empty_cells_dash(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_table_empty_cells_dash(document: Document, profile: Profile) -> list[Violation]:
     """Пустые ячейки таблицы должны быть заполнены прочерком.
 
     Параметры:
@@ -510,6 +567,61 @@ def check_table_empty_cells_dash(
     return violations
 
 
+@register("B.10")
+def check_table_not_empty(document: Document, profile: Profile) -> list[Violation]:
+    """B.10 — таблица не должна быть пустой.
+
+    Таблица считается пустой, если:
+    * нет ни одной data-строки (только headers), ИЛИ
+    * есть строки, но во всех ячейках текст пустой/whitespace.
+
+    Пустая таблица обычно — забытый placeholder при копировании структуры
+    или ошибка при редактировании.
+    """
+    _ = profile
+    violations: list[Violation] = []
+    for _ps, table in _all_tables(document):
+        if _is_table_empty(table):
+            violations.append(
+                Violation(
+                    check_code="B.10",
+                    severity="warning",
+                    message=(
+                        f"Таблица «{_table_caption_text(table)}» пуста — нет данных в строках"
+                    ),
+                    location=f"tables[{table.id}]",
+                    suggestion=(
+                        "Заполнить таблицу данными или удалить её, "
+                        "если она оказалась пустой по ошибке"
+                    ),
+                    details={"table_id": table.id},
+                )
+            )
+    return violations
+
+
+def _is_table_empty(table: Table) -> bool:
+    """True если таблица не имеет содержательных data-строк."""
+    if not table.rows:
+        return True
+    for row in table.rows:
+        for cell in row:
+            for el in cell:
+                if hasattr(el, "text") and (el.text or "").strip():
+                    return False
+    return True
+
+
+def _table_caption_text(table: Table) -> str:
+    """Краткое описание таблицы — её caption или id."""
+    parts: list[str] = []
+    for el in table.caption:
+        if hasattr(el, "text") and isinstance(el.text, str):
+            parts.append(el.text)
+    txt = "".join(parts).strip()
+    return txt if txt else table.id
+
+
 __all__ = [
     "check_table_caption_above",
     "check_table_caption_format",
@@ -518,6 +630,7 @@ __all__ = [
     "check_table_empty_cells_dash",
     "check_table_has_caption",
     "check_table_header_repeats",
+    "check_table_not_empty",
     "check_table_numbering_continuous",
     "check_table_referenced_in_text",
 ]

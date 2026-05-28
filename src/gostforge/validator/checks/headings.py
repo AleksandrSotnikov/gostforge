@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """H.* — проверки заголовков логических разделов."""
 
 from __future__ import annotations
@@ -31,6 +29,35 @@ _NUMBER_WITH_DOT = re.compile(r"^(\d+(?:\.\d+)*)(\.)\s")
 # Шаблон для извлечения верхнего номера раздела (без подуровней),
 # например «1 Введение» → 1, «1.2 Анализ» → 1, «1. Введение» → 1.
 _LEADING_NUMBER = re.compile(r"^(\d+)(?:\.\d+)*\.?\s")
+
+# Структурные элементы по ГОСТ 7.32-2017, которые НЕ нумеруются
+# (в отличие от разделов основной части). Сравнение — по
+# нормализованному тексту заголовка.
+_STRUCTURAL_HEADINGS_NORMALIZED: frozenset[str] = frozenset(
+    {
+        "реферат",
+        "содержание",
+        "определения",
+        "термины и определения",
+        "обозначения и сокращения",
+        "перечень сокращений и обозначений",
+        "перечень сокращений",
+        "нормативные ссылки",
+        "введение",
+        "заключение",
+        "список использованных источников",
+        "список литературы",
+        "список источников",
+        "литература",
+    }
+)
+
+
+def _is_structural_heading(text: str) -> bool:
+    """True для структурных элементов ГОСТ (не нумеруются): введение,
+    заключение, список источников, реферат, приложение и т. п."""
+    norm = " ".join(text.lower().split()).rstrip(".")
+    return norm in _STRUCTURAL_HEADINGS_NORMALIZED or norm.startswith("приложение")
 
 
 def _heading_text(content: Sequence[InlineElement]) -> str:
@@ -73,19 +100,29 @@ _all_logical_sections = all_logical_sections
 def check_heading_1_format(document: Document, profile: Profile) -> list[Violation]:
     """Проверка формата заголовков 1 уровня.
 
-    Сверяется с `profile.styles.extra.heading_1` (font, size_pt, bold,
-    uppercase, alignment). Если у заголовка свойство явно задано и не
-    совпадает с эталоном — нарушение. None значит «наследуется» —
-    пропускаем.
+    Сверяется с `profile.styles.heading_1` (HeadingStyleProfile): font,
+    size_pt, bold, uppercase. Если у заголовка свойство явно задано и
+    не совпадает с эталоном — нарушение.
+
+    Парсер выполняет style-cascade при чтении документа: run-ы,
+    которые не имеют явных rPr-атрибутов, наследуют font/size/bold/italic
+    от стиля Heading1 (включая linked character-стиль). Поэтому проверка
+    срабатывает и на документах, где Word нарисовал заголовок «синим
+    Cambria» через дефолтный шаблон, без явного forma на run-уровне.
     """
     violations: list[Violation] = []
-    heading_1: dict[str, Any] = profile.styles.extra.get("heading_1", {}) or {}
+    h1 = profile.styles.heading_1
+    # Backwards-compat: legacy YAML может задавать heading_1 в extra dict.
+    # В таком случае значения из extra перекрывают типизированные
+    # (студент явно переопределил, значит так и хочет).
+    legacy: dict[str, Any] = profile.styles.extra.get("heading_1", {}) or {}
 
-    expected_font: str | None = heading_1.get("font")
-    expected_size: float | None = heading_1.get("size_pt")
-    expected_bold: bool | None = heading_1.get("bold")
-    expected_uppercase: bool | None = heading_1.get("uppercase")
-    expected_alignment: str | None = heading_1.get("alignment")
+    expected_font: str | None = legacy.get("font", h1.font)
+    expected_size: float | None = legacy.get("size_pt", h1.size_pt)
+    expected_bold: bool | None = legacy.get("bold", h1.bold)
+    expected_uppercase: bool | None = legacy.get("uppercase", h1.uppercase)
+    expected_alignment: str | None = legacy.get("alignment", h1.alignment)
+    expected_color: str | None = legacy.get("color", h1.color)
 
     for section in _all_logical_sections(document):
         if section.level != 1:
@@ -147,25 +184,68 @@ def check_heading_1_format(document: Document, profile: Profile) -> list[Violati
                         suggestion="Сделать заголовок полужирным",
                     )
                 )
+            if _color_violates_expected(run.color_hex, expected_color):
+                violations.append(
+                    _violation(
+                        "H.01",
+                        f"В заголовке 1 уровня «{text}» цвет шрифта "
+                        f"«{run.color_hex}» не соответствует профилю "
+                        f"({_describe_expected_color(expected_color)})",
+                        section.id,
+                        suggestion=(
+                            "Использовать чёрный (auto) цвет шрифта в заголовках"
+                            if not expected_color or expected_color == "auto"
+                            else f"Использовать цвет #{expected_color.lstrip('#')}"
+                        ),
+                    )
+                )
 
     return violations
+
+
+def _color_violates_expected(actual: str | None, expected: str | None) -> bool:
+    """True, если фактический цвет run-а нарушает ожидание профиля.
+
+    Профильное ``expected=None`` или ``"auto"`` означает «никакого
+    явного цвета» — допустимы только None и чёрный (#000000). Если
+    ожидается hex (например, "FF0000") — проверяем точное совпадение
+    без учёта регистра и лидирующего «#».
+    """
+    if not expected or expected == "auto":
+        if actual is None:
+            return False
+        norm = actual.lstrip("#").upper()
+        return norm != "000000"
+    expected_norm = expected.lstrip("#").upper()
+    if actual is None:
+        return True
+    return actual.lstrip("#").upper() != expected_norm
+
+
+def _describe_expected_color(expected: str | None) -> str:
+    """Описание ожидаемого цвета для текста нарушения."""
+    if not expected or expected == "auto":
+        return "ожидается чёрный (auto)"
+    return f"ожидается #{expected.lstrip('#')}"
 
 
 @register("H.02")
 def check_heading_2_format(document: Document, profile: Profile) -> list[Violation]:
     """Проверка формата заголовков 2 уровня.
 
-    Сверяется с `profile.styles.extra.heading_2` (font, size_pt, bold,
-    uppercase). Если у заголовка свойство явно задано и не совпадает с
-    эталоном — нарушение. None означает «наследуется» — пропускаем.
+    Сверяется с `profile.styles.heading_2` (HeadingStyleProfile): font,
+    size_pt, bold, uppercase. Парсер выполняет style-cascade — см.
+    docstring H.01.
     """
     violations: list[Violation] = []
-    heading_2: dict[str, Any] = profile.styles.extra.get("heading_2", {}) or {}
+    h2 = profile.styles.heading_2
+    legacy: dict[str, Any] = profile.styles.extra.get("heading_2", {}) or {}
 
-    expected_font: str | None = heading_2.get("font")
-    expected_size: float | None = heading_2.get("size_pt")
-    expected_bold: bool | None = heading_2.get("bold")
-    expected_uppercase: bool | None = heading_2.get("uppercase")
+    expected_font: str | None = legacy.get("font", h2.font)
+    expected_size: float | None = legacy.get("size_pt", h2.size_pt)
+    expected_bold: bool | None = legacy.get("bold", h2.bold)
+    expected_uppercase: bool | None = legacy.get("uppercase", h2.uppercase)
+    expected_color: str | None = legacy.get("color", h2.color)
 
     for section in _all_logical_sections(document):
         if section.level != 2:
@@ -220,14 +300,27 @@ def check_heading_2_format(document: Document, profile: Profile) -> list[Violati
                         suggestion="Сделать заголовок полужирным",
                     )
                 )
+            if _color_violates_expected(run.color_hex, expected_color):
+                violations.append(
+                    _violation(
+                        "H.02",
+                        f"В заголовке 2 уровня «{text}» цвет шрифта "
+                        f"«{run.color_hex}» не соответствует профилю "
+                        f"({_describe_expected_color(expected_color)})",
+                        section.id,
+                        suggestion=(
+                            "Использовать чёрный (auto) цвет шрифта в заголовках"
+                            if not expected_color or expected_color == "auto"
+                            else f"Использовать цвет #{expected_color.lstrip('#')}"
+                        ),
+                    )
+                )
 
     return violations
 
 
 @register("H.03")
-def check_heading_number_no_trailing_dot(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_heading_number_no_trailing_dot(document: Document, profile: Profile) -> list[Violation]:
     """После номера раздела в заголовке точки быть не должно.
 
     Допустимо: «1 Введение», «1.2 Анализ».
@@ -254,9 +347,7 @@ def check_heading_number_no_trailing_dot(
 
 
 @register("H.08")
-def check_heading_no_terminal_punctuation(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_heading_no_terminal_punctuation(document: Document, profile: Profile) -> list[Violation]:
     """Заголовок не должен оканчиваться точкой (или многоточием).
 
     По ГОСТ Р 2.105-2019 заголовок не должен оканчиваться знаком
@@ -308,9 +399,17 @@ def check_heading_numbering_continuous(
     if not level1:
         return violations
 
+    # Структурные элементы (Введение, Заключение, Список источников и т. п.)
+    # по ГОСТ 7.32 НЕ нумеруются — исключаем их из проверки единообразия
+    # нумерации, иначе корректный документ (структурные без номера +
+    # разделы основной части с номером) ложно помечался бы «смешанным».
+    content_level1 = [s for s in level1 if not _is_structural_heading(_heading_text(s.heading))]
+    if not content_level1:
+        return violations
+
     numbered: list[tuple[LogicalSection, int]] = []
     unnumbered: list[LogicalSection] = []
-    for section in level1:
+    for section in content_level1:
         text = _heading_text(section.heading).lstrip()
         match = _LEADING_NUMBER.match(text)
         if match:
@@ -340,8 +439,7 @@ def check_heading_numbering_continuous(
                 ),
                 location=f"page_sections.*.logical_section[{first_un.id}]",
                 suggestion=(
-                    "Принять единый стиль: либо нумеровать все разделы 1 уровня, "
-                    "либо ни один"
+                    "Принять единый стиль: либо нумеровать все разделы 1 уровня, либо ни один"
                 ),
                 details={"section_id": first_un.id},
             )
@@ -362,9 +460,7 @@ def check_heading_numbering_continuous(
                         f"ожидается {expected}, найдено {num} (заголовок «{heading}»)"
                     ),
                     location=f"page_sections.*.logical_section[{section.id}]",
-                    suggestion=(
-                        f"Перенумеровать раздел: «{expected} ...» вместо «{num} ...»"
-                    ),
+                    suggestion=(f"Перенумеровать раздел: «{expected} ...» вместо «{num} ...»"),
                     details={
                         "section_id": section.id,
                         "expected": str(expected),
@@ -486,8 +582,7 @@ def check_heading_not_hanging(
                         ),
                         location=f"page_sections.*.logical_section[{section.id}]",
                         suggestion=(
-                            "Удалите пустой абзац или добавьте под заголовком "
-                            "осмысленный текст"
+                            "Удалите пустой абзац или добавьте под заголовком осмысленный текст"
                         ),
                         details={"section_id": section.id},
                     )

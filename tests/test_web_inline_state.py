@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты конвертеров inline-элементов между моделью и state Фазы 2.5.
 
 Покрытие:
@@ -36,7 +34,6 @@ from gostforge.web.builder_editor import (
     _runs_from_inline,
     _runs_to_inline,
 )
-
 
 # --- Базовая сериализация одного inline-элемента ----------------------------
 
@@ -162,9 +159,7 @@ def test_round_trip_mixed_inline_elements() -> None:
     runs = _runs_from_inline(original)
     restored = _runs_to_inline(runs)
     # Длина и порядок типов совпадают.
-    assert [type(x).__name__ for x in restored] == [
-        type(x).__name__ for x in original
-    ]
+    assert [type(x).__name__ for x in restored] == [type(x).__name__ for x in original]
     # Текст / ключевые поля совпадают.
     assert restored[0] == TextRun(text="Энергия ", bold=False)
     assert restored[1] == InlineFormula(latex=r"E = h\nu")

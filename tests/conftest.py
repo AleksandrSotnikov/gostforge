@@ -6,8 +6,6 @@
 в репозитории.
 """
 
-# ruff: noqa: RUF001, RUF002
-
 from __future__ import annotations
 
 import contextlib

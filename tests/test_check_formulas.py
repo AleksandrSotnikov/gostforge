@@ -1,7 +1,5 @@
 """Тесты M.01 / M.03 / M.04 — нумерация и ссылки на формулы."""
 
-# ruff: noqa: RUF001, RUF002
-
 from gostforge.model import (
     Document,
     Formula,
@@ -105,9 +103,7 @@ def test_m03_registered() -> None:
 
 def test_m03_continuous_numbering_no_violation() -> None:
     """Формулы 1, 2, 3 — нарушения нет."""
-    formulas = [
-        Formula(id=f"f-{i}", latex=f"x_{i}", number=i) for i in (1, 2, 3)
-    ]
+    formulas = [Formula(id=f"f-{i}", latex=f"x_{i}", number=i) for i in (1, 2, 3)]
     doc = _doc_with_content(list(formulas))
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "M.03"]

@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """T.* — фиксеры основного текста."""
 
 from __future__ import annotations
@@ -251,8 +249,7 @@ def fix_unit_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
                     fixer_code="T.12",
                     location=_paragraph_location(paragraph),
                     description=(
-                        "Обычные пробелы между числом и единицей измерения "
-                        "заменены на неразрывные"
+                        "Обычные пробелы между числом и единицей измерения заменены на неразрывные"
                     ),
                 )
             )
@@ -273,9 +270,7 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
         for run in _text_runs(paragraph):
             if not run.text:
                 continue
-            new_text = _INITIALS_SURNAME_RE.sub(
-                rf"\1{_NBSP}\2{_NBSP}\3", run.text
-            )
+            new_text = _INITIALS_SURNAME_RE.sub(rf"\1{_NBSP}\2{_NBSP}\3", run.text)
             if new_text != run.text:
                 run.text = new_text
                 paragraph_changed = True
@@ -285,7 +280,40 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
                     fixer_code="T.13",
                     location=_paragraph_location(paragraph),
                     description=(
-                        "Обычные пробелы между инициалами и фамилией "
+                        "Обычные пробелы между инициалами и фамилией заменены на неразрывные"
+                    ),
+                )
+            )
+    return applied
+
+
+@register("U.01")
+def fix_si_unit_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
+    """Заменить обычный пробел между числом и единицей СИ на NBSP (U.01).
+
+    Использует тот же паттерн, что и проверка U.01, поэтому исправляет
+    ровно то, что она находит (единицы по ГОСТ Р 8.000-2015). Работает
+    в пределах одного TextRun; видимо текст не меняется.
+    """
+    from gostforge.validator.checks.units import _RE_REGULAR_SPACE_BEFORE_UNIT
+
+    applied: list[FixApplied] = []
+    for paragraph in _all_paragraphs(document):
+        paragraph_changed = False
+        for run in _text_runs(paragraph):
+            if not run.text:
+                continue
+            new_text = _RE_REGULAR_SPACE_BEFORE_UNIT.sub(rf"\1{_NBSP}\3", run.text)
+            if new_text != run.text:
+                run.text = new_text
+                paragraph_changed = True
+        if paragraph_changed:
+            applied.append(
+                FixApplied(
+                    fixer_code="U.01",
+                    location=_paragraph_location(paragraph),
+                    description=(
+                        "Обычные пробелы между числом и единицей измерения (СИ) "
                         "заменены на неразрывные"
                     ),
                 )
@@ -293,9 +321,93 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
     return applied
 
 
+@register("T.01")
+def fix_body_font(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести шрифт явно-заданных text-run-ов к ожидаемому (T.01).
+
+    Меняет только run-ы с явным `run.font`, отличным от эталона
+    (`profile.styles.body.font` или `checks.T.01.params.font`). Run-ы,
+    наследующие шрифт от стиля (`font is None`), не трогаем. Scope
+    зеркалит проверку T.01 (пропускаем колонтитулы).
+    """
+    from gostforge.validator.checks.text import _classify_paragraph
+
+    config = profile.checks.get("T.01")
+    expected_font = profile.styles.body.font
+    if config and config.params.get("font"):
+        expected_font = config.params["font"]
+
+    applied: list[FixApplied] = []
+    for paragraph in _all_paragraphs(document):
+        if _classify_paragraph(paragraph) == "header_footer":
+            continue
+        paragraph_changed = False
+        for run in _text_runs(paragraph):
+            if not run.text or not run.text.strip():
+                continue
+            if run.font is not None and run.font != expected_font:
+                run.font = expected_font
+                paragraph_changed = True
+        if paragraph_changed:
+            applied.append(
+                FixApplied(
+                    fixer_code="T.01",
+                    location=_paragraph_location(paragraph),
+                    description=f"Шрифт текста приведён к «{expected_font}»",
+                )
+            )
+    return applied
+
+
+@register("T.02")
+def fix_body_font_size(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести кегль явно-заданных run-ов к ожидаемому по категории (T.02).
+
+    Категории: body / caption / footnote — со своими размерами. Заголовки
+    и колонтитулы пропускаются (их кегль — H.*/K.*). Run-ы без явного
+    `size_pt` (наследуют от стиля) не трогаем.
+    """
+    from gostforge.validator.checks.text import _SIZE_TOLERANCE_PT, _classify_paragraph
+
+    config = profile.checks.get("T.02")
+    params = config.params if config else {}
+    extra = profile.styles.extra
+    body_size = float(params.get("body_size", profile.styles.body.size_pt))
+    caption_size = float(params.get("caption_size", extra.get("caption_size_pt", 12)))
+    footnote_size = float(params.get("footnote_size", extra.get("footnote_size_pt", 10)))
+    expected_by_category = {
+        "body": body_size,
+        "caption": caption_size,
+        "footnote": footnote_size,
+    }
+
+    applied: list[FixApplied] = []
+    for paragraph in _all_paragraphs(document):
+        expected = expected_by_category.get(_classify_paragraph(paragraph))
+        if expected is None:
+            continue
+        paragraph_changed = False
+        for run in _text_runs(paragraph):
+            if not run.text or not run.text.strip():
+                continue
+            if run.size_pt is not None and abs(run.size_pt - expected) > _SIZE_TOLERANCE_PT:
+                run.size_pt = expected
+                paragraph_changed = True
+        if paragraph_changed:
+            applied.append(
+                FixApplied(
+                    fixer_code="T.02",
+                    location=_paragraph_location(paragraph),
+                    description=f"Кегль текста приведён к {expected} pt",
+                )
+            )
+    return applied
+
+
 @register("T.06")
 def fix_disable_auto_hyphenation(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[FixApplied]:
     """Отключить автоматический перенос слов (`Document.auto_hyphenation = False`).
 
@@ -315,9 +427,7 @@ def fix_disable_auto_hyphenation(
 
 
 @register("T.07")
-def fix_consecutive_empty_paragraphs(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_consecutive_empty_paragraphs(document: Document, profile: Profile) -> list[FixApplied]:
     """Удалить лишние подряд идущие пустые абзацы.
 
     Параметр `checks.T.07.params.max_consecutive_empty: int = 1` —
@@ -333,10 +443,7 @@ def fix_consecutive_empty_paragraphs(
     def _is_empty(p: object) -> bool:
         if not isinstance(p, Paragraph):
             return False
-        return not any(
-            isinstance(r, TextRun) and r.text and r.text.strip()
-            for r in p.content
-        )
+        return not any(isinstance(r, TextRun) and r.text and r.text.strip() for r in p.content)
 
     def _clean_container(
         items: list[LogicalSection | Block],
@@ -374,9 +481,18 @@ def fix_consecutive_empty_paragraphs(
 
 # Стили параграфов, которые считаются «телом» и подлежат правкам T.03/T.04/T.05.
 # Заголовки, подписи и колонтитулы имеют свои правила и не трогаются.
-_BODY_EXCLUDE_PREFIXES = ("heading", "caption", "image caption", "table caption",
-                          "figure caption", "title", "subtitle", "footnote",
-                          "header", "footer")
+_BODY_EXCLUDE_PREFIXES = (
+    "heading",
+    "caption",
+    "image caption",
+    "table caption",
+    "figure caption",
+    "title",
+    "subtitle",
+    "footnote",
+    "header",
+    "footer",
+)
 
 
 def _is_body_paragraph(paragraph: Paragraph) -> bool:
@@ -410,18 +526,14 @@ def fix_line_spacing(document: Document, profile: Profile) -> list[FixApplied]:
             FixApplied(
                 fixer_code="T.03",
                 location=_paragraph_location(p),
-                description=(
-                    f"Межстрочный интервал {old} → {expected}"
-                ),
+                description=(f"Межстрочный интервал {old} → {expected}"),
             )
         )
     return applied
 
 
 @register("T.04")
-def fix_first_line_indent(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_first_line_indent(document: Document, profile: Profile) -> list[FixApplied]:
     """Привести отступ красной строки основного текста к
     profile.styles.body.first_line_indent_cm.
 
@@ -449,9 +561,7 @@ def fix_first_line_indent(
 
 
 @register("T.05")
-def fix_paragraph_alignment(
-    document: Document, profile: Profile
-) -> list[FixApplied]:
+def fix_paragraph_alignment(document: Document, profile: Profile) -> list[FixApplied]:
     """Привести выравнивание основного текста к profile.styles.body.alignment.
 
     По умолчанию для ГОСТ 7.32 — justify (по ширине). Меняем только
@@ -478,6 +588,59 @@ def fix_paragraph_alignment(
     return applied
 
 
+@register("T.14")
+def fix_paragraph_spacing(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести интервалы между абзацами к profile.styles.body.
+
+    Исправление симметрично проверке T.14: для каждого Normal-параграфа
+    с явно заданным space_before_pt/space_after_pt != expected
+    заменяем на expected (по умолчанию 0). Heading*/Caption/List*
+    пропускаем.
+    """
+    body = profile.styles.body
+    expected_before = float(body.space_before_pt)
+    expected_after = float(body.space_after_pt)
+    tolerance = 0.5
+    config = profile.checks.get("T.14")
+    if config:
+        if config.params.get("expected_before_pt") is not None:
+            expected_before = float(config.params["expected_before_pt"])
+        if config.params.get("expected_after_pt") is not None:
+            expected_after = float(config.params["expected_after_pt"])
+        if config.params.get("tolerance_pt") is not None:
+            tolerance = float(config.params["tolerance_pt"])
+
+    applied: list[FixApplied] = []
+    for p in _all_paragraphs(document):
+        style = (p.style_name or "Normal").lower()
+        if any(
+            style.startswith(prefix)
+            for prefix in ("heading", "caption", "list", "footer", "header", "title")
+        ):
+            continue
+        if p.space_before_pt is not None and abs(p.space_before_pt - expected_before) > tolerance:
+            old = p.space_before_pt
+            p.space_before_pt = expected_before
+            applied.append(
+                FixApplied(
+                    fixer_code="T.14",
+                    location=_paragraph_location(p) + ".space_before_pt",
+                    description=f"space_before {old:g} pt → {expected_before:g} pt",
+                )
+            )
+        if p.space_after_pt is not None and abs(p.space_after_pt - expected_after) > tolerance:
+            old = p.space_after_pt
+            p.space_after_pt = expected_after
+            applied.append(
+                FixApplied(
+                    fixer_code="T.14",
+                    location=_paragraph_location(p) + ".space_after_pt",
+                    description=f"space_after {old:g} pt → {expected_after:g} pt",
+                )
+            )
+    return applied
+
+
 __all__ = [
     "fix_consecutive_empty_paragraphs",
     "fix_disable_auto_hyphenation",
@@ -487,6 +650,7 @@ __all__ = [
     "fix_initials_nbsp",
     "fix_line_spacing",
     "fix_paragraph_alignment",
+    "fix_paragraph_spacing",
     "fix_straight_quotes",
     "fix_trailing_whitespace",
     "fix_unit_nbsp",

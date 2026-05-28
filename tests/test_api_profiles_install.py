@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты REST endpoints для установки/удаления custom-профилей."""
 
 from __future__ import annotations
@@ -14,13 +12,7 @@ from fastapi.testclient import TestClient
 
 from gostforge.api import create_app
 
-
-_VALID_YAML = (
-    'id: kafedra-api-2026\n'
-    'name: Кафедра API\n'
-    'version: "1.0"\n'
-    'extends: gost-7.32-2017\n'
-)
+_VALID_YAML = 'id: kafedra-api-2026\nname: Кафедра API\nversion: "1.0"\nextends: gost-7.32-2017\n'
 
 
 @pytest.fixture
@@ -139,9 +131,7 @@ def test_delete_builtin_profile_returns_404(client: TestClient) -> None:
 # --- end-to-end: POST /check с custom-профилем -----------------------------
 
 
-def test_check_works_with_installed_custom_profile(
-    client: TestClient, tmp_path: Path
-) -> None:
+def test_check_works_with_installed_custom_profile(client: TestClient, tmp_path: Path) -> None:
     """Установили профиль → можно сразу прогнать /check с ним."""
     from .conftest import make_docx
 

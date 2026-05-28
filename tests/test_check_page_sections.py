@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002, RUF003
-
 """Тесты K.* — проверок колонтитулов и нумерации на уровне PageSection-ов."""
 
 from __future__ import annotations
@@ -8,6 +6,7 @@ from gostforge.model import (
     ContentTemplate,
     Document,
     HeaderConfig,
+    LogicalSection,
     PageNumberingConfig,
     PageSection,
     TextRun,
@@ -97,9 +96,7 @@ def test_k03_correct_start_value() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="start_at", start_value=3
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=3),
         )
     )
     profile = _profile()
@@ -114,9 +111,7 @@ def test_k03_wrong_start_value_violation() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="start_at", start_value=1
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=1),
         )
     )
     profile = _profile()
@@ -132,9 +127,7 @@ def test_k03_missing_start_at_violation() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="continue"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="continue"),
         )
     )
     profile = _profile()
@@ -181,9 +174,7 @@ def test_k04_continuous_numbering_ok() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="continue"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="continue"),
         )
     )
     doc.page_sections.append(
@@ -191,9 +182,7 @@ def test_k04_continuous_numbering_ok() -> None:
             id="app",
             name="Приложения",
             type="appendix",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="continue"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="continue"),
         )
     )
     profile = _profile()
@@ -216,9 +205,7 @@ def test_k04_restart_in_middle_violation() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="restart"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="restart"),
         )
     )
     profile = _profile()
@@ -235,9 +222,7 @@ def test_k04_first_section_restart_ignored() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="restart"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="restart"),
         )
     )
     profile = _profile()
@@ -253,9 +238,7 @@ def test_k04_allow_restart_in_appendix_when_enabled() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="start_at", start_value=3
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=3),
         )
     )
     doc.page_sections.append(
@@ -263,9 +246,7 @@ def test_k04_allow_restart_in_appendix_when_enabled() -> None:
             id="app",
             name="Приложения",
             type="appendix",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="restart"
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="restart"),
         )
     )
     profile = _profile()
@@ -290,9 +271,7 @@ def test_k05_appendix_with_proper_header_ok() -> None:
             name="Приложения",
             type="appendix",
             header=HeaderConfig(
-                default=ContentTemplate(
-                    center=[TextRun(text="ПРИЛОЖЕНИЕ {appendix_letter}")]
-                )
+                default=ContentTemplate(center=[TextRun(text="ПРИЛОЖЕНИЕ {appendix_letter}")])
             ),
         )
     )
@@ -324,9 +303,7 @@ def test_k05_appendix_header_without_keyword_violation() -> None:
             id="app",
             name="Приложения",
             type="appendix",
-            header=HeaderConfig(
-                default=ContentTemplate(center=[TextRun(text="Какой-то текст")])
-            ),
+            header=HeaderConfig(default=ContentTemplate(center=[TextRun(text="Какой-то текст")])),
         )
     )
     profile = _profile()
@@ -373,9 +350,7 @@ def test_k01_all_expected_sections_ok() -> None:
                 type=stype,  # type: ignore[arg-type]
                 page_numbering=PageNumberingConfig(visible=False)
                 if stype == "title"
-                else PageNumberingConfig(
-                    visible=True, start_mode="start_at", start_value=3
-                )
+                else PageNumberingConfig(visible=True, start_mode="start_at", start_value=3)
                 if stype == "main"
                 else PageNumberingConfig(visible=True, start_mode="continue"),
             )
@@ -393,9 +368,7 @@ def test_k01_missing_sections_violation() -> None:
             id="main",
             name="Основная часть",
             type="main",
-            page_numbering=PageNumberingConfig(
-                visible=True, start_mode="start_at", start_value=3
-            ),
+            page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=3),
         )
     )
     profile = _profile()
@@ -451,6 +424,54 @@ def test_k01_empty_template_no_violation() -> None:
     doc = Document()
     violations = [v for v in validate(doc, profile) if v.check_code == "K.01"]
     assert violations == []
+
+
+def _main_section_with_headings(headings: list[str]) -> Document:
+    """Документ с одной main-PageSection и заданными разделами 1 уровня
+    (как его строит конструктор/парсер на Фазе 1)."""
+    doc = Document()
+    content: list[LogicalSection] = [
+        LogicalSection(id=f"s{i}", heading=[TextRun(text=h)], level=1)
+        for i, h in enumerate(headings)
+    ]
+    doc.page_sections.append(
+        PageSection(
+            id="main",
+            name="Основная часть",
+            type="main",
+            page_numbering=PageNumberingConfig(visible=True),
+            content=content,
+        )
+    )
+    return doc
+
+
+def test_k01_detects_structural_types_from_headings() -> None:
+    """Плоский документ (один main) с титульником/содержанием/приложением
+    по заголовкам — K.01 не штрафует за отсутствие типов вёрстки."""
+    doc = _main_section_with_headings(
+        [
+            "Титульный лист",
+            "Реферат",
+            "Содержание",
+            "Введение",
+            "1 Анализ",
+            "Заключение",
+            "Список использованных источников",
+            "Приложение А",
+        ]
+    )
+    violations = [v for v in validate(doc, _profile()) if v.check_code == "K.01"]
+    assert violations == []
+
+
+def test_k01_flags_missing_structural_via_headings() -> None:
+    """Если нет титульника/предисловной части/приложений — K.01 их находит."""
+    doc = _main_section_with_headings(["Введение", "1 Анализ", "Заключение"])
+    violations = [v for v in validate(doc, _profile()) if v.check_code == "K.01"]
+    missing_types = {v.details["expected_type"] for v in violations}
+    assert missing_types == {"title", "frontmatter", "appendix"}
+    assert all(v.severity == "error" for v in violations)
 
 
 # --- K.06 ---------------------------------------------------------------------

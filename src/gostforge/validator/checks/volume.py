@@ -121,8 +121,7 @@ def check_total_volume(document: Document, profile: Profile) -> list[Violation]:
                 check_code="V.01",
                 severity="warning",
                 message=(
-                    f"Объём документа оценён в ~{pages_est:.1f} страниц "
-                    f"(минимум — {min_pages})"
+                    f"Объём документа оценён в ~{pages_est:.1f} страниц (минимум — {min_pages})"
                 ),
                 location="document",
                 suggestion=f"Дописать материал до ~{min_pages} страниц",
@@ -140,8 +139,7 @@ def check_total_volume(document: Document, profile: Profile) -> list[Violation]:
                 check_code="V.01",
                 severity="warning",
                 message=(
-                    f"Объём документа оценён в ~{pages_est:.1f} страниц "
-                    f"(максимум — {max_pages})"
+                    f"Объём документа оценён в ~{pages_est:.1f} страниц (максимум — {max_pages})"
                 ),
                 location="document",
                 suggestion=f"Сократить материал до ~{max_pages} страниц",
@@ -181,10 +179,7 @@ def check_intro_conclusion_volume(document: Document, profile: Profile) -> list[
                 Violation(
                     check_code="V.02",
                     severity="warning",
-                    message=(
-                        f"Введение содержит {words} слов "
-                        f"(минимум — {intro_min})"
-                    ),
+                    message=(f"Введение содержит {words} слов (минимум — {intro_min})"),
                     location=f"logical_sections.{intro.id}",
                     suggestion=f"Расширить введение до {intro_min} слов",
                     details={
@@ -200,10 +195,7 @@ def check_intro_conclusion_volume(document: Document, profile: Profile) -> list[
                 Violation(
                     check_code="V.02",
                     severity="warning",
-                    message=(
-                        f"Введение содержит {words} слов "
-                        f"(максимум — {intro_max})"
-                    ),
+                    message=(f"Введение содержит {words} слов (максимум — {intro_max})"),
                     location=f"logical_sections.{intro.id}",
                     suggestion=f"Сократить введение до {intro_max} слов",
                     details={
@@ -223,10 +215,7 @@ def check_intro_conclusion_volume(document: Document, profile: Profile) -> list[
                 Violation(
                     check_code="V.02",
                     severity="warning",
-                    message=(
-                        f"Заключение содержит {words} слов "
-                        f"(минимум — {conclusion_min})"
-                    ),
+                    message=(f"Заключение содержит {words} слов (минимум — {conclusion_min})"),
                     location=f"logical_sections.{conclusion.id}",
                     suggestion=f"Расширить заключение до {conclusion_min} слов",
                     details={
@@ -242,10 +231,7 @@ def check_intro_conclusion_volume(document: Document, profile: Profile) -> list[
                 Violation(
                     check_code="V.02",
                     severity="warning",
-                    message=(
-                        f"Заключение содержит {words} слов "
-                        f"(максимум — {conclusion_max})"
-                    ),
+                    message=(f"Заключение содержит {words} слов (максимум — {conclusion_max})"),
                     location=f"logical_sections.{conclusion.id}",
                     suggestion=f"Сократить заключение до {conclusion_max} слов",
                     details={

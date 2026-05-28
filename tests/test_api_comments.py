@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты REST endpoints для комментариев (Фаза 3)."""
 
 from __future__ import annotations
@@ -47,9 +45,7 @@ def submission_id(client: TestClient, tmp_path: Path) -> int:
 # --- POST /submissions/{id}/comments ---------------------------------------
 
 
-def test_add_comment_returns_record(
-    client: TestClient, submission_id: int
-) -> None:
+def test_add_comment_returns_record(client: TestClient, submission_id: int) -> None:
     r = client.post(
         f"/submissions/{submission_id}/comments",
         json={"body": "Проверь введение", "author": "prof", "role": "supervisor"},
@@ -63,33 +59,21 @@ def test_add_comment_returns_record(
     assert isinstance(body["id"], int)
 
 
-def test_add_comment_default_role_anonymous(
-    client: TestClient, submission_id: int
-) -> None:
-    r = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "x"}
-    )
+def test_add_comment_default_role_anonymous(client: TestClient, submission_id: int) -> None:
+    r = client.post(f"/submissions/{submission_id}/comments", json={"body": "x"})
     assert r.status_code == 200
     assert r.json()["role"] == "anonymous"
     assert r.json()["author"] == ""
 
 
-def test_add_comment_empty_body_returns_400(
-    client: TestClient, submission_id: int
-) -> None:
-    r = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": ""}
-    )
+def test_add_comment_empty_body_returns_400(client: TestClient, submission_id: int) -> None:
+    r = client.post(f"/submissions/{submission_id}/comments", json={"body": ""})
     assert r.status_code == 400
-    r = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "   "}
-    )
+    r = client.post(f"/submissions/{submission_id}/comments", json={"body": "   "})
     assert r.status_code == 400
 
 
-def test_add_comment_invalid_role_returns_400(
-    client: TestClient, submission_id: int
-) -> None:
+def test_add_comment_invalid_role_returns_400(client: TestClient, submission_id: int) -> None:
     r = client.post(
         f"/submissions/{submission_id}/comments",
         json={"body": "x", "role": "admin"},
@@ -102,9 +86,7 @@ def test_add_comment_unknown_submission_returns_404(client: TestClient) -> None:
     assert r.status_code == 404
 
 
-def test_add_comment_missing_body_field_returns_400(
-    client: TestClient, submission_id: int
-) -> None:
+def test_add_comment_missing_body_field_returns_400(client: TestClient, submission_id: int) -> None:
     r = client.post(f"/submissions/{submission_id}/comments", json={})
     assert r.status_code == 400
 
@@ -118,32 +100,18 @@ def test_list_comments_empty(client: TestClient, submission_id: int) -> None:
     assert r.json() == []
 
 
-def test_list_comments_chronological(
-    client: TestClient, submission_id: int
-) -> None:
-    client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "первый"}
-    )
-    client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "второй"}
-    )
+def test_list_comments_chronological(client: TestClient, submission_id: int) -> None:
+    client.post(f"/submissions/{submission_id}/comments", json={"body": "первый"})
+    client.post(f"/submissions/{submission_id}/comments", json={"body": "второй"})
     items = client.get(f"/submissions/{submission_id}/comments").json()
     assert [c["body"] for c in items] == ["первый", "второй"]
 
 
-def test_list_comments_filter_resolved(
-    client: TestClient, submission_id: int
-) -> None:
-    r1 = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "open"}
-    )
-    r2 = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "closed"}
-    )
+def test_list_comments_filter_resolved(client: TestClient, submission_id: int) -> None:
+    r1 = client.post(f"/submissions/{submission_id}/comments", json={"body": "open"})
+    r2 = client.post(f"/submissions/{submission_id}/comments", json={"body": "closed"})
     client.patch(f"/comments/{r2.json()['id']}/resolve")
-    only_open = client.get(
-        f"/submissions/{submission_id}/comments?include_resolved=false"
-    ).json()
+    only_open = client.get(f"/submissions/{submission_id}/comments?include_resolved=false").json()
     assert len(only_open) == 1
     assert only_open[0]["id"] == r1.json()["id"]
 
@@ -160,23 +128,15 @@ def test_list_comments_unknown_submission_returns_empty_list(
 # --- PATCH /comments/{id}/resolve ------------------------------------------
 
 
-def test_resolve_comment_default_marks_resolved(
-    client: TestClient, submission_id: int
-) -> None:
-    cid = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "x"}
-    ).json()["id"]
+def test_resolve_comment_default_marks_resolved(client: TestClient, submission_id: int) -> None:
+    cid = client.post(f"/submissions/{submission_id}/comments", json={"body": "x"}).json()["id"]
     r = client.patch(f"/comments/{cid}/resolve")
     assert r.status_code == 200
     assert r.json()["resolved"] is True
 
 
-def test_resolve_comment_explicit_false_unmarks(
-    client: TestClient, submission_id: int
-) -> None:
-    cid = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "x"}
-    ).json()["id"]
+def test_resolve_comment_explicit_false_unmarks(client: TestClient, submission_id: int) -> None:
+    cid = client.post(f"/submissions/{submission_id}/comments", json={"body": "x"}).json()["id"]
     client.patch(f"/comments/{cid}/resolve")
     r = client.patch(f"/comments/{cid}/resolve", json={"resolved": False})
     assert r.json()["resolved"] is False
@@ -191,9 +151,7 @@ def test_resolve_unknown_comment_returns_404(client: TestClient) -> None:
 
 
 def test_delete_comment(client: TestClient, submission_id: int) -> None:
-    cid = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "x"}
-    ).json()["id"]
+    cid = client.post(f"/submissions/{submission_id}/comments", json={"body": "x"}).json()["id"]
     r = client.delete(f"/comments/{cid}")
     assert r.status_code == 200
     assert r.json() == {"deleted": True}
@@ -212,12 +170,8 @@ def test_delete_unknown_comment_returns_404(client: TestClient) -> None:
 def test_submission_detail_includes_unresolved_count(
     client: TestClient, submission_id: int
 ) -> None:
-    client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "open1"}
-    )
-    r2 = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "resolved-one"}
-    )
+    client.post(f"/submissions/{submission_id}/comments", json={"body": "open1"})
+    r2 = client.post(f"/submissions/{submission_id}/comments", json={"body": "resolved-one"})
     client.patch(f"/comments/{r2.json()['id']}/resolve")
     r = client.get(f"/submissions/{submission_id}")
     assert r.json()["unresolved_comments"] == 1
@@ -233,13 +187,9 @@ def test_submission_detail_unresolved_zero_when_no_comments(
 # --- CASCADE ----------------------------------------------------------------
 
 
-def test_delete_submission_cascades_to_comments(
-    client: TestClient, submission_id: int
-) -> None:
+def test_delete_submission_cascades_to_comments(client: TestClient, submission_id: int) -> None:
     """Удаление submission уносит свои комментарии (ON DELETE CASCADE)."""
-    cid = client.post(
-        f"/submissions/{submission_id}/comments", json={"body": "x"}
-    ).json()["id"]
+    cid = client.post(f"/submissions/{submission_id}/comments", json={"body": "x"}).json()["id"]
     client.delete(f"/submissions/{submission_id}")
     # Комментарий больше не существует.
     assert client.delete(f"/comments/{cid}").status_code == 404

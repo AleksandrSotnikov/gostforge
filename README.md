@@ -4,108 +4,176 @@
 
 Инструмент для двух сценариев:
 
-1. **Нормоконтроль** — автоматическая проверка чужих `.docx` (курсовых, дипломных, ВКР) на соответствие ГОСТ 7.32-2017, ГОСТ Р 2.105-2019, ГОСТ Р 7.0.100-2018 и/или методичкам кафедр. Результат — отчёт + аннотированный `.docx` с комментариями Word ровно в проблемных местах.
-2. **Конструктор** — структурный редактор для написания работ с нуля. Студент собирает документ из блоков (раздел, абзац, таблица, рисунок, формула, список литературы), а вся ГОСТ-вёрстка применяется автоматически на экспорте по выбранному профилю.
+1. **Нормоконтроль** — автоматическая проверка чужих `.docx`
+   (курсовых, дипломных, ВКР, отчётов о НИР) на соответствие
+   ГОСТ 7.32-2017, ГОСТ Р 2.105-2019, ГОСТ Р 7.0.100-2018 и/или
+   методичкам кафедр. Результат — отчёт + аннотированный `.docx`
+   с комментариями Word ровно в проблемных местах.
+2. **Конструктор** — структурный редактор для написания работ с
+   нуля. Студент собирает документ из блоков (раздел, абзац,
+   таблица, рисунок, формула, список литературы), а вся
+   ГОСТ-вёрстка применяется автоматически на экспорте по
+   выбранному профилю.
 
-Оба режима работают с **единой моделью документа** и **единой системой профилей**, что исключает расхождения между «как пишем» и «как проверяем».
+Полная двусторонняя совместимость: готовую `.docx` можно загрузить в
+конструктор и редактировать дальше; собранный из конструктора документ
+проходит нормоконтролем без дополнительных правок.
+
+Оба режима работают через **единую модель документа** и **единую систему
+профилей** — расхождений между «как пишем» и «как проверяем» нет.
 
 ## Статус
 
-**Фазы 0–2 завершены, Фаза 2.5 (пословное редактирование в
-конструкторе) и Фаза 3 (REST API + Docker + локальная БД с
-auto-migrations + маркетплейс кафедральных профилей + совместная
-работа руководитель↔студент через CLI/REST/UI + встроенный просмотр
-документации в WebApp) — реализованы.** Покрытие каталога —
-**104 проверки в 15 категориях (100%)**, общая база тестов **1046+**.
+**114 проверок** в 16 категориях · **26 автофиксеров** · **30 CLI-команд** ·
+**6 режимов веб-UI** · **REST API на FastAPI** · **1654+ тестов**
+(`ruff check`, `ruff format`, `mypy --strict` чисты).
 
-Что уже работает:
+### Ядро
 
-- Парсер `.docx → Document`: поля страницы, формат бумаги (A4/A3/A5/
-  Letter/Legal), ориентация, метаданные, параграфы со стилями и runs,
-  заголовки H1..H4, таблицы и рисунки со склейкой подписей, footer и
-  header с полем PAGE, `<w:pgNumType>` (start + fmt),
-  `<w:pageBreakBefore>` через цепочку стилей, OMML-формулы → `latex`,
-  нумерованные и маркированные списки, `<w:autoHyphenation>` из
-  `settings.xml`, библиография с распарсенными полями (author, year, url,
-  doi, access_date, place, language), DPI изображений через Pillow,
-  alignment рисунков.
-- Экспортёр `Document → .docx`: round-trip без потерь по полям, стилям,
-  списочной структуре, формулам, таблицам, footer/header,
-  `pgNumType.start/fmt`, реальным изображениям (через `add_picture`).
-- Профили YAML с полноценным наследованием (deep-merge): базовый
+- **Парсер `.docx → Document`**. Поля и формат страницы, метаданные,
+  параграфы со стилями и runs, заголовки H1..H4, таблицы (включая
+  multi-row шапку через `<w:tblHeader/>` и merge-cells), рисунки,
+  footer/header с полем `PAGE`, page numbering (`<w:pgNumType>` start
+  + fmt), OMML-формулы → LaTeX, нумерованные/маркированные списки
+  с уровнями, hyperlinks, footnotes, textboxes, библиография
+  с распарсенными полями, DPI изображений, **комментарии рецензента**
+  из `word/comments.xml`, **style-cascade** (font/size/bold/italic/color
+  наследуются от Heading{N} → Normal).
+- **Экспортёр `Document → .docx`**. Round-trip без потерь. Настоящие
+  numPr-списки, корректная вёрстка по ГОСТу (чёрные заголовки Times
+  New Roman вместо синего Cambria из шаблона Word, межабзацный
+  интервал 0 pt). Multi-row шапка таблицы с авто-повтором на новых
+  страницах (`<w:tblHeader/>`), опц. строка «Продолжение таблицы N».
+  Ограничения по ширине **и высоте** рисунка (`max_height_cm`).
+  Профильные форматы подписей (`caption.format`) уважаются.
+- **Профили YAML** с deep-merge при `extends`. Базовый
   `gost-7.32-2017`, `gost-r-2.105-2019` (ЕСКД), пример кафедрального
-  `example-department`.
-- **104 реализованные проверки** во всех 15 категориях:
-  F (страница), T (текст), S (структура), H (заголовки), I (рисунки),
-  B (таблицы), M (формулы), L (списки), R (литература), C
-  (перекрёстные ссылки), A (сокращения), P (приложения), K
-  (колонтитулы), V (объём), X (стиль). Полный каталог со статусами —
-  `docs/checks-catalog.md`.
-- **9 автофиксеров**: T.07–T.13, H.03, H.08. Безопасные правки
-  (пробелы, кавычки, тире, NBSP, точки в заголовках) применяются по
-  `gostforge fix`.
-- **Конструктор работ** (`gostforge.builder`): fluent-API + 3 шаблона +
-  CLI `gostforge new`.
-- **Аннотатор** (`gostforge annotate`): настоящие OOXML-комментарии
-  Word (боковые выноски) либо inline-маркеры о нарушениях прямо в `.docx`.
-- **Плагины проверок** (`~/.gostforge/plugins/`): динамическая загрузка
-  пользовательских проверок без модификации кода gostforge.
-- **CLI** (16 операций): `check`, `fix`, `annotate`, `new`, `pdf`, `diff`,
-  `stats`, `ui`, `serve`, `history`, `checks`,
-  `profiles list/show/install/uninstall/validate/diff`,
-  `comment add/list/resolve/delete`, `plugins list/dir`.
-- **Streamlit-WebApp** с четырьмя режимами:
-  «Нормоконтроль» / «Конструктор» / «История» / «Документация».
-  Открывается в любом современном браузере, включая мобильный —
-  отдельные native-клиенты не разрабатываются.
-  Режим «История» — список submission-ов из локальной БД с
-  цветным summary, фильтром по filename и unresolved-флагу +
-  встроенная лента обсуждения руководитель↔студент с формой
-  добавления комментариев.
-  Режим «Документация» — встроенный просмотр всех руководств
-  `docs/*.md` с навигацией и кнопкой скачивания.
-- **Пословное редактирование** (Фаза 2.5): каждый параграф в визуальном
-  конструкторе редактируется на уровне inline-элементов — TextRun
-  (B/I/U/sup/sub), InlineFormula (LaTeX inline), CrossRef (выбор
-  рисунка/таблицы/формулы по списку), Citation (выбор записи
-  библиографии с опц. страницами). Undo/Redo на 50 шагов + автосохранение
-  в `~/.gostforge/autosave/`. См. [docs/builder.md](docs/builder.md#41-пословное-редактирование-фаза-25).
-- **REST API** (Фаза 3, опц. extra `[api]`): 10 endpoints на FastAPI —
-  `/health`, `/profiles`, `/profiles/{id}`, `/checks`, `/check`,
-  `/fix`, `/annotate`, `/stats`, `/submissions`, `/submissions/{id}`.
-  Аутентификация через `X-API-Key` middleware (env
-  `GOSTFORGE_API_KEYS`), CORS, лимит размера файла. Запуск через
-  `gostforge serve` или `docker compose up`. См.
-  [docs/api.md](docs/api.md) — руководство по деплою с nginx,
-  [docs/phase-3-api-spec.md](docs/phase-3-api-spec.md) — спецификация
-  endpoints.
-- **Локальная SQLite-БД истории**: `~/.gostforge/gostforge.db`,
-  auto-init при первом запуске (миграции применяются через
-  `schema_version`-таблицу, zero-config). Каждый `gostforge check`
-  записывает submission + violations; `gostforge history` показывает
-  трекинг прогресса. См. [docs/database.md](docs/database.md).
-- **Маркетплейс кафедральных профилей**: одной командой устанавить
-  YAML-профиль в локальный реестр —
-  `gostforge profiles install kafedra.yaml` или `POST /profiles`.
-  После этого профиль доступен всем командам без правки исходников.
-  См. [docs/profiles.md](docs/profiles.md#установка-кафедрального-профиля).
-- **Совместная работа руководитель ↔ студент** (миграция v3):
-  таблица комментариев с ролями `supervisor`/`student`/`anonymous`,
-  toggle resolved-флага, счётчик `unresolved_comments` в submission
-  detail. CLI: `gostforge comment add/list/resolve/delete` +
-  показ в `gostforge history --id N`. REST: `POST/GET
-  /submissions/{id}/comments`, `PATCH /comments/{id}/resolve`,
-  `DELETE /comments/{id}`. Authorship: env
-  `GOSTFORGE_DEFAULT_AUTHOR`.
-- **Production-деплой через Docker**: `Dockerfile` (API), `Dockerfile.ui`
-  (Streamlit UI), `docker compose up -d` поднимает оба сервиса.
-  Multi-stage образы на `python:3.11-slim` с non-root юзером и
-  HEALTHCHECK. См. [docs/api.md §5](docs/api.md#5-деплой-через-docker).
-- **CI на GitHub Actions** (`.github/workflows/ci.yml`):
-  тесты на Python 3.11/3.12, ruff/mypy, сборка Docker-образов.
-- **877+ тестов**, mypy --strict baseline, ruff без регресса.
+  `example-department`. Типизированная Pydantic-схема со стилями
+  страницы / текста / заголовков / таблиц / рисунков / списков и
+  per-figure/table схемой нумерации (continuous / by_chapter /
+  буквенно в приложениях).
+- **114 проверок** в 16 категориях: F (страница), T (текст), S
+  (структура), H (заголовки), I (рисунки), B (таблицы), M (формулы),
+  L (списки), R (литература), C (перекрёстные ссылки), A
+  (сокращения), P (приложения), K (колонтитулы), V (объём), X
+  (стиль и стилистика), U (единицы измерения). Полный каталог —
+  [docs/checks-catalog.md](docs/checks-catalog.md).
+- **26 автофиксеров**: F.01–F.04/F.06 (геометрия страницы + позиция
+  номера), T.01–T.14 (шрифт, кегль, интервалы, пробелы, кавычки,
+  тире, NBSP), U.01, H.01–H.04/H.08 (формат заголовков, нумерация,
+  точка после/в конце), L.04. Применяются по `gostforge fix`,
+  кнопкой «Применить автофиксы» в UI или `gostforge apply-fixes`.
 
-См. [docs/roadmap.md](docs/roadmap.md) — план фаз и текущий прогресс.
+### Конструктор работ
+
+- **Fluent-API** (`gostforge.builder`) с тремя шаблонами:
+  `coursework` / `bachelor_thesis` / `research_report`.
+- **Отключение проверок** для отдельных разделов через
+  `.skip_checks(*codes)` / `.skip_all_checks()` — для титульного,
+  реферата, приложений.
+- **Подразделы до 3-го уровня** через рекурсивный `.subsection(...)`.
+- **Разложение готовой `.docx` в конструктор** (`document_to_state`)
+  — импортированную работу можно редактировать дальше в UI или CLI.
+
+### Streamlit-WebApp (`gostforge ui`)
+
+Шесть режимов в одном приложении (переключатель в верху страницы):
+**Главная** · **Нормоконтроль** · **Конструктор** · **Редактор
+профиля** · **История** · **Документация**.
+
+Конструктор включает:
+- Загрузку готовой `.docx` со сразу показанной сводкой нарушений и
+  кнопкой «Применить автофиксы».
+- Кнопку «Собрать каркас по ГОСТ» — болванка структуры в один клик.
+- Шаблоны разделов: Введение, Заключение, Реферат, Содержание,
+  Список источников (`is_bibliography=True`), титульный лист (ручная
+  вставка), приложения с авто-нумерацией букв (А, Б, В…), Глава с
+  подразделом.
+- Редактирование любого блока (параграф/таблица/рисунок/список/
+  формула/TOC). Картинки вшиваются в state как data-URI.
+- **Пословное редактирование параграфов** (Фаза 2.5): TextRun
+  (B/I/U/sup/sub), InlineFormula (LaTeX), CrossRef (рисунок/таблица/
+  формула), Citation (запись библиографии).
+- **Многоуровневая шапка таблиц** через поле «Доп. шапка» с
+  авто-склеиванием пустых ячеек (`Группа 1||Группа 2|` → две группы
+  по 2 колонки).
+- **Стабильные id блоков** — удаление/перемещение не «приклеивает»
+  состояние виджета к соседу.
+- Поиск-замена по разделам с подсветкой совпадений.
+- Bulk-операции: удаление пустых параграфов, Title Case, авто-нумерация
+  глав («1 Анализ», «1.1 Подраздел», «1.1.1 Пункт») со снятием
+  нумерации со структурных разделов.
+- Дублирование, перемещение и перенос разделов и блоков (в т. ч.
+  в другой раздел).
+- Панели **«Прогресс»**, **«Готовность работы»** (чек-лист
+  обязательных элементов + навигация «Перейти к разделу»),
+  **«Live-нормоконтроль»** с кнопкой «→ К разделу» на каждом
+  нарушении.
+- Раскрывающаяся панель «Нормоконтроль раздела»: чекбокс «Не
+  проверять» и multi-select категорий проверок.
+- Экспорт в `.docx`/`.pdf`/`.md`/`.html`; превью PDF в браузере
+  (через LibreOffice headless).
+- Undo/Redo + версионирование с автосохранением в
+  `~/.gostforge/autosave/`.
+
+**Редактор профиля** — визуальная настройка всех параметров оформления
+(страница, текст, заголовки, таблицы — включая нумерацию и
+«Продолжение таблицы», рисунки — включая `max_height_cm` и схему
+нумерации, списки), набора проверок и метаданных. Сохранение профиля
+снимком или наследником (`extends`); список и удаление пользовательских
+профилей.
+
+Подробнее — [docs/builder.md](docs/builder.md#4-визуальный-редактор-streamlit).
+
+### CLI (30 команд)
+
+| Команда | Назначение |
+|---|---|
+| `check` / `check-state` | Нормоконтроль `.docx` или state-файла |
+| `fix` / `apply-fixes` | Автофиксы для `.docx` или state |
+| `annotate` | Аннотация `.docx` комментариями Word или inline-маркерами |
+| `new` / `new-state` | Болванка по шаблону → `.docx` или state |
+| `import-docx` / `import-pdf` / `import-md` | Импорт в state (PDF: extra `[import-formats]`) |
+| `generate` | state → `.docx` |
+| `export-md` / `export-html` | state → Markdown / HTML5 |
+| `convert` | Конвертация форматов через LibreOffice (DOC→DOCX) |
+| `pdf` | `.docx` → PDF |
+| `diff` / `diff-state` | Сравнение submission-ов или state-файлов |
+| `stats` / `stats-state` | Метрики структуры |
+| `state-versions` | Список и восстановление авто-версий state |
+| `ui` | Streamlit-WebApp |
+| `serve` | REST API на FastAPI |
+| `history` | Submission-ы из локальной БД |
+| `checks` | Список всех проверок |
+| `profiles list/show/install/uninstall/validate/diff` | Управление профилями |
+| `comment add/list/resolve/delete` | Комментарии руководитель↔студент |
+| `plugins list/dir` | Управление пользовательскими плагинами проверок |
+
+### REST API (опц. extra `[api]`)
+
+13 endpoints на FastAPI: health, profiles, checks, check, fix,
+annotate, stats, submissions + комментарии. Аутентификация через
+`X-API-Key`, CORS, лимит размера файла. Запуск через
+`gostforge serve` или `docker compose up`. Полный реестр — [docs/api.md](docs/api.md).
+
+### Прочее
+
+- **Локальная SQLite-БД** истории: `~/.gostforge/gostforge.db`,
+  auto-init, миграции через `schema_version`.
+- **Маркетплейс кафедральных профилей**:
+  `gostforge profiles install kafedra.yaml` или `POST /profiles`.
+- **Совместная работа руководитель ↔ студент**: комментарии с
+  ролями, resolved-флаг, счётчик `unresolved_comments`.
+- **Плагины проверок** (`~/.gostforge/plugins/`): пользовательские
+  проверки через `@register("X.NN")` без модификации gostforge.
+- **Production-деплой через Docker**: `Dockerfile` (API),
+  `Dockerfile.ui` (Streamlit UI), `docker compose up -d` — multi-stage
+  образы на `python:3.11-slim`.
+- **CI на GitHub Actions**: тесты на Python 3.11/3.12, ruff/mypy,
+  сборка Docker-образов.
+
+Полный план развития — [docs/roadmap.md](docs/roadmap.md). История
+изменений — [docs/changelog.md](docs/changelog.md).
 
 ## Архитектура (кратко)
 
@@ -119,7 +187,7 @@ auto-migrations + маркетплейс кафедральных профиле
                      │   │ структура+контент  │   │
 ┌─────────────────┐  │   └────────────────────┘   │  ┌──────────────────┐
 │     Парсер      │──┘            ↑               └──│    Валидатор     │──→ Отчёт
-│ .docx → модель  │←── .docx      │                  │   ~75 проверок   │
+│ .docx → модель  │←── .docx      │                  │   114 проверок   │
 └─────────────────┘               │                  └──────────────────┘
                                   │
                           ┌───────────────┐
@@ -139,171 +207,158 @@ cd gostforge
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
+
+# Опционально:
+pip install -e ".[dev,ui]"             # Streamlit UI
+pip install -e ".[dev,ui,api]"         # + REST API
+pip install -e ".[dev,import-formats]" # + импорт PDF (pdfplumber)
 ```
 
 ## Использование
 
-Уже работает:
+### Нормоконтроль
 
 ```bash
-# Проверить одну работу с подробным цветным выводом
+# Проверить одну работу с цветным выводом
 gostforge check work.docx --profile gost-7.32-2017
 
-# Проверить папку работ и сохранить Excel-отчёт
+# Папка работ → Excel-отчёт
 gostforge check ./submissions/ --profile gost-7.32-2017 --report report.xlsx
 
-# То же, но кратко (только сводка и список кодов нарушений)
+# Кратко (только summary и коды нарушений)
 gostforge check work.docx --quiet
 
-# Markdown-отчёт (формат определяется по расширению файла)
+# Markdown-отчёт (формат по расширению)
 gostforge check work.docx --report report.md
-
-# Показать доступные профили и реализованные проверки
-gostforge profiles list
-gostforge profiles show gost-7.32-2017
-gostforge checks
-
-# Веб-интерфейс: нормоконтроль (drag-and-drop) и визуальный конструктор
-pip install -e ".[ui]"   # один раз — поставит streamlit
-gostforge ui             # откроется на http://localhost:8501
 ```
 
-В верхнем переключателе режима выбирается «Нормоконтроль» или
-«Конструктор». Подробнее о визуальном редакторе — раздел «Конструктор
-работ» ниже и [docs/builder.md](docs/builder.md).
-
-Exit code: `0` — нарушений нет; `1` — найдены ошибки (severity=error);
-`2` — проблема загрузки профиля. Подходит для CI.
+Exit codes: `0` — нарушений нет; `1` — найдены ошибки; `2` — проблема
+загрузки профиля.
 
 ### Автоисправление
 
 ```bash
-# Применить все безопасные правки и сохранить копию
 gostforge fix work.docx -o work_fixed.docx
-
-# Только конкретные исправления
 gostforge fix work.docx -o work_fixed.docx --only T.08 --only T.10
-
-# Показать что было бы исправлено, без записи файла
 gostforge fix work.docx -o /dev/null --dry-run
 ```
 
-Безопасно исправляются: двойные пробелы (T.08), хвостовые пробелы
-(T.09), прямые кавычки на «ёлочки» (T.10), дефис между пробелами на
-длинное тире (T.11), точка после номера в заголовке (H.03), точка в
-конце заголовка (H.08).
-
-### Конструктор работ
+### Конструктор работ (CLI)
 
 ```bash
-# Создать болванку курсовой по шаблону
-gostforge new my-coursework.docx --template coursework \
-    --title "Курсовая по нормоконтролю" --author "Иванов И. И." --year 2026
+# 1. Создать с нуля или импортировать готовую работу
+gostforge new-state --template coursework --title "..." -o state.json
+# ИЛИ
+gostforge import-docx work.docx -o state.json
+# ИЛИ из PDF (нужен extra [import-formats]):
+gostforge import-pdf work.pdf -o state.json
 
-# Бакалаврская ВКР с двумя главами и реферат-вариант для отчёта НИР
-gostforge new thesis.docx --template bachelor_thesis --title "Моя ВКР" --year 2026
-gostforge new report.docx --template research_report --title "Отчёт НИР"
+# 2. Редактировать (вручную, в UI, или скриптом)
+gostforge ui                                      # визуально
+$EDITOR state.json                                # вручную
+gostforge apply-fixes state.json -o state.json    # автофиксы
+
+# 3. Сборка финального .docx
+gostforge generate state.json -o final.docx
+
+# Дополнительно: round-trip с Markdown и сравнение версий
+gostforge export-md state.json -o draft.md
+gostforge import-md draft.md -o state.json
+gostforge diff-state old.json new.json
+gostforge diff-state old.json new.json --mode unified
 ```
 
-Программный fluent-API — см. [docs/builder.md](docs/builder.md):
+Доступные шаблоны: `coursework`, `bachelor_thesis`,
+`research_report`, `empty`.
+
+### Программный fluent-API
 
 ```python
 from gostforge.builder import work
 
 (
     work("Курсовая", author="Иван Иванов", year=2026)
-    .section("Введение").paragraph("Актуальность ...")
-    .section("Заключение").paragraph("Выводы ...")
+    .section("Титульный лист")
+        .paragraph("...")
+        .skip_all_checks()
+    .section("Введение")
+        .paragraph("Актуальность темы исследования...")
+        .list(["задача 1", "задача 2", "задача 3"], ordered=True)
+    .section("Глава 1. Анализ")
+        .subsection("1.1 Постановка задачи")
+            .paragraph("...")
+        .subsection("1.2 Существующие решения")
+            .table(
+                headers=["Алгоритм", "Сложность"],
+                rows=[["Дейкстра", "O(n log n)"]],
+                caption="Сложность алгоритмов",
+            )
+    .section("Заключение")
+        .paragraph("...")
     .section("Список использованных источников")
         .reference("Иванов И. И. Программирование. — М. : Наука, 2023. — 320 с.")
     .save("coursework.docx")
 )
 ```
 
-Документ, собранный конструктором, проходит ≥29 из 30 проверок из коробки.
+См. [docs/builder.md](docs/builder.md) — полный гайд по builder-API
+и UI.
 
-#### Визуальный редактор
+### Веб-интерфейс
 
-В режиме `Конструктор` веб-интерфейса (`gostforge ui`) доступен
-интерактивный редактор: создание/перемещение/удаление разделов и
-подразделов, добавление параграфов, таблиц, рисунков, списков, формул
-и записей библиографии. По кнопке «Сгенерировать .docx» документ
-собирается через `WorkBuilder`, отдаётся на скачивание и сразу
-прогоняется через выбранный профиль с показом сводки нарушений.
-Промежуточное состояние сохраняется в JSON и загружается обратно через
-sidebar. Детали — [docs/builder.md](docs/builder.md#4-визуальный-редактор-streamlit).
+```bash
+pip install -e ".[ui]"   # один раз
+gostforge ui             # → http://localhost:8501
+```
 
 ### PDF-экспорт
 
 ```bash
-# Требует установленный LibreOffice (sudo apt install libreoffice)
-gostforge pdf work.docx -o work.pdf
+gostforge pdf work.docx -o work.pdf   # требует LibreOffice
 ```
-
-Использует LibreOffice headless для конвертации. Полезно для генерации
-финальной версии работы после автофиксов. Exit codes: `3` — LibreOffice
-не найден; `4` — таймаут; `5` — LibreOffice вернул ошибку.
 
 ### Аннотация документа
 
 ```bash
-# Настоящие комментарии Word (по умолчанию) — боковые выноски в .docx,
-# на которые можно отвечать и которые можно резолвить в Word/LibreOffice.
-gostforge annotate work.docx -o annotated.docx
-
-# Старый режим: inline-маркеры вида [F.01: текст] красным курсивом
-# прямо в тексте параграфа.
-gostforge annotate work.docx -o annotated.docx --style inline
+gostforge annotate work.docx -o annotated.docx          # комментарии Word
+gostforge annotate work.docx -o annotated.docx --style inline  # inline-маркеры
 ```
-
-В режиме `comments` в .docx-архив добавляется отдельная часть
-`word/comments.xml`, в `document.xml` ставятся пары
-`<w:commentRangeStart/End>` плюс reference-run, а в `[Content_Types].xml`
-и `word/_rels/document.xml.rels` дописываются нужные Override и
-Relationship. Реализация — прямые манипуляции с zip-архивом, без
-зависимости от внутреннего API python-docx.
 
 ## Плагины проверок
 
-Кафедральные или организационные проверки можно подключать в виде
-**плагинов** — обычных Python-файлов в каталоге
-`~/.gostforge/plugins/` (`%APPDATA%\gostforge\plugins\` на Windows).
-Каждая зарегистрированная через `@register("X.NN")` функция автоматически
-попадает в общий реестр и может быть включена в любой профиль.
+Кафедральные или организационные проверки подключаются как обычные
+Python-файлы в `~/.gostforge/plugins/` (на Windows —
+`%APPDATA%\gostforge\plugins\`). Функция, зарегистрированная через
+`@register("X.NN")`, автоматически попадает в общий реестр и может
+быть включена в любой профиль.
 
 ```bash
 gostforge plugins dir    # узнать/создать каталог плагинов
 gostforge plugins list   # увидеть загруженные плагины и их коды
 ```
 
-Полный гайд с примерами и предупреждениями о безопасности —
-[docs/plugins.md](docs/plugins.md).
-
+Подробности и предупреждения о безопасности — [docs/plugins.md](docs/plugins.md).
 
 ## Документация
 
 - [Архитектура](docs/architecture.md)
 - [Каталог проверок](docs/checks-catalog.md)
+- [Конструктор и визуальный редактор](docs/builder.md)
 - [Система профилей](docs/profiles.md)
 - [Плагины проверок](docs/plugins.md)
 - [Колонтитулы и секции](docs/page-sections.md)
-- [Roadmap](docs/roadmap.md)
-- [Работа с Claude Code](docs/claude-code-workflow.md) — как продолжать разработку
-- [Вклад в проект](CONTRIBUTING.md)
-
-## Для разработчиков, использующих Claude Code
-
-В корне проекта лежит `CLAUDE.md` — он автоматически подхватывается агентом и
-содержит ключевой контекст (стек, правила, конвенции). Подробная пошаговая
-инструкция и готовые промпты для каждой задачи roadmap — в
-[docs/claude-code-workflow.md](docs/claude-code-workflow.md).
+- [REST API](docs/api.md)
+- [Локальная БД истории](docs/database.md)
+- [Roadmap](docs/roadmap.md) · [Changelog](docs/changelog.md)
+- [Как контрибьютить](CONTRIBUTING.md)
 
 ## Стандарты-основа
 
-- **ГОСТ 7.32-2017** — Отчёт о научно-исследовательской работе. Структура и правила оформления.
+- **ГОСТ 7.32-2017** — Отчёт о НИР. Структура и правила оформления.
 - **ГОСТ Р 2.105-2019** — ЕСКД. Общие требования к текстовым документам.
-- **ГОСТ Р 7.0.100-2018** — Библиографическая запись. Библиографическое описание.
+- **ГОСТ Р 7.0.100-2018** — Библиографическая запись. Описание.
 - **ГОСТ Р 7.0.5-2008** — Библиографическая ссылка.
+- **ГОСТ Р 8.000-2015** — Единицы измерения (СИ).
 
 ## Лицензия
 

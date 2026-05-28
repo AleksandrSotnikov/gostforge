@@ -46,14 +46,11 @@ python -m pytest -q
 
 * **test** — `python -m pytest -q` на Python 3.11 и 3.12 (matrix).
 * **lint** — `ruff check`, `ruff format --check`, `mypy --strict`.
-  Сейчас в warn-only режиме из-за pre-existing baseline; новые
-  изменения должны не ухудшать baseline (проверяется руками в PR).
+  Все три должны проходить чисто; baseline не толерируется.
 * **docker** — `docker build` + `docker compose config` (валидация
   Dockerfile и compose-yaml; image публиковать не пытаемся).
 
-Если CI красный из-за чужих pre-existing baseline-ошибок — это
-нормально для warn-only шагов. Если упал именно pytest или docker
-build — нужно чинить перед merge.
+Красный CI блокирует merge.
 
 ## Коммиты
 
@@ -104,8 +101,36 @@ Conventional Commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`,
    проверки. Минимум — `S.01` (обязательные разделы).
 4. Зарегистрируй в `gostforge/cli.py::new` (добавь в `click.Choice` и
    ветку диспетчера).
-5. Тесты в `tests/test_builder_templates.py` — минимум 2: структура
+5. Зарегистрируй также в `gostforge/cli.py::new_state_cmd` (зеркало
+   для JSON-state).
+6. Тесты в `tests/test_builder_templates.py` — минимум 2: структура
    шаблона + интеграционный `save()` cycle.
+
+## Как добавить шаблон раздела для UI
+
+1. Открой `src/gostforge/web/builder_editor.py::_SECTION_TEMPLATES`.
+2. Добавь запись `"key": ("Человеческое название", factory)`, где
+   `factory` — функция без аргументов, возвращающая dict с минимум
+   `heading` и `blocks`. Опционально: `subsections`, `is_bibliography`,
+   `references`, `disabled_checks`.
+3. Тест в `tests/test_cli_new_state_and_bulk.py` или
+   `tests/test_builder_ui_extras.py` — что factory даёт валидный dict.
+
+## Как добавить CLI-команду для state-операций
+
+Pattern из существующих команд (`new-state`, `import-docx`,
+`generate`, `export-md`, `import-md`, `apply-fixes`, `diff-state`):
+
+1. Открой `src/gostforge/cli.py`.
+2. `@main.command("name")` + опции через `@click.option`.
+3. Внутри функции — чтение JSON через `json.loads(path.read_text(...))`,
+   проверка `"sections" in state`, вызов внутреннего helper-а из
+   `src/gostforge/web/builder_editor.py` (например,
+   `_build_document_from_state`, `document_to_state`).
+4. Ошибки `JSONDecodeError` → exit 2, ошибки validate/build → exit 3.
+5. Тесты в `tests/test_cli_*.py` — обязательно через `subprocess.run`
+   с реальным `gostforge` binary, чтобы проверить интеграцию click +
+   pipe + exit codes.
 
 ## Этика проверок
 

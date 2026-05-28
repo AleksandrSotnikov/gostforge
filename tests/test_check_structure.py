@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты S.01, S.02, S.03, S.04, S.05, S.06, S.07, S.08 — структура работы."""
 
 from gostforge.model import (
@@ -529,6 +527,25 @@ def test_s03_unknown_heading_violation() -> None:
     assert len(found) == 1
     assert found[0].severity == "warning"
     assert "Моя собственная штука" in found[0].message
+
+
+def test_s03_structural_elements_allowed() -> None:
+    """Титульный лист, нормативные ссылки, задание и пр. — допустимы,
+    хотя и не входят в required/expected (не «подозрительные»)."""
+    doc = _doc(
+        [
+            _heading("Титульный лист"),
+            _heading("Нормативные ссылки"),
+            _heading("Термины и определения"),
+            _heading("Задание на выпускную квалификационную работу"),
+            _heading("Введение"),
+            _heading("Заключение"),
+            _heading("Список использованных источников"),
+        ]
+    )
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "S.03"]
+    assert found == []
 
 
 def test_s03_alias_is_accepted() -> None:

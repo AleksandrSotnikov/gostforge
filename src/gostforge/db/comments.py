@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Операции с таблицей comments (совместная работа руководитель ↔ студент).
 
 Один submission → много комментариев в хронологическом порядке.
@@ -13,7 +11,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Literal
 
 CommentRole = Literal["student", "supervisor", "anonymous"]
@@ -54,9 +52,7 @@ def add_comment(
     if not body or not body.strip():
         raise ValueError("Текст комментария не может быть пустым")
     if role not in _VALID_ROLES:
-        raise ValueError(
-            f"role должна быть одной из {sorted(_VALID_ROLES)}, получено: {role!r}"
-        )
+        raise ValueError(f"role должна быть одной из {sorted(_VALID_ROLES)}, получено: {role!r}")
     # Submission должен существовать — без FK CASCADE это даст IntegrityError
     # с не очень понятным текстом; делаем pre-check.
     exists = conn.execute(
@@ -65,7 +61,7 @@ def add_comment(
     if exists is None:
         raise ValueError(f"Submission #{submission_id} не существует")
 
-    ts = created_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ts = created_at or datetime.now(UTC).isoformat(timespec="seconds")
     cursor = conn.execute(
         """
         INSERT INTO comments (submission_id, author, role, body, resolved, created_at)
@@ -107,15 +103,11 @@ def list_comments(
 
 def get_comment(conn: sqlite3.Connection, comment_id: int) -> Comment | None:
     """Один комментарий по id или None."""
-    row = conn.execute(
-        "SELECT * FROM comments WHERE id = ?", (int(comment_id),)
-    ).fetchone()
+    row = conn.execute("SELECT * FROM comments WHERE id = ?", (int(comment_id),)).fetchone()
     return _row_to_comment(row) if row is not None else None
 
 
-def resolve_comment(
-    conn: sqlite3.Connection, comment_id: int, *, resolved: bool = True
-) -> bool:
+def resolve_comment(conn: sqlite3.Connection, comment_id: int, *, resolved: bool = True) -> bool:
     """Пометить комментарий как resolved (или снять отметку).
 
     Возвращает True если запись существовала, иначе False.
@@ -130,16 +122,12 @@ def resolve_comment(
 
 def delete_comment(conn: sqlite3.Connection, comment_id: int) -> bool:
     """Удалить комментарий. True если был, False если не было."""
-    cursor = conn.execute(
-        "DELETE FROM comments WHERE id = ?", (int(comment_id),)
-    )
+    cursor = conn.execute("DELETE FROM comments WHERE id = ?", (int(comment_id),))
     conn.commit()
     return (cursor.rowcount or 0) > 0
 
 
-def count_unresolved_comments(
-    conn: sqlite3.Connection, submission_id: int
-) -> int:
+def count_unresolved_comments(conn: sqlite3.Connection, submission_id: int) -> int:
     """Сколько открытых (resolved=0) комментариев у submission."""
     row = conn.execute(
         "SELECT COUNT(*) FROM comments WHERE submission_id = ? AND resolved = 0",

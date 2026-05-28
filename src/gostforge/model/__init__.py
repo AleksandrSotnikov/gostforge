@@ -1,5 +1,3 @@
-# ruff: noqa: RUF002, RUF003
-
 """Внутренняя модель документа.
 
 Это сердце системы: и парсер, и валидатор, и экспортёр работают через эту
@@ -13,8 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
-
-SCHEMA_VERSION = "0.3.0"
+SCHEMA_VERSION = "0.4.0"
 
 
 # --- Inline content -----------------------------------------------------------
@@ -83,13 +80,40 @@ class Citation:
     template: str = "[{n}]"  # либо "[{n}, с. {pages}]"
 
 
-InlineElement = TextRun | CrossRef | InlineFormula | Citation
+@dataclass
+class Hyperlink:
+    """Гиперссылка на URL/email/якорь внутри документа.
+
+    Отображается как кликабельный текст в Word/LibreOffice; на экспорте
+    превращается в ``<w:hyperlink r:id="rIdN">`` + Relationship на URL
+    (или ``<w:hyperlink w:anchor="bookmark">`` для внутренних).
+    """
+
+    url: str  # http://..., https://..., mailto:..., или пусто для anchor
+    text: str  # отображаемый текст (то, что видит читатель)
+    anchor: str | None = None  # для внутренних ссылок на bookmark
+
+
+@dataclass
+class FootnoteRef:
+    """Ссылка на сноску из ``word/footnotes.xml``.
+
+    Содержит id (стабильный в рамках одного документа) и опционально
+    кэшированный текст самой сноски — для удобства проверок
+    нормоконтроля без дополнительного lookup.
+    """
+
+    footnote_id: str
+    text: str = ""  # содержимое сноски, заполняется парсером
+
+
+InlineElement = TextRun | CrossRef | InlineFormula | Citation | Hyperlink | FootnoteRef
 
 
 # --- Блоки --------------------------------------------------------------------
 
 
-class BlockType(str, Enum):
+class BlockType(str, Enum):  # noqa: UP042  # str+Enum для JSON-сериализации (не StrEnum)
     PARAGRAPH = "paragraph"
     TABLE = "table"
     FIGURE = "figure"
@@ -97,6 +121,7 @@ class BlockType(str, Enum):
     LIST = "list"
     CODE = "code"
     FOOTNOTE = "footnote"
+    TOC = "toc"  # автоматическое оглавление через Word TOC-field
 
 
 @dataclass
@@ -126,6 +151,11 @@ class Paragraph(Block):
     # True/False — задано явно (через w:pPr/w:pageBreakBefore у параграфа или
     # унаследовано от Word-стиля).
     page_break_before: bool | None = None
+    # Интервалы перед/после абзаца в пунктах (w:spacing w:before/w:after).
+    # None — атрибут не задан явно (наследуется от стиля). Используется
+    # проверкой T.14 для контроля «лишнего» интервала между абзацами.
+    space_before_pt: float | None = None
+    space_after_pt: float | None = None
 
 
 @dataclass
@@ -142,13 +172,44 @@ class Figure(Block):
 
 
 @dataclass
+class CellMerge:
+    """Описание объединённой ячейки в таблице.
+
+    Координаты row/col отсчитываются от 0; row=0 — шапка (headers),
+    row=1+ — обычные данные (rows[0] = row=1 и т. д.).
+
+    rowspan/colspan ≥ 1. При rowspan=2, colspan=1 это «вертикальное
+    объединение двух ячеек одной колонки» (`<w:vMerge>`); colspan=2
+    — горизонтальное (`<w:gridSpan w:val="2"/>`).
+    """
+
+    row: int
+    col: int
+    rowspan: int = 1
+    colspan: int = 1
+
+
+@dataclass
 class Table(Block):
     type: BlockType = BlockType.TABLE
     caption: list[InlineElement] = field(default_factory=list)
     headers: list[list[InlineElement]] = field(default_factory=list)
+    # Дополнительные строки шапки НАД основной (`headers`). Пустой
+    # список = одноуровневая шапка (поведение по умолчанию). Полезно для
+    # таблиц с многоуровневыми заголовками типа «Группа 1 | Группа 2»
+    # сверху и «Подзаг A | Подзаг B | ...» снизу.
+    # Порядок — сверху вниз: extra_header_rows[0] — самая верхняя строка,
+    # extra_header_rows[-1] непосредственно над headers. Колонки внутри
+    # ряда часто склеиваются через `merges` (CellMerge с colspan).
+    extra_header_rows: list[list[list[InlineElement]]] = field(default_factory=list)
     rows: list[list[list[InlineElement]]] = field(default_factory=list)
     column_widths_pct: list[float] | None = None
     number: int | None = None
+    # Объединённые ячейки. Пустой список = плоская таблица.
+    # Заполняется парсером из <w:vMerge>/<w:gridSpan>; экспортёр пишет
+    # обратно. Координаты row/col — индексы в (extra_header_rows +
+    # headers + rows), 0-based.
+    merges: list[CellMerge] = field(default_factory=list)
 
 
 @dataclass
@@ -163,6 +224,30 @@ class ListBlock(Block):
     type: BlockType = BlockType.LIST
     ordered: bool = False
     items: list[list[InlineElement]] = field(default_factory=list)
+    # Уровень вложенности каждого элемента (0..8). По умолчанию пустой
+    # список = все элементы на уровне 0 (плоский список — backwards
+    # compatible со старым кодом). При item_levels[i] > 0 экспортёр
+    # пишет multilevel abstractNum в numbering.xml с правильным ilvl,
+    # парсер читает ilvl из <w:numPr><w:ilvl/> обратно.
+    item_levels: list[int] = field(default_factory=list)
+
+
+@dataclass
+class TableOfContents(Block):
+    """Автоматическое оглавление документа.
+
+    Реализуется через Word TOC-field (``<w:fldSimple w:instr="TOC..."/>``):
+    Word/LibreOffice сами строят список заголовков с номерами страниц
+    при открытии файла (пользователь видит «обновить оглавление» при
+    F9). Содержимое блока в .docx — пустой placeholder; настоящий
+    список заголовков формируется приложением при рендере.
+    """
+
+    type: BlockType = BlockType.TOC
+    # Уровни заголовков, которые включаются в TOC. Default 1-3 —
+    # стандартное оглавление с главами, подразделами и пунктами.
+    min_level: int = 1
+    max_level: int = 3
 
 
 # --- Логические разделы -------------------------------------------------------
@@ -170,13 +255,26 @@ class ListBlock(Block):
 
 @dataclass
 class LogicalSection:
-    """Раздел работы по содержанию (введение, глава 1, заключение)."""
+    """Раздел работы по содержанию (введение, глава 1, заключение).
+
+    `disabled_checks` — список кодов проверок, которые НЕ должны
+    применяться к содержимому этой секции (и её дочерних узлов).
+    Спецзначение ``["*"]`` отключает ВСЕ проверки для раздела целиком.
+    Это нужно для титульного листа, реферата, приложений — частей
+    работы, которые оформляются по своим правилам (или вовсе по
+    шаблону кафедры), а не по правилам, заданным в профиле.
+
+    Поле — фича конструктора (builder), не сохраняется в .docx и не
+    читается из .docx; при нормоконтроле чужих работ оно всегда
+    пустое.
+    """
 
     id: str
     heading: list[InlineElement] = field(default_factory=list)
     level: int = 1  # 1..4
     auto_numbering: bool = True
     children: list[LogicalSection | Block] = field(default_factory=list)
+    disabled_checks: list[str] = field(default_factory=list)
 
 
 # --- Секции вёрстки -----------------------------------------------------------
@@ -256,7 +354,34 @@ class DocumentMetadata:
     organization: str = ""
     department: str = ""
     year: int | None = None
-    work_type: Literal["coursework", "bachelor_thesis", "master_thesis", "research_report", "other"] = "other"
+    work_type: Literal[
+        "coursework", "bachelor_thesis", "master_thesis", "research_report", "other"
+    ] = "other"
+
+
+@dataclass
+class Comment:
+    """Комментарий рецензента из word/comments.xml.
+
+    Word/LibreOffice кладут комментарии в отдельный XML-part:
+    каждый ``<w:comment>`` имеет id, автора, дату и тело
+    (один или несколько параграфов). В document.xml — только
+    ссылки ``<w:commentRangeStart>``, ``<w:commentRangeEnd>``,
+    ``<w:commentReference>`` с тем же id.
+
+    Парсер собирает list[Comment] в Document.comments. Это полезно
+    для научного руководителя, оставляющего заметки прямо в Word,
+    и для UI, который может показать их в редакторе.
+    """
+
+    id: str
+    author: str = ""
+    date: str = ""  # ISO 8601, как в XML; парсить дальше пользователю
+    text: str = ""
+    # Контекст: id раздела, к которому привязан комментарий (если удалось
+    # вычислить через commentRangeStart). None = верхнеуровневый или
+    # не определено.
+    section_id: str | None = None
 
 
 @dataclass
@@ -273,3 +398,5 @@ class Document:
     # None — не задано (наследуется от приложения).
     auto_hyphenation: bool | None = None
     abbreviations: dict[str, str] = field(default_factory=dict)
+    # Комментарии рецензента из word/comments.xml. Заполняется парсером.
+    comments: list[Comment] = field(default_factory=list)

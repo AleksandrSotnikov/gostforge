@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI 'gostforge comment add/list/resolve/delete' + интеграция с history."""
 
 from __future__ import annotations
@@ -66,9 +64,7 @@ def test_add_uses_default_author_from_env(
 ) -> None:
     monkeypatch.setenv("GOSTFORGE_DEFAULT_AUTHOR", "student@kafedra.ru")
     runner = CliRunner()
-    result = runner.invoke(
-        main, ["comment", "add", str(submission_id), "Просто комментарий"]
-    )
+    result = runner.invoke(main, ["comment", "add", str(submission_id), "Просто комментарий"])
     assert result.exit_code == 0
     assert "student@kafedra.ru" in result.output
 
@@ -80,18 +76,14 @@ def test_add_with_unknown_submission_returns_2(db_path: Path) -> None:
     assert "не существует" in result.output
 
 
-def test_add_with_empty_body_returns_2(
-    db_path: Path, submission_id: int
-) -> None:
+def test_add_with_empty_body_returns_2(db_path: Path, submission_id: int) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["comment", "add", str(submission_id), "   "])
     assert result.exit_code == 2
     assert "пустым" in result.output
 
 
-def test_add_with_invalid_role_handled_by_click(
-    db_path: Path, submission_id: int
-) -> None:
+def test_add_with_invalid_role_handled_by_click(db_path: Path, submission_id: int) -> None:
     """click.Choice сам отвергает невалидное значение --role."""
     runner = CliRunner()
     result = runner.invoke(
@@ -112,13 +104,9 @@ def test_list_empty(db_path: Path, submission_id: int) -> None:
     assert "нет" in result.output.lower()
 
 
-def test_list_shows_chronological_with_markers(
-    db_path: Path, submission_id: int
-) -> None:
+def test_list_shows_chronological_with_markers(db_path: Path, submission_id: int) -> None:
     runner = CliRunner()
-    runner.invoke(
-        main, ["comment", "add", str(submission_id), "open one", "--role", "student"]
-    )
+    runner.invoke(main, ["comment", "add", str(submission_id), "open one", "--role", "student"])
     runner.invoke(
         main,
         ["comment", "add", str(submission_id), "open two", "--role", "supervisor"],
@@ -133,17 +121,13 @@ def test_list_shows_chronological_with_markers(
     assert "●" in result.output
 
 
-def test_list_unresolved_hides_closed(
-    db_path: Path, submission_id: int
-) -> None:
+def test_list_unresolved_hides_closed(db_path: Path, submission_id: int) -> None:
     runner = CliRunner()
     runner.invoke(main, ["comment", "add", str(submission_id), "open"])
     runner.invoke(main, ["comment", "add", str(submission_id), "closed"])
     # Закрываем второй комментарий.
     runner.invoke(main, ["comment", "resolve", "2"])
-    result = runner.invoke(
-        main, ["comment", "list", str(submission_id), "--unresolved"]
-    )
+    result = runner.invoke(main, ["comment", "list", str(submission_id), "--unresolved"])
     assert "open" in result.output
     assert "closed" not in result.output
 
@@ -198,9 +182,7 @@ def test_delete_unknown_returns_1(db_path: Path) -> None:
 # --- интеграция: history --id показывает комментарии ----------------------
 
 
-def test_history_id_shows_comments(
-    db_path: Path, submission_id: int
-) -> None:
+def test_history_id_shows_comments(db_path: Path, submission_id: int) -> None:
     """gostforge history --id N показывает submission + комментарии."""
     runner = CliRunner()
     runner.invoke(
@@ -214,9 +196,7 @@ def test_history_id_shows_comments(
     assert "[supervisor]" in result.output
 
 
-def test_history_id_without_comments_shows_no_section(
-    db_path: Path, submission_id: int
-) -> None:
+def test_history_id_without_comments_shows_no_section(db_path: Path, submission_id: int) -> None:
     """Без комментариев секция «Комментарии:» не показывается."""
     runner = CliRunner()
     result = runner.invoke(main, ["history", "--id", str(submission_id)])

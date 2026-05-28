@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты API-key middleware (Фаза 3, итерация 2).
 
 env GOSTFORGE_API_KEYS включает обязательную проверку заголовка
@@ -110,9 +108,7 @@ def test_multiple_keys_supported(monkeypatch: pytest.MonkeyPatch) -> None:
     assert client.get("/checks", headers={"X-API-Key": "unknown"}).status_code == 401
 
 
-def test_post_check_with_auth(
-    monkeypatch: pytest.MonkeyPatch, docx_bytes: bytes
-) -> None:
+def test_post_check_with_auth(monkeypatch: pytest.MonkeyPatch, docx_bytes: bytes) -> None:
     """POST /check тоже требует X-API-Key при включённом auth."""
     client = _client_with_keys(monkeypatch, "super-secret-1234")
     files = {"file": ("s.docx", docx_bytes, "application/octet-stream")}

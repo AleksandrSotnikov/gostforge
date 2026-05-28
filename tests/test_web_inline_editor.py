@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты helpers и сборки документов с inline-элементами (шаг 6 Фазы 2.5).
 
 Покрытие:
@@ -18,12 +16,10 @@ import pytest
 
 pytest.importorskip("streamlit")
 
-from gostforge.builder import work
 from gostforge.model import (
     BibliographyEntry,
     Citation,
     Document,
-    InlineFormula,
     LogicalSection,
     PageSection,
     Paragraph,
@@ -35,7 +31,6 @@ from gostforge.web.builder_editor import (
     _collect_xref_targets,
     _resolve_citation_proxies,
 )
-
 
 # --- _collect_xref_targets --------------------------------------------------
 
@@ -93,9 +88,7 @@ def test_collect_xref_targets_descends_into_subsections() -> None:
                     {
                         "id": "s1.1",
                         "heading": "1.1",
-                        "blocks": [
-                            {"kind": "figure", "image_path": "", "caption": "вложенный"}
-                        ],
+                        "blocks": [{"kind": "figure", "image_path": "", "caption": "вложенный"}],
                     }
                 ],
             }
@@ -113,9 +106,7 @@ def test_collect_xref_targets_skips_bibliography_section() -> None:
                 "id": "ref",
                 "heading": "Список",
                 "is_bibliography": True,
-                "blocks": [
-                    {"kind": "figure", "image_path": "", "caption": "не считаем"}
-                ],
+                "blocks": [{"kind": "figure", "image_path": "", "caption": "не считаем"}],
                 "subsections": [],
             }
         ]
@@ -253,9 +244,7 @@ def test_resolve_citation_proxies_descends_into_logical_sections() -> None:
                     LogicalSection(
                         id="sec1",
                         heading=[TextRun(text="Глава")],
-                        children=[
-                            Paragraph(id="p", content=[Citation(source_id="bib-1")])
-                        ],
+                        children=[Paragraph(id="p", content=[Citation(source_id="bib-1")])],
                     )
                 ],
             )
@@ -290,8 +279,12 @@ def test_build_from_state_resolves_bib_proxy_at_export() -> None:
                         "kind": "paragraph",
                         "runs": [
                             {"kind": "text", "text": "Это подтверждается в "},
-                            {"kind": "citation", "source_id": "bib-1", "pages": "42",
-                             "template": "[{n}, с. {pages}]"},
+                            {
+                                "kind": "citation",
+                                "source_id": "bib-1",
+                                "pages": "42",
+                                "template": "[{n}, с. {pages}]",
+                            },
                             {"kind": "text", "text": "."},
                         ],
                     }

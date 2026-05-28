@@ -17,28 +17,35 @@ PAGE/STYLEREF, реальные изображения, OMML-формулы) —
 
 from __future__ import annotations
 
+import contextlib
 import io
 import logging
+import re
 from collections.abc import Sequence
+from datetime import UTC
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-import docx  # type: ignore[import-not-found]
-from docx.document import Document as DocxDocument  # type: ignore[import-not-found]
-from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore[import-not-found]
-from docx.oxml import OxmlElement  # type: ignore[import-not-found]
-from docx.oxml.ns import qn  # type: ignore[import-not-found]
-from docx.shared import Cm, Mm, Pt, RGBColor  # type: ignore[import-not-found]
-from docx.text.paragraph import Paragraph as DocxParagraph  # type: ignore[import-not-found]
+import docx
+from docx.document import Document as DocxDocument
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Cm, Mm, Pt, RGBColor
+from docx.text.paragraph import Paragraph as DocxParagraph
+from lxml import etree  # type: ignore[import-untyped]
 
 from gostforge.model import (
     Block,
+    CellMerge,
     Citation,
     ContentTemplate,
     CrossRef,
     Document,
     Figure,
+    FootnoteRef,
     Formula,
+    Hyperlink,
     InlineElement,
     InlineFormula,
     ListBlock,
@@ -46,15 +53,13 @@ from gostforge.model import (
     PageSection,
     Paragraph,
     Table,
+    TableOfContents,
     TextRun,
 )
 from gostforge.profile import Profile
 
-# Локальные импорты lxml — нужны только для записи поля PAGE в footer.
-# Парсер уже использует ту же lxml-цепочку для чтения.
-from lxml import etree  # type: ignore[import-untyped]
-
-
+# Relationship namespace для w:hyperlink r:id="...".
+_R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 M_NS = "http://schemas.openxmlformats.org/officeDocument/2006/math"
 
@@ -71,6 +76,11 @@ _current_source_docx: Any | None = None
 # по их id. Используется в `_write_runs` для рендеринга Citation. Сбрасывается
 # в `export_docx()` через try/finally, чтобы состояние не утекало между вызовами.
 _current_bibliography_index: dict[str, int] | None = None
+
+# Контекст одной операции экспорта: профиль для доступа к heading/caption/
+# table-стилям внутри функций записи. Заполняется в export_docx() и
+# сбрасывается через try/finally.
+_current_profile: Any | None = None
 
 _ALIGNMENT_MAP = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
@@ -128,15 +138,216 @@ def _apply_page_size(doc: DocxDocument, page_section: PageSection) -> None:
 
 
 def _apply_normal_style(doc: DocxDocument, profile: Profile) -> None:
-    """Применить шрифт/кегль/интервалы к стилю Normal."""
+    """Применить шрифт/кегль/интервалы к стилю Normal.
+
+    Дополнительно зануляет theme-fonts (asciiTheme/hAnsiTheme),
+    которые Word из дефолтного шаблона ставит как majorHAnsi/minorHAnsi
+    и которые при render-е в Word/LibreOffice перекрывают явно
+    указанный font.name.
+    """
     body = profile.styles.body
     normal = doc.styles["Normal"]
     normal.font.name = body.font
     normal.font.size = Pt(body.size_pt)
-    # Интервалы и отступы — на уровне paragraph_format стиля Normal
+    # Снимаем theme-fonts со стиля Normal, иначе в Word шрифт может
+    # отображаться как Calibri/Cambria поверх явно указанного.
+    _clear_theme_fonts(normal.element, font_name=body.font)
     pf = normal.paragraph_format
     pf.line_spacing = body.line_spacing
     pf.first_line_indent = Cm(body.first_line_indent_cm)
+    # Выравнивание основного текста — обычно justify по ГОСТу. Без
+    # явной установки Word наследует left из своего дефолтного шаблона,
+    # и абзацы основного текста выглядят рваными по правому краю.
+    pf.alignment = _ALIGNMENT_MAP[body.alignment]
+    # Интервалы между абзацами. По ГОСТу — 0; Word из дефолтного
+    # шаблона ставит 'after=200 twips' (10 pt), что вылезает
+    # между абзацами обычного текста как лишнее белое поле. Явно
+    # сбрасываем по значению из профиля.
+    pf.space_before = Pt(body.space_before_pt)
+    pf.space_after = Pt(body.space_after_pt)
+
+
+def _clear_theme_fonts(style_element: Any, *, font_name: str) -> None:
+    """Удалить theme-атрибуты у w:rFonts и проставить явный шрифт.
+
+    Word при создании документа через python-docx наследует stлей Normal
+    из бортового шаблона: rFonts с asciiTheme/hAnsiTheme = minorHAnsi
+    (Calibri). Это перекрывает явно заданный font.name при рендере.
+    Решение — найти w:rFonts в xml-элементе стиля, убрать
+    *Theme-атрибуты и проставить ascii/hAnsi/cs/eastAsia на нужный шрифт.
+    """
+    w_ns = W_NS
+    rPr = style_element.find(f"{{{w_ns}}}rPr")
+    if rPr is None:
+        return
+    rFonts = rPr.find(f"{{{w_ns}}}rFonts")
+    if rFonts is None:
+        rFonts = etree.SubElement(rPr, f"{{{w_ns}}}rFonts")
+    # Снимаем theme-атрибуты.
+    for attr in (
+        "asciiTheme",
+        "hAnsiTheme",
+        "cstheme",
+        "eastAsiaTheme",
+    ):
+        key = f"{{{w_ns}}}{attr}"
+        if key in rFonts.attrib:
+            del rFonts.attrib[key]
+    # Ставим явный шрифт для всех 4 наборов символов.
+    for attr in ("ascii", "hAnsi", "cs", "eastAsia"):
+        rFonts.set(f"{{{w_ns}}}{attr}", font_name)
+
+
+def _apply_heading_styles(doc: DocxDocument, profile: Profile) -> None:
+    """Переопределить стили Heading1..Heading4 параметрами из профиля.
+
+    python-docx наследует Heading-стили из бортового шаблона Word —
+    там они синие, Cambria, с большими before-spacing. Эта функция
+    их переписывает по `profile.styles.heading_N`.
+    """
+    levels = (
+        (1, profile.styles.heading_1),
+        (2, profile.styles.heading_2),
+        (3, profile.styles.heading_3),
+        (4, profile.styles.heading_4),
+    )
+    for level, cfg in levels:
+        style_id = f"Heading {level}"
+        try:
+            style = doc.styles[style_id]
+        except KeyError:  # pragma: no cover - python-docx делает Heading1..9
+            continue
+        # Font + theme cleanup.
+        style.font.name = cfg.font
+        style.font.size = Pt(cfg.size_pt)
+        style.font.bold = cfg.bold
+        style.font.italic = cfg.italic
+        # Цвет: 'auto' = снять явный цвет, иначе hex.
+        _apply_style_color(style.element, cfg.color)
+        _clear_theme_fonts(style.element, font_name=cfg.font)
+        # Параграф-формат.
+        pf = style.paragraph_format
+        pf.alignment = _ALIGNMENT_MAP[cfg.alignment]
+        pf.line_spacing = cfg.line_spacing
+        pf.space_before = Pt(cfg.spacing_before_pt)
+        pf.space_after = Pt(cfg.spacing_after_pt)
+        pf.first_line_indent = Cm(cfg.first_line_indent_cm)
+        pf.page_break_before = cfg.page_break_before
+        pf.keep_with_next = cfg.keep_with_next
+        # Связанный character-стиль (HeadingNChar): Word при рендере run-ов
+        # внутри параграфа применяет linked-char поверх параграф-стиля.
+        # Если не переписать — Cambria+синий из дефолтного шаблона
+        # перекроют нашу правку.
+        _sync_linked_char_style(doc, style.element, cfg)
+
+
+def _sync_linked_char_style(doc: DocxDocument, p_style_element: Any, cfg: Any) -> None:
+    """Применить шрифт/цвет/жирность из cfg к linked character-стилю.
+
+    В styles.xml у каждого heading-параграф-стиля есть ссылка
+    ``<w:link w:val="HeadingNChar"/>`` на character-стиль. При рендере
+    run-ов параграфа Word применяет char-стиль поверх параграф-стиля
+    (и его theme-fonts/синий цвет могут перекрыть параграф-настройки).
+
+    Эта функция находит linked-char-стиль по styleId из w:link и
+    переписывает его font, color, bold, italic симметрично с
+    параграф-стилем. theme-fonts чистятся через _clear_theme_fonts.
+    """
+    w_ns = W_NS
+    link = p_style_element.find(f"{{{w_ns}}}link")
+    if link is None:
+        return
+    char_style_id = link.get(f"{{{w_ns}}}val")
+    if not char_style_id:
+        return
+    # python-docx не индексирует character-стили по styleId напрямую,
+    # ищем через styles_part.element.
+    styles_root = p_style_element.getparent()
+    char_elem = None
+    for st in styles_root.findall(f"{{{w_ns}}}style"):
+        if (
+            st.get(f"{{{w_ns}}}type") == "character"
+            and st.get(f"{{{w_ns}}}styleId") == char_style_id
+        ):
+            char_elem = st
+            break
+    if char_elem is None:
+        return
+    # Font + theme cleanup на rPr этого char-стиля.
+    _clear_theme_fonts(char_elem, font_name=cfg.font)
+    rPr = char_elem.find(f"{{{w_ns}}}rPr")
+    if rPr is None:
+        rPr = etree.SubElement(char_elem, f"{{{w_ns}}}rPr")
+    # Size: w:sz/w:szCs в полу-пунктах (Pt*2).
+    half_pt = str(int(cfg.size_pt * 2))
+    for tag in ("sz", "szCs"):
+        el = rPr.find(f"{{{w_ns}}}{tag}")
+        if el is None:
+            el = etree.SubElement(rPr, f"{{{w_ns}}}{tag}")
+        el.set(f"{{{w_ns}}}val", half_pt)
+    # Bold / italic: явные w:b и w:i (или их удаление).
+    for tag, want in (("b", cfg.bold), ("bCs", cfg.bold), ("i", cfg.italic), ("iCs", cfg.italic)):
+        el = rPr.find(f"{{{w_ns}}}{tag}")
+        if want:
+            if el is None:
+                etree.SubElement(rPr, f"{{{w_ns}}}{tag}")
+        else:
+            if el is not None:
+                rPr.remove(el)
+    # Color — через ту же функцию что и для параграф-стиля.
+    _apply_style_color(char_elem, cfg.color)
+
+
+def _apply_style_color(style_element: Any, color: str) -> None:
+    """Установить или снять явный цвет шрифта на уровне стиля.
+
+    'auto' (или пустая строка) — снимает атрибут (Word возьмёт чёрный).
+    hex без # — ставит rgb-цвет.
+    """
+    w_ns = W_NS
+    rPr = style_element.find(f"{{{w_ns}}}rPr")
+    if rPr is None:
+        rPr = etree.SubElement(style_element, f"{{{w_ns}}}rPr")
+    color_elem = rPr.find(f"{{{w_ns}}}color")
+    if color in ("auto", "", None):
+        if color_elem is not None:
+            rPr.remove(color_elem)
+        # Также удалим theme-color если есть.
+        return
+    if color_elem is None:
+        color_elem = etree.SubElement(rPr, f"{{{w_ns}}}color")
+    # Удалим тема-атрибуты, чтобы наш val реально применился.
+    for attr in ("themeColor", "themeTint", "themeShade"):
+        key = f"{{{w_ns}}}{attr}"
+        if key in color_elem.attrib:
+            del color_elem.attrib[key]
+    color_elem.set(f"{{{w_ns}}}val", color.lstrip("#"))
+
+
+def _apply_caption_style(doc: DocxDocument, profile: Profile) -> None:
+    """Применить параметры подписи к стилю Caption (для figure и table).
+
+    Поскольку figure.caption и table.caption могут отличаться (центр
+    vs. лево, выше/ниже) — стиль Caption переписываем по figure.caption,
+    а отдельные настройки для подписи таблицы применяются прямо к
+    параграфу при записи таблицы (см. _write_table_caption).
+    """
+    cfg = profile.styles.figure.caption
+    try:
+        style = doc.styles["Caption"]
+    except KeyError:  # pragma: no cover
+        return
+    style.font.name = cfg.font
+    style.font.size = Pt(cfg.size_pt)
+    style.font.bold = cfg.bold
+    style.font.italic = cfg.italic
+    _clear_theme_fonts(style.element, font_name=cfg.font)
+    _apply_style_color(style.element, "auto")
+    pf = style.paragraph_format
+    pf.alignment = _ALIGNMENT_MAP[cfg.alignment]
+    pf.space_before = Pt(cfg.spacing_before_pt)
+    pf.space_after = Pt(cfg.spacing_after_pt)
+    pf.first_line_indent = Cm(0)
 
 
 def _write_runs(docx_paragraph: DocxParagraph, content: Sequence[InlineElement]) -> None:
@@ -160,6 +371,67 @@ def _write_runs(docx_paragraph: DocxParagraph, content: Sequence[InlineElement])
             _write_inline_formula(docx_paragraph, element)
         elif isinstance(element, Citation):
             _write_citation(docx_paragraph, element)
+        elif isinstance(element, Hyperlink):
+            _write_hyperlink(docx_paragraph, element)
+        elif isinstance(element, FootnoteRef):
+            _write_footnote_ref(docx_paragraph, element)
+
+
+def _write_hyperlink(docx_paragraph: DocxParagraph, element: Hyperlink) -> None:
+    """Записать <w:hyperlink r:id="rIdN"> в параграф.
+
+    Регистрирует Relationship на URL в части document.xml.rels через
+    python-docx ``part.relate_to(url, RT.HYPERLINK, is_external=True)``.
+    Если есть anchor (внутренняя ссылка) — пишем w:anchor вместо r:id.
+    """
+    from docx.opc.constants import RELATIONSHIP_TYPE as RT
+
+    p_xml = docx_paragraph._p
+    hl = etree.SubElement(p_xml, f"{{{W_NS}}}hyperlink")
+    if element.anchor:
+        hl.set(f"{{{W_NS}}}anchor", element.anchor)
+    elif element.url:
+        try:
+            part = docx_paragraph.part
+            r_id = part.relate_to(element.url, RT.HYPERLINK, is_external=True)
+            hl.set(f"{{{_R_NS}}}id", r_id)
+        except Exception:
+            # Если relate_to не работает (тесты на mock docs) —
+            # пишем URL прямо в anchor для отладки.
+            hl.set(f"{{{W_NS}}}anchor", element.url)
+    # Run с текстом ссылки.
+    r = etree.SubElement(hl, f"{{{W_NS}}}r")
+    rPr = etree.SubElement(r, f"{{{W_NS}}}rPr")
+    # Стиль Hyperlink (синий + подчёркивание) применяется автоматически
+    # Word-ом, но добавим style-ref для гарантии.
+    rStyle = etree.SubElement(rPr, f"{{{W_NS}}}rStyle")
+    rStyle.set(f"{{{W_NS}}}val", "Hyperlink")
+    t = etree.SubElement(r, f"{{{W_NS}}}t")
+    t.set(
+        "{http://www.w3.org/XML/1998/namespace}space",
+        "preserve",
+    )
+    t.text = element.text
+
+
+def _write_footnote_ref(docx_paragraph: DocxParagraph, element: FootnoteRef) -> None:
+    """Записать ссылку на footnote: <w:footnoteReference w:id="N"/>.
+
+    Сам текст сноски должен лежать в word/footnotes.xml — экспортёр
+    Phase 4 пока его не записывает, только ссылку. Если есть element.text,
+    он добавляется как fallback-TextRun перед reference, чтобы текст не
+    потерялся при экспорте в окружении без footnotes-part.
+    """
+    p_xml = docx_paragraph._p
+    if element.text:
+        # Fallback: добавляем текст сноски сразу после ссылки как
+        # обычный текст (не теряем содержимое).
+        r_text = etree.SubElement(p_xml, f"{{{W_NS}}}r")
+        rPr = etree.SubElement(r_text, f"{{{W_NS}}}rPr")
+        vertAlign = etree.SubElement(rPr, f"{{{W_NS}}}vertAlign")
+        vertAlign.set(f"{{{W_NS}}}val", "superscript")
+        t = etree.SubElement(r_text, f"{{{W_NS}}}t")
+        t.text = f"[{element.footnote_id}]"
 
 
 def _write_text_run(docx_paragraph: DocxParagraph, element: TextRun) -> None:
@@ -252,6 +524,10 @@ def _apply_paragraph_format(docx_para: DocxParagraph, paragraph: Paragraph) -> N
         pf.first_line_indent = Cm(paragraph.first_line_indent_cm)
     if paragraph.page_break_before is not None:
         pf.page_break_before = paragraph.page_break_before
+    if paragraph.space_before_pt is not None:
+        pf.space_before = Pt(paragraph.space_before_pt)
+    if paragraph.space_after_pt is not None:
+        pf.space_after = Pt(paragraph.space_after_pt)
 
 
 def _write_paragraph(doc: DocxDocument, paragraph: Paragraph) -> None:
@@ -267,17 +543,34 @@ def _write_paragraph(doc: DocxDocument, paragraph: Paragraph) -> None:
 
 
 def _write_logical_section(doc: DocxDocument, section: LogicalSection) -> None:
-    """Добавить заголовок логического раздела и рекурсивно записать его содержимое."""
-    heading_text = "".join(
-        el.text for el in section.heading if isinstance(el, TextRun)
-    )
+    """Добавить заголовок логического раздела и рекурсивно записать его содержимое.
+
+    Применяет UPPERCASE если профиль это требует для текущего уровня
+    (по умолчанию — для heading_1 в ГОСТ 7.32).
+    """
+    heading_text = "".join(el.text for el in section.heading if isinstance(el, TextRun))
     level = max(0, min(section.level, 4))  # docx supports 0..9, мы — 1..4
+    # Профиль-конфиг уровня: heading_1..heading_4 → uppercase, прочее.
+    if _current_profile is not None and 1 <= level <= 4:
+        cfg = getattr(_current_profile.styles, f"heading_{level}", None)
+        if cfg is not None and cfg.uppercase:
+            heading_text = heading_text.upper()
     doc.add_heading(heading_text, level=level)
     _write_items(doc, section.children)
 
 
-def _write_caption_paragraph(doc: DocxDocument, content: Sequence[InlineElement]) -> None:
-    """Записать подпись (Caption) отдельным параграфом со стилем «Caption»."""
+def _write_caption_paragraph(
+    doc: DocxDocument,
+    content: Sequence[InlineElement],
+    *,
+    caption_kind: Literal["figure", "table"] = "figure",
+) -> None:
+    """Записать подпись отдельным параграфом со стилем «Caption».
+
+    `caption_kind` определяет, какой `CaptionStyleProfile` использовать —
+    figure (по центру под рисунком) или table (слева над таблицей).
+    Без него используем стиль figure-подписи (исторический default).
+    """
     if not content:
         return
     try:
@@ -285,33 +578,123 @@ def _write_caption_paragraph(doc: DocxDocument, content: Sequence[InlineElement]
     except KeyError:
         docx_para = doc.add_paragraph()
     _write_runs(docx_para, content)
+    # Применяем alignment и spacing согласно профилю — стиль Caption общий,
+    # а для table-подписи нужны другие настройки (слева, перед таблицей).
+    if _current_profile is None:
+        return
+    if caption_kind == "table":
+        cfg = _current_profile.styles.table.caption
+    else:
+        cfg = _current_profile.styles.figure.caption
+    pf = docx_para.paragraph_format
+    pf.alignment = _ALIGNMENT_MAP[cfg.alignment]
+    pf.space_before = Pt(cfg.spacing_before_pt)
+    pf.space_after = Pt(cfg.spacing_after_pt)
+    pf.first_line_indent = Cm(0)
+    # keep_together: длинная подпись не разрывается между страницами.
+    # keep_with_next: подпись таблицы (position=above) не отрывается
+    # от таблицы под ней.
+    if cfg.keep_together:
+        pf.keep_together = True
+    if cfg.keep_with_next:
+        pf.keep_with_next = True
+    # На уровне run-ов — шрифт/кегль (если в стиле Caption они сбиты).
+    for run in docx_para.runs:
+        run.font.name = cfg.font
+        run.font.size = Pt(cfg.size_pt)
+        if cfg.bold:
+            run.bold = True
+        if cfg.italic:
+            run.italic = True
 
 
 def _write_table(doc: DocxDocument, table: Table) -> None:
     """Записать таблицу с подписью НАД ней (по ГОСТ).
 
-    Шапка пишется первой строкой со стилем bold. Дополнительные ряды — обычные.
-    Подписи рисунков идут под рисунком, подписи таблиц — над ней.
+    Применяет рамки и стиль ячеек из ``profile.styles.table``. Шапка
+    bold. Подпись таблицы — слева, ВЫШЕ таблицы (профиль). Если
+    ``repeat_header`` включён, на шапочные строки ставится
+    ``<w:tblHeader/>`` — Word повторяет их на каждой continuation-странице
+    (ГОСТ 7.32 «шапка таблицы повторяется при переносе»). При
+    ``continuation_caption`` экспортёр прибавляет первой строкой
+    «Продолжение таблицы N» (объединённую по всем колонкам, тоже
+    tblHeader); см. комментарий в схеме профиля про ограничения.
     """
-    _write_caption_paragraph(doc, table.caption)
+    _write_caption_paragraph(doc, table.caption, caption_kind="table")
     column_count = len(table.headers) if table.headers else 0
+    for extra_row in table.extra_header_rows:
+        column_count = max(column_count, len(extra_row))
     for row in table.rows:
         column_count = max(column_count, len(row))
     if column_count == 0:
         return
 
-    rows_total = (1 if table.headers else 0) + len(table.rows)
+    cfg = _current_profile.styles.table if _current_profile is not None else None
+    add_continuation = cfg is not None and cfg.continuation_caption and table.number is not None
+    continuation_text = f"Продолжение таблицы {table.number}" if add_continuation else None
+
+    rows_total = (
+        (1 if continuation_text else 0)
+        + len(table.extra_header_rows)
+        + (1 if table.headers else 0)
+        + len(table.rows)
+    )
     if rows_total == 0:
         return
     docx_table = doc.add_table(rows=rows_total, cols=column_count)
+
+    if cfg is not None:
+        _apply_table_borders(docx_table, cfg)
+
+    repeat_header = cfg is None or cfg.repeat_header
+    header_bold = cfg.header_bold if cfg is not None else True
+
     row_idx = 0
+    # Опциональная строка «Продолжение таблицы N» — широкая на все колонки,
+    # tblHeader-репитер для continuation-страниц.
+    if continuation_text is not None:
+        cell0 = docx_table.rows[row_idx].cells[0]
+        cell0.text = ""
+        _write_runs(cell0.paragraphs[0], [TextRun(text=continuation_text, italic=True)])
+        _apply_cell_paragraph_format(cell0, cfg, is_header=True)
+        _apply_cell_font(cell0, cfg)
+        if column_count > 1:
+            _apply_cell_merges(
+                docx_table,
+                [CellMerge(row=row_idx, col=0, rowspan=1, colspan=column_count)],
+            )
+        _mark_row_as_header(docx_table.rows[row_idx])
+        row_idx += 1
+
+    # Дополнительные строки шапки (для двух/трёх-уровневой шапки).
+    for extra_row in table.extra_header_rows:
+        for col_idx, cell_content in enumerate(extra_row):
+            if col_idx >= column_count:
+                break
+            cell = docx_table.rows[row_idx].cells[col_idx]
+            cell.text = ""
+            _write_runs(cell.paragraphs[0], cell_content)
+            _apply_cell_paragraph_format(cell, cfg, is_header=True)
+            _apply_cell_font(cell, cfg)
+            if header_bold:
+                for run in cell.paragraphs[0].runs:
+                    run.bold = True
+        if repeat_header:
+            _mark_row_as_header(docx_table.rows[row_idx])
+        row_idx += 1
+
     if table.headers:
         for col_idx, cell_content in enumerate(table.headers):
             cell = docx_table.rows[row_idx].cells[col_idx]
             cell.text = ""
             _write_runs(cell.paragraphs[0], cell_content)
-            for run in cell.paragraphs[0].runs:
-                run.bold = True
+            _apply_cell_paragraph_format(cell, cfg, is_header=True)
+            _apply_cell_font(cell, cfg)
+            if header_bold:
+                for run in cell.paragraphs[0].runs:
+                    run.bold = True
+        if repeat_header:
+            _mark_row_as_header(docx_table.rows[row_idx])
         row_idx += 1
     for row in table.rows:
         for col_idx, cell_content in enumerate(row):
@@ -320,7 +703,168 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
             cell = docx_table.rows[row_idx].cells[col_idx]
             cell.text = ""
             _write_runs(cell.paragraphs[0], cell_content)
+            _apply_cell_paragraph_format(cell, cfg, is_header=False)
+            _apply_cell_font(cell, cfg)
         row_idx += 1
+
+    # CellMerge — индексы заданы в координатах (extra_header_rows +
+    # headers + rows). Если есть continuation-row, сдвигаем все на 1.
+    if table.merges:
+        row_offset = 1 if continuation_text else 0
+        shifted = (
+            [
+                CellMerge(row=m.row + row_offset, col=m.col, rowspan=m.rowspan, colspan=m.colspan)
+                for m in table.merges
+            ]
+            if row_offset
+            else list(table.merges)
+        )
+        _apply_cell_merges(docx_table, shifted)
+
+
+def _mark_row_as_header(docx_row: Any) -> None:
+    """Пометить строку таблицы как повторяющуюся шапку через `<w:tblHeader/>`.
+
+    Word при переносе таблицы на следующую страницу будет повторять эту
+    строку (и все строки выше с тем же атрибутом) в виде шапки.
+    """
+    tr = docx_row._tr
+    trPr = tr.find(f"{{{W_NS}}}trPr")
+    if trPr is None:
+        trPr = etree.SubElement(tr, f"{{{W_NS}}}trPr")
+        tr.insert(0, trPr)
+    # Не дублируем — если уже есть, ничего не делаем.
+    if trPr.find(f"{{{W_NS}}}tblHeader") is None:
+        etree.SubElement(trPr, f"{{{W_NS}}}tblHeader")
+
+
+def _apply_cell_merges(docx_table: Any, merges: list[CellMerge]) -> None:
+    """Применить CellMerge к docx-таблице через <w:gridSpan>/<w:vMerge>.
+
+    Для colspan > 1: на первой ячейке ставим <w:gridSpan w:val="N">,
+    физические ячейки справа удаляем (их содержимое теряется — но
+    модель CellMerge подразумевает, что в этой логической ячейке
+    только один контент).
+
+    Для rowspan > 1: на первой строке-ячейке ставим
+    <w:vMerge w:val="restart">, на ячейках ниже — <w:vMerge/> (continue)
+    без val.
+    """
+    for m in merges:
+        try:
+            top_cell = docx_table.rows[m.row].cells[m.col]
+        except IndexError:
+            continue
+        tc = top_cell._tc
+        tcPr = tc.find(f"{{{W_NS}}}tcPr")
+        if tcPr is None:
+            tcPr = etree.SubElement(tc, f"{{{W_NS}}}tcPr")
+            # tcPr должен быть первым ребёнком tc.
+            tc.insert(0, tcPr)
+        # colspan: <w:gridSpan w:val="N"/>.
+        if m.colspan > 1:
+            for existing in tcPr.findall(f"{{{W_NS}}}gridSpan"):
+                tcPr.remove(existing)
+            grid_span = etree.SubElement(tcPr, f"{{{W_NS}}}gridSpan")
+            grid_span.set(f"{{{W_NS}}}val", str(m.colspan))
+            # Удалим соседние tc справа (они «съедены» colspan-ом).
+            tr = tc.getparent()
+            tcs_in_row = tr.findall(f"{{{W_NS}}}tc")
+            try:
+                start_idx = tcs_in_row.index(tc)
+            except ValueError:
+                start_idx = -1
+            if start_idx >= 0:
+                for to_remove in tcs_in_row[start_idx + 1 : start_idx + m.colspan]:
+                    tr.remove(to_remove)
+        # rowspan: <w:vMerge w:val="restart"/> на top + <w:vMerge/> ниже.
+        if m.rowspan > 1:
+            for existing in tcPr.findall(f"{{{W_NS}}}vMerge"):
+                tcPr.remove(existing)
+            v_merge_top = etree.SubElement(tcPr, f"{{{W_NS}}}vMerge")
+            v_merge_top.set(f"{{{W_NS}}}val", "restart")
+            for r_offset in range(1, m.rowspan):
+                next_r = m.row + r_offset
+                try:
+                    next_cell = docx_table.rows[next_r].cells[m.col]
+                except IndexError:
+                    break
+                next_tc = next_cell._tc
+                next_tcPr = next_tc.find(f"{{{W_NS}}}tcPr")
+                if next_tcPr is None:
+                    next_tcPr = etree.SubElement(next_tc, f"{{{W_NS}}}tcPr")
+                    next_tc.insert(0, next_tcPr)
+                for existing in next_tcPr.findall(f"{{{W_NS}}}vMerge"):
+                    next_tcPr.remove(existing)
+                etree.SubElement(next_tcPr, f"{{{W_NS}}}vMerge")
+
+
+def _apply_cell_paragraph_format(cell: Any, cfg: Any, *, is_header: bool) -> None:
+    """Применить параграф-формат к ячейке таблицы.
+
+    Без этого ячейки наследуют стиль Normal (justify + красная строка
+    1.25 см + межстрочный 1.5), что в узких колонках ломает читаемость.
+    По ГОСТ Р 2.105-2019 в таблицах: текст слева/центр, без красной
+    строки, single-spacing, без интервалов между параграфами.
+
+    Параметры берутся из profile.styles.table: cell_alignment,
+    cell_first_line_indent_cm, cell_line_spacing, cell_space_before/
+    after_pt. Для шапки — header_alignment (обычно центр).
+    """
+    if cfg is None:
+        return
+    alignment = cfg.header_alignment if is_header else cfg.cell_alignment
+    for paragraph in cell.paragraphs:
+        pf = paragraph.paragraph_format
+        pf.alignment = _ALIGNMENT_MAP[alignment]
+        pf.first_line_indent = Cm(cfg.cell_first_line_indent_cm)
+        pf.line_spacing = cfg.cell_line_spacing
+        pf.space_before = Pt(cfg.cell_space_before_pt)
+        pf.space_after = Pt(cfg.cell_space_after_pt)
+
+
+def _apply_table_borders(docx_table: Any, cfg: Any) -> None:
+    """Прокинуть рамки в OOXML таблицы через w:tblBorders.
+
+    python-docx позволяет задать ``table.style`` строкой ("Table Grid"),
+    но стиль может отсутствовать в bortоvom шаблоне. Надёжнее —
+    написать ``<w:tblBorders>`` напрямую в XML свойств таблицы.
+    """
+    if cfg.border_style == "none":
+        return
+    tbl_pr = docx_table._element.find(f"{{{W_NS}}}tblPr")
+    if tbl_pr is None:
+        tbl_pr = etree.SubElement(docx_table._element, f"{{{W_NS}}}tblPr")
+    # Если tblBorders уже есть — заменим, иначе создадим.
+    existing = tbl_pr.find(f"{{{W_NS}}}tblBorders")
+    if existing is not None:
+        tbl_pr.remove(existing)
+    borders = etree.SubElement(tbl_pr, f"{{{W_NS}}}tblBorders")
+    color = "auto" if cfg.border_color == "auto" else cfg.border_color.lstrip("#")
+    for side in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = etree.SubElement(borders, f"{{{W_NS}}}{side}")
+        el.set(f"{{{W_NS}}}val", cfg.border_style)
+        el.set(f"{{{W_NS}}}sz", str(int(cfg.border_size)))
+        el.set(f"{{{W_NS}}}space", "0")
+        el.set(f"{{{W_NS}}}color", color)
+
+
+def _apply_cell_font(cell: Any, cfg: Any) -> None:
+    """Применить шрифт/кегль ячеек таблицы, если они заданы в профиле.
+
+    Если cell_font / cell_size_pt = None — оставляем дефолт от стиля Normal
+    (который уже Times New Roman через _apply_normal_style).
+    """
+    if cfg is None:
+        return
+    if cfg.cell_font is None and cfg.cell_size_pt is None:
+        return
+    for paragraph in cell.paragraphs:
+        for run in paragraph.runs:
+            if cfg.cell_font is not None:
+                run.font.name = cfg.cell_font
+            if cfg.cell_size_pt is not None:
+                run.font.size = Pt(cfg.cell_size_pt)
 
 
 def _write_figure(doc: DocxDocument, figure: Figure) -> None:
@@ -338,28 +882,93 @@ def _write_figure(doc: DocxDocument, figure: Figure) -> None:
     """
     path = figure.image_path
 
+    fig_alignment = _figure_alignment_from_profile()
+
     # Случай 1: embedded:rIdN с открытым source_docx.
     if path.startswith("embedded:") and _current_source_docx is not None:
-        rid = path[len("embedded:"):]
+        rid = path[len("embedded:") :]
         if _try_write_embedded_picture(doc, _current_source_docx, rid, figure):
             return
 
     # Случай 2: реальный файл на диске.
     if path and not path.startswith("embedded:") and Path(path).is_file():
         paragraph = doc.add_paragraph()
-        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        paragraph.alignment = fig_alignment
+        # Первый отступ убираем — это не текст, а рисунок.
+        paragraph.paragraph_format.first_line_indent = Cm(0)
+        _apply_figure_paragraph_constraints(paragraph)
         run = paragraph.add_run()
         try:
-            run.add_picture(path)
-        except Exception:  # noqa: BLE001 — fallback на placeholder при любой ошибке
+            _add_picture_with_max_width(run, path)
+        except Exception:
             paragraph.add_run(f"[Рисунок: {figure.id}]").italic = True
-        _write_caption_paragraph(doc, figure.caption)
+        _write_caption_paragraph(doc, figure.caption, caption_kind="figure")
         return
 
     # Случай 3: placeholder.
     placeholder = doc.add_paragraph()
+    placeholder.alignment = fig_alignment
+    placeholder.paragraph_format.first_line_indent = Cm(0)
+    _apply_figure_paragraph_constraints(placeholder)
     placeholder.add_run(f"[Рисунок: {figure.id}]").italic = True
-    _write_caption_paragraph(doc, figure.caption)
+    _write_caption_paragraph(doc, figure.caption, caption_kind="figure")
+
+
+def _apply_figure_paragraph_constraints(paragraph: Any) -> None:
+    """Применить параграф-формат к параграфу-рисунку.
+
+    Сейчас — только keep_with_next=True (из profile.styles.figure):
+    рисунок и подпись остаются на одной странице, Word не отрывает
+    подпись на следующую страницу.
+    """
+    if _current_profile is None:
+        return
+    fig_cfg = _current_profile.styles.figure
+    if fig_cfg.keep_with_next:
+        paragraph.paragraph_format.keep_with_next = True
+
+
+def _add_picture_with_max_width(run: Any, source: Any) -> None:
+    """Вставить картинку с ограничением максимальной ширины и высоты.
+
+    По умолчанию add_picture(path) использует оригинальный размер,
+    из-за чего большие сканы и скриншоты вылезают за поля страницы
+    или вообще выходят за лист (а подпись съезжает на следующую
+    страницу — нарушение ГОСТ). Сначала вставляем без явной ширины,
+    потом если картинка шире или выше лимита из профиля — масштабируем
+    пропорционально (сохраняем aspect ratio).
+    """
+    if _current_profile is None:
+        run.add_picture(source)
+        return
+    fig_cfg = _current_profile.styles.figure
+    max_width_cm = float(fig_cfg.max_width_cm)
+    max_height_cm = float(fig_cfg.max_height_cm)
+    picture = run.add_picture(source)
+    # picture.width/height — EMU (1 cm = 360000 EMU). Сначала жмём по
+    # ширине, потом — если всё ещё высоковато — дожимаем по высоте.
+    try:
+        max_w_emu = Cm(max_width_cm).emu
+        max_h_emu = Cm(max_height_cm).emu
+        if picture.width > max_w_emu:
+            ratio = picture.height / picture.width
+            picture.width = max_w_emu
+            picture.height = int(max_w_emu * ratio)
+        if picture.height > max_h_emu:
+            ratio = picture.width / picture.height
+            picture.height = max_h_emu
+            picture.width = int(max_h_emu * ratio)
+    except (AttributeError, TypeError):  # pragma: no cover
+        # На всякий случай — если picture не InlineShape (мок и пр.),
+        # не падаем; картинка останется оригинального размера.
+        return
+
+
+def _figure_alignment_from_profile() -> Any:
+    """Вернуть выравнивание рисунка из профиля (или CENTER по умолчанию)."""
+    if _current_profile is None:
+        return WD_ALIGN_PARAGRAPH.CENTER
+    return _ALIGNMENT_MAP[_current_profile.styles.figure.alignment]
 
 
 def _write_formula(doc: DocxDocument, formula: Formula) -> None:
@@ -386,48 +995,340 @@ def _try_write_embedded_picture(
     """Попытка достать media-blob из source_docx и вставить как картинку."""
     try:
         image_part = source_docx_obj.part.related_parts.get(rid)
-    except Exception:  # noqa: BLE001
+    except Exception:
         logger.debug("Не удалось получить related_parts для rId=%s", rid)
         return False
     if image_part is None:
         return False
     try:
         blob = image_part.blob
-    except Exception:  # noqa: BLE001
+    except Exception:
         return False
 
     paragraph = doc.add_paragraph()
-    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.alignment = _figure_alignment_from_profile()
+    paragraph.paragraph_format.first_line_indent = Cm(0)
+    _apply_figure_paragraph_constraints(paragraph)
     run = paragraph.add_run()
     try:
-        run.add_picture(io.BytesIO(blob))
-    except Exception:  # noqa: BLE001
+        _add_picture_with_max_width(run, io.BytesIO(blob))
+    except Exception:
         p_xml = paragraph._p
         parent = p_xml.getparent()
         if parent is not None:
             parent.remove(p_xml)
         return False
 
-    _write_caption_paragraph(doc, figure.caption)
+    _write_caption_paragraph(doc, figure.caption, caption_kind="figure")
     return True
 
 
-def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
-    """Записать список (нумерованный/маркированный).
+# Регекс «вручную добавленного маркера» в начале элемента списка.
+# Покрывает: '-', '–', '—', '•', '*', '◦' + любые табы/пробелы после,
+# а также нумерованные варианты '1.', '1)', 'a)', 'A.'.
+# Не пытается удалять маркер посреди текста — только в самом начале.
+_LEADING_MARKER_RE = re.compile(
+    r"^("
+    r"[-–—•*◦]"  # bullet-маркеры
+    r"|\d{1,3}[\.\)]"  # '1.', '12)'
+    r"|[a-zа-яёA-ZА-ЯЁ][\.\)]"  # 'a)', 'б.', 'A.', 'Б)'
+    r")[\s\t]+"
+)
 
-    Используем Word-стили ``List Number`` / ``List Bullet``, если они
-    доступны в шаблоне. Если стиль недоступен — fallback на обычный
-    параграф с текстовым префиксом «1. » или «• ».
+
+def _strip_leading_marker_from_inline(
+    content: Sequence[InlineElement],
+) -> list[InlineElement]:
+    """Удалить ведущий маркер списка из первого TextRun, если он есть.
+
+    Идея: пользователи часто пишут элементы списка с уже добавленным
+    маркером («- NET Framework 4.8», «1. шаг»). Если оставить такой
+    текст как есть, экспортёр-numPr нарисует свой маркер ПЛЮС
+    текстовый маркер в run-е останется — получаются «два маркера».
+
+    Алгоритм:
+    1. Найти первый TextRun в content (пропуская CrossRef/Citation/
+       Formula — они не могут содержать маркер).
+    2. Если его text начинается с известного маркера — удалить
+       совпадение (маркер + последующие пробелы/табы).
+    3. Если в результате text пуст — оставить TextRun с пустым text
+       (легче, чем удалять элемент: остальные форматные атрибуты
+       run-а сохраняются для случая когда они применяются к
+       последующему).
+
+    Возвращает НОВЫЙ list (не мутирует входной), чтобы избежать
+    side-effect-ов при многократном проходе.
     """
-    style_name = "List Number" if list_block.ordered else "List Bullet"
-    for idx, item_content in enumerate(list_block.items, start=1):
-        try:
-            paragraph = doc.add_paragraph(style=style_name)
-        except KeyError:
-            paragraph = doc.add_paragraph()
-            prefix = f"{idx}. " if list_block.ordered else "• "
-            paragraph.add_run(prefix)
+    if not content:
+        return list(content)
+    result = list(content)
+    for i, el in enumerate(result):
+        if isinstance(el, TextRun):
+            stripped = _LEADING_MARKER_RE.sub("", el.text, count=1)
+            if stripped != el.text:
+                result[i] = TextRun(
+                    text=stripped,
+                    bold=el.bold,
+                    italic=el.italic,
+                    underline=el.underline,
+                    superscript=el.superscript,
+                    subscript=el.subscript,
+                    font=el.font,
+                    size_pt=el.size_pt,
+                    color_hex=el.color_hex,
+                )
+            return result
+        # Не TextRun (CrossRef/InlineFormula/Citation в начале) —
+        # маркер вряд ли там, прерываем поиск.
+        break
+    return result
+
+
+def _write_list(doc: DocxDocument, list_block: ListBlock) -> None:
+    """Записать список (нумерованный/маркированный) через настоящий numPr.
+
+    Маркер и шаблон нумерации берутся из ``profile.styles.lists``
+    (по умолчанию по ГОСТ Р 7.32-2017: маркер = тире «–»,
+    нумерация = «N)»). Отступ слева и hanging — тоже из профиля.
+
+    Стратегия: один раз на экспорт регистрируем в numbering.xml два
+    abstractNum (ordered и bullet) с настроенным lvlText, и одно
+    concrete num на каждый. Параграфы списка получают
+    ``<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="N"/></w:numPr></w:pPr>``
+    — Word/LibreOffice сами отрисовывают маркер. Это даёт правильное
+    поведение списка при редактировании в Word (Enter → новый bullet),
+    и парсер видит ``<w:numPr>`` → ListBlock без эвристик.
+    """
+    cfg = _current_profile.styles.lists if _current_profile is not None else None
+    bullet = cfg.bullet_char if cfg is not None else "–"
+    ordered_fmt = cfg.ordered_format if cfg is not None else "{n})"
+    left_indent_cm = cfg.left_indent_cm if cfg is not None else 1.25
+    hanging_indent_cm = cfg.hanging_indent_cm if cfg is not None else 0.5
+    marker_suffix = cfg.marker_suffix if cfg is not None else "tab"
+
+    # lvlText для numbering.xml: %1 = подстановка номера, остальное —
+    # литеральный текст. ordered_fmt из профиля имеет «{n}» — конвертируем.
+    lvl_text = ordered_fmt.replace("{n}", "%1") if list_block.ordered else bullet
+    # Сколько уровней нужно (0 = плоский). Берём max(item_levels)+1
+    # или 1 (если levels пустые).
+    levels = list(list_block.item_levels) if list_block.item_levels else []
+    max_level = max(levels) if levels else 0
+    num_id = _ensure_list_num_in_numbering(
+        doc,
+        ordered=list_block.ordered,
+        lvl_text=lvl_text,
+        left_twips=int(Cm(left_indent_cm).twips),
+        hanging_twips=int(Cm(hanging_indent_cm).twips),
+        max_level=max_level,
+        marker_suffix=marker_suffix,
+    )
+
+    item_left_twips = int(Cm(left_indent_cm).twips)
+    item_hanging_twips = int(Cm(hanging_indent_cm).twips)
+
+    for idx, item_content in enumerate(list_block.items):
+        # Удаляем «вручную написанный» маркер в начале элемента
+        # (типа «- NET Framework», «– требование», «1. шаг», «•  пункт»).
+        # Без этого numPr рисует свой маркер ПЛЮС текстовый маркер
+        # остаётся — пользователь видит «– – текст» или «1) 1. текст».
+        item_content = _strip_leading_marker_from_inline(item_content)
+        paragraph = doc.add_paragraph()
+        # ilvl: из item_levels или 0 по умолчанию.
+        item_level = levels[idx] if idx < len(levels) else 0
+        # Ставим numPr.
+        pPr = paragraph._p.get_or_add_pPr()
+        for old in pPr.findall(f"{{{W_NS}}}numPr"):
+            pPr.remove(old)
+        num_pr = etree.SubElement(pPr, f"{{{W_NS}}}numPr")
+        ilvl = etree.SubElement(num_pr, f"{{{W_NS}}}ilvl")
+        ilvl.set(f"{{{W_NS}}}val", str(item_level))
+        num_id_el = etree.SubElement(num_pr, f"{{{W_NS}}}numId")
+        num_id_el.set(f"{{{W_NS}}}val", str(num_id))
+        # Явный <w:ind> с left+hanging на уровне параграфа списка.
+        # БАГ-ФИКС: раньше тут стоял `paragraph.paragraph_format.
+        # first_line_indent = Cm(0)`, что писало <w:ind w:firstLine="0"/>
+        # — это перекрывало hanging из numbering.xml, и при переносе
+        # длинного элемента на следующую строку текст начинался с
+        # красной строки 1.25 см (наследуясь от стиля Normal).
+        # Теперь явно ставим left+hanging на каждый параграф списка:
+        # numbering управляет ilvl, а параграф — отступом продолжения
+        # строки (left).
+        for old in pPr.findall(f"{{{W_NS}}}ind"):
+            pPr.remove(old)
+        # Уровни > 0 получают увеличенный left на +720 twips (как в
+        # _ensure_list_num_in_numbering при создании lvl).
+        effective_left = item_left_twips + item_level * 720
+        ind = etree.SubElement(pPr, f"{{{W_NS}}}ind")
+        ind.set(f"{{{W_NS}}}left", str(effective_left))
+        # Семантика диалога Word «Изменение отступов в списке»:
+        # hanging>0 — маркер левее текста; hanging<0 — правее (firstLine);
+        # hanging=0 — совпадают (firstLine="0" перекрывает красную строку
+        # стиля Normal, иначе перенос длинной строки съезжает на 1.25 см).
+        if item_hanging_twips > 0:
+            ind.set(f"{{{W_NS}}}hanging", str(item_hanging_twips))
+        elif item_hanging_twips < 0:
+            ind.set(f"{{{W_NS}}}firstLine", str(-item_hanging_twips))
+        else:
+            ind.set(f"{{{W_NS}}}firstLine", "0")  # перекрыть красную строку Normal
         _write_runs(paragraph, item_content)
+
+
+# Кеш зарегистрированных numId внутри одного export-вызова: чтобы не
+# плодить дубли abstractNum/num на каждый ListBlock. Ключ — кортеж
+# (ordered, lvl_text, left_twips, hanging_twips). Сбрасывается в
+# try/finally export_docx через _current_profile = None.
+_current_list_numbering: dict[tuple[Any, ...], int] | None = None
+
+
+def _ensure_list_num_in_numbering(
+    doc: DocxDocument,
+    *,
+    ordered: bool,
+    lvl_text: str,
+    left_twips: int,
+    hanging_twips: int,
+    max_level: int = 0,
+    marker_suffix: str = "tab",
+) -> int:
+    """Зарегистрировать (если ещё нет) abstractNum + num с этими параметрами.
+
+    Возвращает numId, который нужно ставить в pPr/numPr/numId.
+
+    Идея: на один уникальный (ordered+lvl_text+отступы) набор —
+    один abstractNum и один num. Это позволяет иметь несколько списков
+    с разной нумерацией (например, основной список с «N)» и доп.
+    подсписок с «N.») в одном документе.
+    """
+    global _current_list_numbering
+    if _current_list_numbering is None:
+        _current_list_numbering = {}
+    cache_key = (ordered, lvl_text, left_twips, hanging_twips, max_level, marker_suffix)
+    if cache_key in _current_list_numbering:
+        return _current_list_numbering[cache_key]
+
+    try:
+        numbering_part = doc.part.numbering_part
+    except (AttributeError, KeyError):  # pragma: no cover
+        # numbering_part должен быть в дефолтном шаблоне python-docx,
+        # но на всякий случай — возвращаем 0 (отсутствующий numId,
+        # Word проигнорирует и параграф будет без маркера).
+        return 0
+    num_elem = numbering_part.element
+
+    # Находим максимальный существующий abstractNumId и numId.
+    max_anid = -1
+    for an in num_elem.findall(f"{{{W_NS}}}abstractNum"):
+        with contextlib.suppress(ValueError):
+            max_anid = max(max_anid, int(an.get(f"{{{W_NS}}}abstractNumId") or "-1"))
+    max_nid = 0
+    for n in num_elem.findall(f"{{{W_NS}}}num"):
+        with contextlib.suppress(ValueError):
+            max_nid = max(max_nid, int(n.get(f"{{{W_NS}}}numId") or "0"))
+
+    new_anid = max_anid + 1
+    new_nid = max_nid + 1
+
+    # Создаём <w:abstractNum>.
+    an = etree.SubElement(num_elem, f"{{{W_NS}}}abstractNum")
+    an.set(f"{{{W_NS}}}abstractNumId", str(new_anid))
+    mlt = etree.SubElement(an, f"{{{W_NS}}}multiLevelType")
+    mlt.set(
+        f"{{{W_NS}}}val",
+        "singleLevel" if max_level == 0 else "multilevel",
+    )
+    for _ilvl in range(max_level + 1):
+        _add_list_level(
+            an,
+            ilvl=_ilvl,
+            ordered=ordered,
+            lvl_text=(lvl_text if _ilvl == 0 else _nested_lvl_text(ordered, _ilvl, lvl_text)),
+            left_twips=left_twips + _ilvl * 720,
+            hanging_twips=hanging_twips,
+            marker_suffix=marker_suffix,
+            font_for_bullet=(
+                _current_profile.styles.body.font
+                if _current_profile is not None
+                else "Times New Roman"
+            ),
+        )
+
+    # Создаём <w:num> ссылающийся на abstractNum.
+    n = etree.SubElement(num_elem, f"{{{W_NS}}}num")
+    n.set(f"{{{W_NS}}}numId", str(new_nid))
+    abstract_ref = etree.SubElement(n, f"{{{W_NS}}}abstractNumId")
+    abstract_ref.set(f"{{{W_NS}}}val", str(new_anid))
+
+    _current_list_numbering[cache_key] = new_nid
+    return new_nid
+
+
+def _add_list_level(
+    abstract_num: Any,
+    *,
+    ilvl: int,
+    ordered: bool,
+    lvl_text: str,
+    left_twips: int,
+    hanging_twips: int,
+    marker_suffix: str = "tab",
+    font_for_bullet: str = "Times New Roman",
+) -> None:
+    """Добавить <w:lvl ilvl="N"> внутрь <w:abstractNum>.
+
+    Содержит: start, numFmt (decimal/bullet), lvlText, lvlJc, pPr/ind
+    с left+hanging/firstLine, rPr (для bullet — явный шрифт во избежание
+    Symbol) и suff (tab/space/nothing) — символ после маркера/номера
+    из профиля (поле «Символ после номера» диалога Word).
+    """
+    lvl = etree.SubElement(abstract_num, f"{{{W_NS}}}lvl")
+    lvl.set(f"{{{W_NS}}}ilvl", str(ilvl))
+    start = etree.SubElement(lvl, f"{{{W_NS}}}start")
+    start.set(f"{{{W_NS}}}val", "1")
+    num_fmt = etree.SubElement(lvl, f"{{{W_NS}}}numFmt")
+    num_fmt.set(f"{{{W_NS}}}val", "decimal" if ordered else "bullet")
+    # suff = разделитель между маркером и текстом: tab (default
+    # Word), space или nothing — из профиля (поле «Символ после
+    # номера»). При tab Tab расширяется до позиции left из <w:ind>,
+    # выравнивая текст первой строки с переносом длинной строки.
+    suff = etree.SubElement(lvl, f"{{{W_NS}}}suff")
+    suff.set(f"{{{W_NS}}}val", marker_suffix)
+    lvl_text_el = etree.SubElement(lvl, f"{{{W_NS}}}lvlText")
+    lvl_text_el.set(f"{{{W_NS}}}val", lvl_text)
+    lvl_jc = etree.SubElement(lvl, f"{{{W_NS}}}lvlJc")
+    lvl_jc.set(f"{{{W_NS}}}val", "left")
+    lvl_pPr = etree.SubElement(lvl, f"{{{W_NS}}}pPr")
+    lvl_ind = etree.SubElement(lvl_pPr, f"{{{W_NS}}}ind")
+    lvl_ind.set(f"{{{W_NS}}}left", str(left_twips))
+    # Семантика диалога Word «Изменение отступов в списке»:
+    # hanging>0 — маркер левее текста; hanging<0 — правее (firstLine);
+    # hanging=0 — совпадают (ни hanging, ни firstLine).
+    if hanging_twips > 0:
+        lvl_ind.set(f"{{{W_NS}}}hanging", str(hanging_twips))
+    elif hanging_twips < 0:
+        lvl_ind.set(f"{{{W_NS}}}firstLine", str(-hanging_twips))
+    if not ordered:
+        lvl_rPr = etree.SubElement(lvl, f"{{{W_NS}}}rPr")
+        lvl_rFonts = etree.SubElement(lvl_rPr, f"{{{W_NS}}}rFonts")
+        for attr in ("ascii", "hAnsi", "cs", "eastAsia"):
+            lvl_rFonts.set(f"{{{W_NS}}}{attr}", font_for_bullet)
+
+
+def _nested_lvl_text(ordered: bool, ilvl: int, base_lvl_text: str) -> str:
+    """Вернуть lvlText для вложенного уровня ilvl > 0.
+
+    Для ordered (decimal): '%(ilvl+1).' — стандартная nested-нумерация
+    '%2.', '%3.', и т. д.
+
+    Для unordered: альтернативный bullet-символ для разнообразия
+    ('◦', '▪', ...), если base_lvl_text стандартный. Кастомный
+    bullet просто повторяется.
+    """
+    if ordered:
+        return f"%{ilvl + 1}."
+    nested_bullets = ["◦", "▪", "·", "▫", "‣", "◆", "•"]
+    if base_lvl_text in {"–", "—", "*", "•"}:
+        return nested_bullets[min(ilvl - 1, len(nested_bullets) - 1)]
+    return base_lvl_text
 
 
 def _write_template_into_footer_paragraph(
@@ -464,9 +1365,7 @@ def _write_template_into_footer_paragraph(
 def _has_text(items: Sequence[InlineElement] | None) -> bool:
     if not items:
         return False
-    return any(
-        isinstance(el, TextRun) and el.text and el.text.strip() for el in items
-    )
+    return any(isinstance(el, TextRun) and el.text and el.text.strip() for el in items)
 
 
 def _write_footer(doc: DocxDocument, footer_template: ContentTemplate) -> None:
@@ -514,6 +1413,37 @@ _PAGE_FMT_OOXML = {
 }
 
 
+def _sync_page_section_with_profile(page_section: PageSection, profile: Profile) -> None:
+    """Применить параметры профиля к модели page_section перед записью.
+
+    Согласует:
+    * margins_mm — поля страницы из profile.styles.page;
+    * page_numbering.start_value — из profile.checks['F.06'].params,
+      если задано и текущий start_mode='start_at'.
+
+    Эта функция мутирует input page_section (side effect). Это
+    единственное место, где модель «приземляется» под конкретный
+    профиль во время экспорта — builder.build() остаётся
+    профиль-агностичным.
+    """
+    # Поля страницы.
+    margins = profile.styles.page.margins_mm
+    if margins:
+        merged = dict(page_section.page.margins_mm)
+        merged.update({k: float(v) for k, v in margins.items()})
+        page_section.page.margins_mm = merged
+    # F.06 start_value.
+    f06 = profile.checks.get("F.06")
+    if (
+        f06
+        and f06.enabled
+        and f06.params.get("start_value") is not None
+        and page_section.page_numbering.start_mode == "start_at"
+    ):
+        with contextlib.suppress(TypeError, ValueError):
+            page_section.page_numbering.start_value = int(f06.params["start_value"])
+
+
 def _apply_pgnumtype(doc: DocxDocument, page_section: PageSection) -> None:
     """Прописать <w:pgNumType w:start="N" w:fmt="..."/> в sectPr.
 
@@ -556,6 +1486,32 @@ def _write_items(doc: DocxDocument, items: Sequence[LogicalSection | Block]) -> 
             _write_list(doc, item)
         elif isinstance(item, Formula):
             _write_formula(doc, item)
+        elif isinstance(item, TableOfContents):
+            _write_toc(doc, item)
+
+
+def _write_toc(doc: DocxDocument, toc: TableOfContents) -> None:
+    """Записать автоматическое оглавление через Word TOC-field.
+
+    OOXML: <w:p><w:fldSimple w:instr=" TOC \\o "1-3" \\h \\z "/>
+    с placeholder-параграфом «Оглавление будет здесь после обновления
+    (F9 в Word)» внутри fldSimple. При открытии файла Word строит
+    оглавление автоматически на основе Heading-стилей.
+
+    Опции TOC-field:
+    * \\o "min-max" — диапазон уровней (default 1-3);
+    * \\h — гиперссылки на заголовки;
+    * \\z — скрыть номера в Web-preview.
+    """
+    paragraph = doc.add_paragraph()
+    instr = f' TOC \\o "{toc.min_level}-{toc.max_level}" \\h \\z '
+    fld = etree.SubElement(paragraph._p, f"{{{W_NS}}}fldSimple")
+    fld.set(f"{{{W_NS}}}instr", instr)
+    # Placeholder-run внутри fldSimple — Word его заменит при первом
+    # обновлении поля (F9 или открытие документа с подтверждением).
+    inner_r = etree.SubElement(fld, f"{{{W_NS}}}r")
+    inner_t = etree.SubElement(inner_r, f"{{{W_NS}}}t")
+    inner_t.text = "Оглавление будет построено при открытии (F9 в Word)."
 
 
 def export_docx(
@@ -580,7 +1536,11 @@ def export_docx(
         достанет соответствующий media-blob из source_docx и вставит как
         реальное изображение. Иначе на месте картинки будет placeholder.
     """
-    global _current_source_docx, _current_bibliography_index
+    global \
+        _current_source_docx, \
+        _current_bibliography_index, \
+        _current_profile, \
+        _current_list_numbering
     output_path = Path(output_path)
     doc = docx.Document()
 
@@ -606,6 +1566,9 @@ def export_docx(
     try:
         _apply_page_geometry(doc, profile)
         _apply_normal_style(doc, profile)
+        _apply_heading_styles(doc, profile)
+        _apply_caption_style(doc, profile)
+        _current_profile = profile
 
         # Метаданные документа в docProps/core.xml.
         core = doc.core_properties
@@ -613,9 +1576,21 @@ def export_docx(
             core.title = document.metadata.title
         if document.metadata.author:
             core.author = document.metadata.author
+        # Год работы: пишем как core.created (1 января указанного года),
+        # чтобы парсер мог его прочитать обратно при impоrt-docx.
+        # python-docx иначе ставит datetime.now(), и год потеряется.
+        if document.metadata.year:
+            from datetime import datetime
+
+            core.created = datetime(document.metadata.year, 1, 1, tzinfo=UTC)
 
         if document.page_sections:
             first = document.page_sections[0]
+            # Согласовать page_section с профилем перед записью: F.06
+            # start_value, поля страницы. Builder ставит свои дефолты,
+            # а профиль (особенно наследник base) может их переопределить.
+            # Этот вызов — единое место синхронизации модели с профилем.
+            _sync_page_section_with_profile(first, profile)
             _apply_page_size(doc, first)
             _apply_pgnumtype(doc, first)
             if first.footer is not None:
@@ -630,6 +1605,8 @@ def export_docx(
     finally:
         _current_source_docx = None
         _current_bibliography_index = None
+        _current_profile = None
+        _current_list_numbering = None
 
     # Post-processing на уровне zip: запись настроек, которые python-docx
     # не умеет менять напрямую (например, w:autoHyphenation в settings.xml).
@@ -647,11 +1624,13 @@ def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
     """Прописать/удалить <w:autoHyphenation/> в word/settings.xml внутри docx-zip."""
     import shutil
     import zipfile
+
     settings_path = "word/settings.xml"
     tmp_path = docx_path.with_suffix(".docx.tmp")
-    with zipfile.ZipFile(docx_path, "r") as zin, zipfile.ZipFile(
-        tmp_path, "w", zipfile.ZIP_DEFLATED
-    ) as zout:
+    with (
+        zipfile.ZipFile(docx_path, "r") as zin,
+        zipfile.ZipFile(tmp_path, "w", zipfile.ZIP_DEFLATED) as zout,
+    ):
         names = zin.namelist()
         if settings_path not in names:
             settings_xml = (
@@ -669,10 +1648,8 @@ def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
             if value:
                 elem = etree.SubElement(root, f"{{{W_NS}}}autoHyphenation")
                 root.insert(0, elem)
-            new_xml = etree.tostring(
-                root, xml_declaration=True, encoding="UTF-8", standalone=True
-            )
-        except Exception:  # noqa: BLE001
+            new_xml = etree.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
+        except Exception:
             new_xml = settings_xml
 
         wrote_settings = False

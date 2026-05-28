@@ -30,7 +30,9 @@ def _top_level_headings(builder: WorkBuilder) -> list[str]:
 
 
 def test_coursework_template_has_required_sections() -> None:
-    headings = [h.upper() for h in _top_level_headings(coursework_template("Курсовая", author="Иванов"))]
+    headings = [
+        h.upper() for h in _top_level_headings(coursework_template("Курсовая", author="Иванов"))
+    ]
     assert "ВВЕДЕНИЕ" in headings
     assert "ЗАКЛЮЧЕНИЕ" in headings
     assert any("СПИСОК ИСПОЛЬЗОВАННЫХ ИСТОЧНИКОВ" in h for h in headings)
@@ -70,12 +72,9 @@ def test_template_passes_validation() -> None:
         doc = builder.build()
         # K.01 на Фазе 1 builder не покрывает — игнорируем (см. WorkBuilder.save).
         errors = [
-            v for v in validate(doc, profile)
-            if v.severity == "error" and v.check_code != "K.01"
+            v for v in validate(doc, profile) if v.severity == "error" and v.check_code != "K.01"
         ]
-        assert errors == [], (
-            f"Шаблон даёт ошибки: {[(v.check_code, v.message) for v in errors]}"
-        )
+        assert errors == [], f"Шаблон даёт ошибки: {[(v.check_code, v.message) for v in errors]}"
 
 
 def test_template_save_writes_docx(tmp_path: Path) -> None:

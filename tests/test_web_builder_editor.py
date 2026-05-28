@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты интерактивного конструктора (gostforge.web.builder_editor).
 
 Стримлит-виджеты через UI-раннер не дёргаем — только чистые функции
@@ -343,9 +341,7 @@ def test_state_round_trip_via_json() -> None:
 
     state = _default_state()
     state["title"] = "Тест round-trip"
-    state["sections"][0]["blocks"].append(
-        {"kind": "paragraph", "text": "Текст параграфа."}
-    )
+    state["sections"][0]["blocks"].append({"kind": "paragraph", "text": "Текст параграфа."})
     blob = json.dumps(state, ensure_ascii=False).encode("utf-8")
     restored = json.loads(blob.decode("utf-8"))
     assert restored == state

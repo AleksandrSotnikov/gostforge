@@ -1,5 +1,3 @@
-# ruff: noqa: RUF001, RUF002, RUF003
-
 """Тесты CLI-команды `gostforge history` и автозаписи submission в check.
 
 Изолируем БД через env GOSTFORGE_DB_PATH в tmp_path.
@@ -36,9 +34,7 @@ def sample_docx(tmp_path: Path) -> Path:
 # --- автозапись из check ---------------------------------------------------
 
 
-def test_check_records_submission_by_default(
-    db_path: Path, sample_docx: Path
-) -> None:
+def test_check_records_submission_by_default(db_path: Path, sample_docx: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(main, ["check", str(sample_docx), "--quiet"])
     # exit code зависит от того, нашлись ли error-violations; нас интересует
@@ -56,9 +52,7 @@ def test_check_records_submission_by_default(
 
 def test_check_no_record_skips_db(db_path: Path, sample_docx: Path) -> None:
     runner = CliRunner()
-    result = runner.invoke(
-        main, ["check", str(sample_docx), "--quiet", "--no-record"]
-    )
+    result = runner.invoke(main, ["check", str(sample_docx), "--quiet", "--no-record"])
     assert result.exit_code in (0, 1)
 
     from gostforge.db import get_connection, list_submissions
@@ -68,9 +62,7 @@ def test_check_no_record_skips_db(db_path: Path, sample_docx: Path) -> None:
     assert len(items) == 0
 
 
-def test_check_records_each_file_when_directory(
-    db_path: Path, tmp_path: Path
-) -> None:
+def test_check_records_each_file_when_directory(db_path: Path, tmp_path: Path) -> None:
     """check на папке должен записать submission для каждого .docx."""
     folder = tmp_path / "docs"
     folder.mkdir()
@@ -100,9 +92,7 @@ def test_history_empty_db_shows_hint(db_path: Path) -> None:
     assert "gostforge check" in result.output
 
 
-def test_history_shows_recent_submissions(
-    db_path: Path, sample_docx: Path
-) -> None:
+def test_history_shows_recent_submissions(db_path: Path, sample_docx: Path) -> None:
     runner = CliRunner()
     runner.invoke(main, ["check", str(sample_docx), "--quiet"])
     result = runner.invoke(main, ["history"])

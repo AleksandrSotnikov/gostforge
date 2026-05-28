@@ -1,7 +1,5 @@
 """Тесты парсера .docx → Document."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -169,9 +167,7 @@ def test_parse_extracts_page_break_before(tmp_path: Path) -> None:
         headings_break_before=True,
     )
     doc = parse_docx(path)
-    sections = [
-        item for item in doc.page_sections[0].content if isinstance(item, LogicalSection)
-    ]
+    sections = [item for item in doc.page_sections[0].content if isinstance(item, LogicalSection)]
     # В make_docx абзацы paragraphs идут после всех заголовков, поэтому здесь
     # children секций пусты. Проверяем page_break_before на самом заголовке
     # отдельно через прямое чтение — но в текущей модели заголовок хранится
@@ -199,9 +195,7 @@ def test_parse_extracts_page_break_before(tmp_path: Path) -> None:
     d.save(str(path2))
     doc2 = parse_docx(path2)
 
-    paragraphs = [
-        item for item in doc2.page_sections[0].content if isinstance(item, Paragraph)
-    ]
+    paragraphs = [item for item in doc2.page_sections[0].content if isinstance(item, Paragraph)]
     assert len(paragraphs) >= 1
     assert paragraphs[-1].page_break_before is True
 
@@ -214,9 +208,7 @@ def test_parse_paragraph_without_page_break(tmp_path: Path) -> None:
         headings=[],
     )
     doc = parse_docx(path)
-    paragraphs = [
-        item for item in doc.page_sections[0].content if isinstance(item, Paragraph)
-    ]
+    paragraphs = [item for item in doc.page_sections[0].content if isinstance(item, Paragraph)]
     assert len(paragraphs) == 1
     # Атрибут либо не задан явно (None), либо False — главное, что не True.
     assert paragraphs[0].page_break_before is not True
@@ -250,7 +242,9 @@ def test_parse_extracts_table_with_caption(tmp_path: Path) -> None:
 
     # Заголовки и строки разложены.
     assert len(table.headers) == 2
-    header_texts = ["".join(e.text for e in cell if isinstance(e, TextRun)) for cell in table.headers]
+    header_texts = [
+        "".join(e.text for e in cell if isinstance(e, TextRun)) for cell in table.headers
+    ]
     assert header_texts == ["Показатель", "Значение"]
     assert len(table.rows) == 2
     first_row = ["".join(e.text for e in cell if isinstance(e, TextRun)) for cell in table.rows[0]]
@@ -419,6 +413,7 @@ def test_parser_extracts_header_with_page_field(tmp_path: Path) -> None:
     doc.save(str(out))
 
     from gostforge.parser import parse_docx
+
     parsed = parse_docx(out)
     page_section = parsed.page_sections[0]
     assert page_section.header is not None
@@ -501,6 +496,7 @@ def test_parser_extracts_image_rid_from_drawing(tmp_path: Path) -> None:
         from PIL import Image  # type: ignore[import-not-found]
     except ImportError:
         import pytest
+
         pytest.skip("Pillow не установлен")
     import docx as python_docx
 

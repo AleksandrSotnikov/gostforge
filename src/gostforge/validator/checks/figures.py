@@ -1,7 +1,5 @@
 """I.* — проверки рисунков."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 import re
@@ -25,15 +23,11 @@ from ..engine import Violation, register
 # Между номером и тире — один пробел; тире длинное (—), допускаем также
 # среднее (–) и обычный дефис (-) как «не строго» — но в правильном
 # случае всё равно сообщаем suggestion с длинным тире.
-_FIGURE_CAPTION_RE = re.compile(
-    r"^Рис(?:унок)?\s+\d+(?:\.\d+)?\s+[—–-]\s+\S"
-)
+_FIGURE_CAPTION_RE = re.compile(r"^Рис(?:унок)?\s+\d+(?:\.\d+)?\s+[—–-]\s+\S")
 
 # Альтернативный вариант, когда параметр allow_dot_after_number=True:
 # «Рисунок 1. Название» — без длинного тире, с точкой после номера.
-_FIGURE_CAPTION_DOT_RE = re.compile(
-    r"^Рис(?:унок)?\s+\d+(?:\.\d+)?\.\s+\S"
-)
+_FIGURE_CAPTION_DOT_RE = re.compile(r"^Рис(?:унок)?\s+\d+(?:\.\d+)?\.\s+\S")
 
 
 def _iter_figures(items: Sequence[LogicalSection | Block]) -> list[Figure]:
@@ -58,14 +52,13 @@ def _all_figures(document: Document) -> list[tuple[PageSection, Figure]]:
 
 def _has_text(elements: Sequence[InlineElement]) -> bool:
     """True, если в списке есть хотя бы один TextRun с непустым текстом."""
-    return any(
-        isinstance(el, TextRun) and el.text and el.text.strip() for el in elements
-    )
+    return any(isinstance(el, TextRun) and el.text and el.text.strip() for el in elements)
 
 
 @register("I.01")
 def check_figure_has_caption(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Каждый рисунок должен иметь подпись «Рисунок N — Название»."""
     violations: list[Violation] = []
@@ -108,9 +101,7 @@ def check_figure_caption_below(
 
 
 @register("I.03")
-def check_figure_caption_format(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_figure_caption_format(document: Document, profile: Profile) -> list[Violation]:
     """Подпись рисунка должна быть в формате «Рисунок N — Название».
 
     Параметры:
@@ -139,13 +130,11 @@ def check_figure_caption_format(
                 check_code="I.03",
                 severity="error",
                 message=(
-                    f"Подпись рисунка «{text}» не соответствует формату "
-                    f"«Рисунок N — Название»"
+                    f"Подпись рисунка «{text}» не соответствует формату «Рисунок N — Название»"
                 ),
                 location=f"page_sections.{page_section.id}.figure[{figure.id}]",
                 suggestion=(
-                    "Использовать формат «Рисунок 1 — Название» "
-                    "(длинное тире —, не дефис)"
+                    "Использовать формат «Рисунок 1 — Название» (длинное тире —, не дефис)"
                 ),
                 details={"figure_id": figure.id, "caption": text},
             )
@@ -157,9 +146,7 @@ _SIZE_TOLERANCE_PT = 0.1
 
 
 @register("I.04")
-def check_figure_caption_style(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_figure_caption_style(document: Document, profile: Profile) -> list[Violation]:
     """Подпись рисунка должна быть нужного кегля (и центрирована).
 
     Параметры (`profile.checks["I.04"].params`):
@@ -206,13 +193,8 @@ def check_figure_caption_style(
                             f"{element.size_pt} pt вместо ожидаемых "
                             f"{expected_size} pt"
                         ),
-                        location=(
-                            f"page_sections.{page_section.id}.figure[{figure.id}]"
-                        ),
-                        suggestion=(
-                            f"Использовать кегль {expected_size} pt для подписи "
-                            f"рисунка"
-                        ),
+                        location=(f"page_sections.{page_section.id}.figure[{figure.id}]"),
+                        suggestion=(f"Использовать кегль {expected_size} pt для подписи рисунка"),
                         details={
                             "figure_id": figure.id,
                             "expected": str(expected_size),
@@ -254,7 +236,8 @@ def _paragraph_text(paragraph: Paragraph) -> str:
 
 @register("I.05")
 def check_figure_numbering_continuous(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """Сквозная нумерация рисунков: номера должны идти 1, 2, 3, ...
 
@@ -292,13 +275,11 @@ def check_figure_numbering_continuous(
                     check_code="I.05",
                     severity="error",
                     message=(
-                        f"Номер {num} встречается у двух рисунков: "
-                        f"«{previous.id}» и «{figure.id}»"
+                        f"Номер {num} встречается у двух рисунков: «{previous.id}» и «{figure.id}»"
                     ),
                     location=f"figure[{figure.id}]",
                     suggestion=(
-                        "Перенумеровать рисунки так, чтобы каждый имел "
-                        "уникальный сквозной номер"
+                        "Перенумеровать рисунки так, чтобы каждый имел уникальный сквозной номер"
                     ),
                     details={
                         "figure_id": figure.id,
@@ -315,13 +296,11 @@ def check_figure_numbering_continuous(
                     check_code="I.05",
                     severity="error",
                     message=(
-                        f"После рисунка {expected - 1} ожидается рисунок "
-                        f"{expected}, найдено {num}"
+                        f"После рисунка {expected - 1} ожидается рисунок {expected}, найдено {num}"
                     ),
                     location=f"figure[{figure.id}]",
                     suggestion=(
-                        f"Перенумеровать рисунок: «Рисунок {expected}» вместо "
-                        f"«Рисунок {num}»"
+                        f"Перенумеровать рисунок: «Рисунок {expected}» вместо «Рисунок {num}»"
                     ),
                     details={
                         "figure_id": figure.id,
@@ -373,9 +352,7 @@ def _document_blocks_linear(document: Document) -> list[Block]:
 
 
 @register("I.07")
-def check_figure_reference_precedes(
-    document: Document, profile: Profile
-) -> list[Violation]:
+def check_figure_reference_precedes(document: Document, profile: Profile) -> list[Violation]:
     """Ссылка на рисунок должна появляться в тексте ДО самого рисунка.
 
     Алгоритм:
@@ -445,7 +422,8 @@ def check_figure_reference_precedes(
 
 @register("I.06")
 def check_figure_referenced_in_text(
-    document: Document, profile: Profile  # noqa: ARG001
+    document: Document,
+    profile: Profile,
 ) -> list[Violation]:
     """На каждый рисунок должна быть ссылка в тексте.
 
@@ -478,13 +456,10 @@ def check_figure_referenced_in_text(
             Violation(
                 check_code="I.06",
                 severity="error",
-                message=(
-                    f"В тексте отсутствует ссылка на рисунок {num} «{figure.id}»"
-                ),
+                message=(f"В тексте отсутствует ссылка на рисунок {num} «{figure.id}»"),
                 location=f"page_sections.{page_section.id}.figure[{figure.id}]",
                 suggestion=(
-                    f"Добавить в текст ссылку вида «см. рисунок {num}» или "
-                    f"«на рисунке {num}»"
+                    f"Добавить в текст ссылку вида «см. рисунок {num}» или «на рисунке {num}»"
                 ),
                 details={"figure_id": figure.id, "number": str(num)},
             )
@@ -533,10 +508,7 @@ def check_figure_dpi(document: Document, profile: Profile) -> list[Violation]:
                 Violation(
                     check_code="I.08",
                     severity="warning",
-                    message=(
-                        f"Рисунок «{fig.id}» имеет DPI={fig.dpi}, "
-                        f"ожидается ≥ {min_dpi}"
-                    ),
+                    message=(f"Рисунок «{fig.id}» имеет DPI={fig.dpi}, ожидается ≥ {min_dpi}"),
                     location=f"page_sections.{page_section.id}.figure[{fig.id}].dpi",
                     suggestion=(
                         f"Пересохранить изображение с разрешением ≥ {min_dpi} DPI "
@@ -571,8 +543,7 @@ def check_figure_centered(document: Document, profile: Profile) -> list[Violatio
                     check_code="I.09",
                     severity="warning",
                     message=(
-                        f"Рисунок «{fig.id}» выровнен «{fig.alignment}», "
-                        f"ожидается «{expected}»"
+                        f"Рисунок «{fig.id}» выровнен «{fig.alignment}», ожидается «{expected}»"
                     ),
                     location=f"page_sections.{page_section.id}.figure[{fig.id}].alignment",
                     suggestion=f"Выровнять рисунок «{expected}»",

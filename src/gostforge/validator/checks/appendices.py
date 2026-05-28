@@ -1,7 +1,5 @@
 """P.* — проверки приложений."""
 
-# ruff: noqa: RUF001, RUF002, RUF003
-
 from __future__ import annotations
 
 import re
@@ -22,9 +20,7 @@ from ..engine import Violation, register
 # Шаблон: «Приложение X» в начале заголовка, X — одна буква.
 # Допускаем заглавную или строчную, кириллическую или латинскую — это
 # часть собственно проверки, которая решает, валидна ли буква.
-_APPENDIX_HEADING_RE = re.compile(
-    r"^\s*Приложение\s+([A-Za-zА-ЯЁа-яё])\b"
-)
+_APPENDIX_HEADING_RE = re.compile(r"^\s*Приложение\s+([A-Za-zА-ЯЁа-яё])\b")
 
 # Допустимый порядок русских заглавных букв для маркировки приложений
 # (без Ё, З, Й, О, Ч, Ь, Ъ, Ы — по ГОСТ).
@@ -87,9 +83,7 @@ def check_appendix_letter_marking(
     if config and config.params.get("forbidden_letters"):
         custom = config.params["forbidden_letters"]
         if isinstance(custom, list):
-            forbidden = frozenset(
-                item.upper() for item in custom if isinstance(item, str)
-            )
+            forbidden = frozenset(item.upper() for item in custom if isinstance(item, str))
 
     # Собираем все приложения в порядке появления.
     found_letters: list[tuple[LogicalSection, str]] = []
@@ -120,9 +114,7 @@ def check_appendix_letter_marking(
                         f"маркируются русскими заглавными буквами"
                     ),
                     location=f"page_sections.*.logical_section[{section.id}]",
-                    suggestion=(
-                        f"Использовать русскую заглавную букву вместо «{letter}»"
-                    ),
+                    suggestion=(f"Использовать русскую заглавную букву вместо «{letter}»"),
                     details={"section_id": section.id, "letter": letter},
                 )
             )
@@ -140,9 +132,7 @@ def check_appendix_letter_marking(
                         f"строчной буквой «{letter}»; должна быть заглавная"
                     ),
                     location=f"page_sections.*.logical_section[{section.id}]",
-                    suggestion=(
-                        f"Использовать заглавную букву «{upper}» вместо «{letter}»"
-                    ),
+                    suggestion=(f"Использовать заглавную букву «{upper}» вместо «{letter}»"),
                     details={"section_id": section.id, "letter": letter},
                 )
             )
@@ -184,9 +174,7 @@ def check_appendix_letter_marking(
                         f"в допустимый ряд для маркировки приложений"
                     ),
                     location=f"page_sections.*.logical_section[{section.id}]",
-                    suggestion=(
-                        "Использовать букву из допустимого ряда: А, Б, В, ..."
-                    ),
+                    suggestion=("Использовать букву из допустимого ряда: А, Б, В, ..."),
                     details={"section_id": section.id, "letter": letter},
                 )
             )
@@ -251,9 +239,7 @@ _APPENDIX_PREFIX_RE = re.compile(r"^\s*Приложение\b", re.IGNORECASE)
 # - одна РУССКАЯ ЗАГЛАВНАЯ буква;
 # - после неё либо точка с пробелом и текстом, либо конец строки (опционально
 #   допускаем пробел и далее — содержательный заголовок).
-_STRICT_APPENDIX_HEADING_RE = re.compile(
-    r"^Приложение\s+([А-Я])(?:\s+\S.*|\.\s+\S.*|$)"
-)
+_STRICT_APPENDIX_HEADING_RE = re.compile(r"^Приложение\s+([А-Я])(?:\s+\S.*|\.\s+\S.*|$)")
 
 
 def _iter_paragraphs(items: Sequence[LogicalSection | Block]) -> list[Paragraph]:
@@ -354,9 +340,7 @@ def check_appendix_referenced(
         return violations
 
     # Соберём общий текст всех Paragraph.
-    paragraphs_text = "\n".join(
-        _paragraph_text(p) for p in _all_paragraphs(document)
-    )
+    paragraphs_text = "\n".join(_paragraph_text(p) for p in _all_paragraphs(document))
 
     for section in appendices:
         heading = _heading_text(section.heading).strip()
@@ -371,8 +355,7 @@ def check_appendix_referenced(
                 check_code="P.02",
                 severity="error",
                 message=(
-                    f"В тексте отсутствует ссылка на «Приложение {letter}» "
-                    f"(заголовок «{heading}»)"
+                    f"В тексте отсутствует ссылка на «Приложение {letter}» (заголовок «{heading}»)"
                 ),
                 location=f"page_sections.*.logical_section[{section.id}]",
                 suggestion=(
@@ -416,9 +399,7 @@ def check_appendix_page_break(
                 Violation(
                     check_code="P.03",
                     severity="error",
-                    message=(
-                        f"Приложение «{heading}» не начинается с новой страницы"
-                    ),
+                    message=(f"Приложение «{heading}» не начинается с новой страницы"),
                     location=f"page_sections.*.logical_section[{section.id}]",
                     suggestion=(
                         "Включить разрыв страницы перед заголовком приложения "
@@ -484,9 +465,7 @@ def _is_meaningful_title_paragraph(paragraph: Paragraph) -> bool:
     style = paragraph.style_name or ""
     if style.startswith("Heading"):
         return True
-    return any(
-        isinstance(el, TextRun) and el.bold is True for el in paragraph.content
-    )
+    return any(isinstance(el, TextRun) and el.bold is True for el in paragraph.content)
 
 
 @register("P.05")
