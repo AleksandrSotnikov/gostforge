@@ -33,7 +33,12 @@ def test_app_module_importable() -> None:
 
 
 def test_app_renders_dashboard_by_default() -> None:
-    """По умолчанию (режим «Главная») приложение рисует дашборд без ошибок."""
+    """По умолчанию (страница «Главная») приложение рисует дашборд без ошибок.
+
+    После перехода на ``st.navigation``: вместо ``st.radio('Режим', ...)``
+    у нас sidebar-навигация со страницами, а дашборд — `default=True`-страница.
+    Проверяем: нет exceptions + есть заголовок дашборда.
+    """
     pytest.importorskip("streamlit")
     try:
         from streamlit.testing.v1 import AppTest
@@ -43,9 +48,8 @@ def test_app_renders_dashboard_by_default() -> None:
     at = AppTest.from_string("from gostforge.web.app import render\nrender()\n")
     at.run(timeout=90)
     assert not at.exception, [str(e) for e in at.exception]
-    # Дашборд — режим по умолчанию: есть заголовок и переключатель режимов.
+    # На главной странице дашборд: есть title.
     assert at.title
-    assert any("Режим" in r.label for r in at.radio)
 
 
 def test_ui_command_without_streamlit_exits_2(monkeypatch: pytest.MonkeyPatch) -> None:

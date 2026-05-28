@@ -565,76 +565,75 @@ def _render_builder_mode() -> None:
 
 
 def render() -> None:
-    """Главная функция рендера — точка входа streamlit-приложения."""
+    """Точка входа streamlit-приложения.
+
+    Multi-page через ``st.navigation`` + ``st.Page``: каждый режим —
+    отдельная страница со своим URL (`?page=...`) и браузерной историей.
+    Sidebar-навигацию Streamlit ставит автоматически. Sharable-ссылки
+    можно отправлять руководителю, refresh не сбрасывает выбранный
+    режим.
+    """
     st.set_page_config(
         page_title="gostforge — нормоконтроль и конструктор по ГОСТу",
         page_icon="📄",
         layout="wide",
         initial_sidebar_state="expanded",
     )
-    profiles = list_profiles()
-    if not profiles:
+    if not list_profiles():
         st.error("Не найдено ни одного профиля. Проверьте директорию profiles/.")
         return
 
-    mode = st.radio(
-        "Режим",
-        options=[
-            "Главная",
-            "Нормоконтроль",
-            "Конструктор",
-            "Редактор профиля",
-            "История",
-            "Документация",
-        ],
-        horizontal=True,
-        help=(
-            "Главная — обзор возможностей и быстрый старт. "
-            "Нормоконтроль — проверка существующего .docx по ГОСТ. "
-            "Конструктор — сборка работы по ГОСТу с нуля или из .docx. "
-            "Редактор профиля — настройка всех параметров оформления и "
-            "сохранение своего профиля. "
-            "История — все прошлые проверки + обсуждение руководитель↔студент. "
-            "Документация — встроенный просмотр руководства."
-        ),
+    # Импорты обёрток отложены до самого st.navigation — они в свою очередь
+    # делают lazy-import тяжёлого модуля только при заходе на страницу.
+    from gostforge.web.pages import (
+        builder as builder_page,
+    )
+    from gostforge.web.pages import (
+        docs as docs_page,
+    )
+    from gostforge.web.pages import (
+        history as history_page,
+    )
+    from gostforge.web.pages import (
+        home as home_page,
+    )
+    from gostforge.web.pages import (
+        normocontrol as normocontrol_page,
+    )
+    from gostforge.web.pages import (
+        profile_editor as profile_editor_page,
     )
 
-    if mode == "Главная":
-        from gostforge.web.dashboard import render_dashboard
-
-        render_dashboard()
-        return
-
-    if mode == "Документация":
-        from gostforge.web.docs_viewer import render_docs_viewer
-
-        render_docs_viewer()
-        return
-
-    if mode == "Редактор профиля":
-        from gostforge.web.profile_editor import render_profile_editor
-
-        render_profile_editor()
-        return
-
-    if mode == "История":
-        from gostforge.web.history_viewer import render_history_viewer
-
-        render_history_viewer()
-        return
-
-    if mode == "Конструктор":
-        # Новый интерактивный редактор (Фаза 2). Старый _render_builder_mode
-        # с генерацией болванки по шаблону сохранён в этом модуле для
-        # обратной совместимости и доступен напрямую через
-        # ``_render_builder_mode()`` — кнопка «Загрузить шаблон» внутри
-        # интерактивного редактора покрывает тот же сценарий.
-        from gostforge.web.builder_editor import render_interactive_builder
-
-        render_interactive_builder()
-    else:
-        profile_id = _render_sidebar(profiles)
-        _render_main(profile_id)
+    # Группируем по смыслу — у пользователя сразу видна иерархия
+    # (workflow «обзор → действие → справка»).
+    pages = {
+        "Старт": [
+            st.Page(home_page.page, title="Главная", icon="🏠", url_path="home", default=True),
+        ],
+        "Работа с документом": [
+            st.Page(
+                normocontrol_page.page,
+                title="Нормоконтроль",
+                icon="🔍",
+                url_path="normocontrol",
+            ),
+            st.Page(builder_page.page, title="Конструктор", icon="🛠️", url_path="builder"),
+        ],
+        "Настройка": [
+            st.Page(
+                profile_editor_page.page,
+                title="Редактор профиля",
+                icon="⚙️",
+                url_path="profile-editor",
+            ),
+        ],
+        "Справка": [
+            st.Page(history_page.page, title="История", icon="📜", url_path="history"),
+            st.Page(docs_page.page, title="Документация", icon="📚", url_path="docs"),
+        ],
+    }
+    nav = st.navigation(pages)
+    nav.run()
 
 
 # Streamlit запускает файл как ``__main__``. При обычном ``import`` модуля
