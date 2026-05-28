@@ -52,7 +52,86 @@ YAML (например, кафедральный профиль, который 
 
     _render_installed_list()
     st.divider()
+    _render_community_registry()
+    st.divider()
     _render_install_from_file()
+
+
+def _render_community_registry() -> None:
+    """Маркетплейс community-профилей: список + установка одной кнопкой."""
+    from gostforge.profile import list_community_profiles, read_community_profile_yaml
+
+    st.subheader("Маркетплейс кафедральных профилей")
+    items = list_community_profiles()
+    if not items:
+        st.caption(
+            "В каталоге `profiles/community/` нет ни одного профиля "
+            "(пакет установлен без profiles-каталога или dirty install). "
+            "См. CLI: `gostforge profiles community list`."
+        )
+        return
+
+    st.caption(
+        f"Доступно {len(items)} образцов кафедральных профилей. Нажмите «Установить», "
+        "чтобы добавить в локальный реестр — после этого профиль появится "
+        "в Нормоконтроле / Конструкторе."
+    )
+
+    # Поиск.
+    query = (
+        st.text_input(
+            "Поиск по названию / описанию",
+            value="",
+            placeholder="часть названия или ID",
+            key="pm_community_search",
+        )
+        .strip()
+        .lower()
+    )
+
+    installed_ids = {c["id"] for c in list_installed_custom_profiles()}
+
+    filtered = items
+    if query:
+        filtered = [
+            it
+            for it in items
+            if query in it["id"].lower()
+            or query in it["name"].lower()
+            or query in it["description"].lower()
+        ]
+        if not filtered:
+            st.warning(f"Ничего не найдено по запросу «{query}»")
+            return
+
+    for entry in filtered:
+        with st.expander(
+            f"**{entry['name']}**  · `{entry['id']}` (v{entry['version']})",
+            expanded=False,
+        ):
+            if entry["extends"]:
+                st.caption(f"Наследует: `{entry['extends']}`")
+            if entry["description"]:
+                st.markdown(entry["description"])
+            already_installed = entry["id"] in installed_ids
+            cols = st.columns([1, 1, 4])
+            if cols[0].button(
+                "Установить" if not already_installed else "Переустановить",
+                key=f"pm_community_install_{entry['id']}",
+                type="primary" if not already_installed else "secondary",
+            ):
+                try:
+                    yaml_content = read_community_profile_yaml(entry["id"])
+                    saved_id = save_profile_to_registry(
+                        yaml_content,
+                        overwrite=already_installed,
+                    )
+                    st.success(f"Установлен профиль `{saved_id}`.")
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f"Не удалось установить: {exc}")
+            if already_installed:
+                cols[1].caption("✓ уже установлен")
 
 
 def _render_installed_list() -> None:

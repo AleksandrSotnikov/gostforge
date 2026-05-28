@@ -111,7 +111,6 @@ def test_process_file_with_progress_calls_callback(tmp_path: Any) -> None:
     """
     from gostforge.profile import load_profile
     from gostforge.web.app import _process_file, _process_file_with_progress
-
     from tests.conftest import make_docx
 
     docx = tmp_path / "x.docx"
@@ -134,7 +133,7 @@ def test_process_file_with_progress_calls_callback(tmp_path: Any) -> None:
     def cb(code: str, idx: int, total: int) -> None:
         calls.append((code, idx, total))
 
-    doc, violations = _process_file_with_progress(uploaded, profile, cb)
+    _, violations = _process_file_with_progress(uploaded, profile, cb)
     assert calls, "Должен быть хотя бы один вызов on_progress"
     # idx растёт; total одинаковый.
     indices = [c[1] for c in calls]

@@ -295,6 +295,61 @@ def _builtin_profiles_dir() -> Path:
     return Path(__file__).resolve().parents[3] / "profiles"
 
 
+def _community_profiles_dir() -> Path:
+    """Каталог community-профилей (маркетплейс кафедральных профилей).
+
+    Эти YAML-ы — иллюстративные образцы кафедральных профилей. Они
+    НЕ грузятся автоматически как builtin — пользователь устанавливает
+    их через ``gostforge profile install <id>`` или UI «Маркетплейс
+    профилей». После установки попадают в локальную SQLite-БД, дальше
+    работают как обычные custom-профили.
+    """
+    return _builtin_profiles_dir() / "community"
+
+
+def list_community_profiles() -> list[dict[str, str]]:
+    """Список доступных community-профилей с метаданными.
+
+    Возвращает [{id, name, version, description}], отсортированный по
+    id. Если каталога нет (например, пакет установлен без profiles/) —
+    возвращает []. Парсинг ошибок YAML тоже даёт [] для устойчивости
+    UI — отдельные битые файлы пропускаются, не валят список.
+    """
+    community_dir = _community_profiles_dir()
+    if not community_dir.is_dir():
+        return []
+    out: list[dict[str, str]] = []
+    for path in sorted(community_dir.glob("*.yaml")):
+        try:
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        out.append(
+            {
+                "id": str(data.get("id") or path.stem),
+                "name": str(data.get("name") or path.stem),
+                "version": str(data.get("version") or "?"),
+                "description": str(data.get("description") or "").strip(),
+                "extends": str(data.get("extends") or ""),
+            }
+        )
+    return out
+
+
+def read_community_profile_yaml(profile_id: str) -> str:
+    """Прочитать сырой YAML community-профиля по id.
+
+    Используется CLI/UI при установке профиля в локальный реестр.
+    Поднимает :class:`FileNotFoundError`, если профиля нет.
+    """
+    candidate = _community_profiles_dir() / f"{profile_id}.yaml"
+    if not candidate.is_file():
+        raise FileNotFoundError(f"Community profile '{profile_id}' не найден")
+    return candidate.read_text(encoding="utf-8")
+
+
 def load_profile(profile_id: str, search_paths: list[Path] | None = None) -> Profile:
     """Загрузить профиль по ID. Если есть `extends` — рекурсивно слить с родителем.
 

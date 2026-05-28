@@ -439,6 +439,87 @@ def profiles_install(path: Path, overwrite: bool) -> None:
     click.echo("\nИспользовать: gostforge check FILE.docx --profile " + rec.profile_id)
 
 
+@profiles.group("community")
+def profiles_community() -> None:
+    """Маркетплейс кафедральных профилей (community-registry).
+
+    YAML-профили в каталоге profiles/community/ — иллюстративные
+    образцы кафедральных профилей. Команды этой группы позволяют
+    просмотреть список и установить выбранный в локальный реестр.
+    """
+
+
+@profiles_community.command("list")
+def profiles_community_list() -> None:
+    """Показать доступные community-профили с описанием."""
+    from gostforge.profile import list_community_profiles
+
+    items = list_community_profiles()
+    if not items:
+        click.echo("В community-каталоге нет ни одного профиля.")
+        return
+    click.echo(click.style(f"Доступно профилей: {len(items)}\n", bold=True))
+    for entry in items:
+        click.echo(
+            click.style(entry["id"], fg="cyan", bold=True)
+            + f"  {entry['name']}  (v{entry['version']})"
+        )
+        if entry["extends"]:
+            click.echo(f"  → наследует: {entry['extends']}")
+        desc = entry["description"]
+        if desc:
+            # Первая строка описания — короткое summary.
+            first_line = desc.splitlines()[0].strip()
+            click.echo(f"  {first_line}")
+        click.echo("")
+    click.echo("Установить: gostforge profiles community install <id>")
+
+
+@profiles_community.command("install")
+@click.argument("profile_id")
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    help="Перезаписать, если профиль с таким id уже установлен.",
+)
+def profiles_community_install(profile_id: str, overwrite: bool) -> None:
+    """Установить community-профиль в локальный реестр по id."""
+    from gostforge.profile import read_community_profile_yaml
+
+    try:
+        yaml_content = read_community_profile_yaml(profile_id)
+    except FileNotFoundError as exc:
+        click.echo(click.style(f"Ошибка: {exc}", fg="red"), err=True)
+        click.echo("Список доступных: gostforge profiles community list", err=True)
+        sys.exit(2)
+
+    try:
+        from gostforge.db import get_connection, install_profile
+    except ImportError as exc:  # pragma: no cover
+        click.echo(f"Ошибка импорта модуля БД: {exc}", err=True)
+        sys.exit(2)
+
+    try:
+        with get_connection() as conn:
+            rec = install_profile(
+                conn,
+                yaml_content=yaml_content,
+                source=f"community:{profile_id}",
+                overwrite=overwrite,
+            )
+    except ValueError as exc:
+        click.echo(click.style(f"Ошибка: {exc}", fg="red"), err=True)
+        sys.exit(2)
+
+    click.echo(
+        click.style("Профиль установлен:", fg="green", bold=True)
+        + f" {rec.profile_id}  ({rec.name}, v{rec.version})"
+    )
+    click.echo(f"  Источник:    {rec.source}")
+    click.echo(f"  Установлен:  {rec.installed_at}")
+    click.echo("\nИспользовать: gostforge check FILE.docx --profile " + rec.profile_id)
+
+
 @profiles.command("uninstall")
 @click.argument("profile_id")
 def profiles_uninstall(profile_id: str) -> None:

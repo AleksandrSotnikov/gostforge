@@ -3,6 +3,60 @@
 > Хронология значимых изменений в проекте. Подробные планы развития —
 > [docs/roadmap.md](roadmap.md). Полная история — `git log`.
 
+## 2026-Q2 — маркетплейс кафедральных профилей + прогресс-бар UI
+
+### Маркетплейс кафедральных профилей (community-registry)
+
+Roadmap-задача «Публичный реестр кафедральных профилей» переведена
+в ✅ как локальный community-registry. YAML-профили в каталоге
+`profiles/community/` — иллюстративные образцы кафедральных
+профилей. Пользователь устанавливает выбранный в локальный реестр
+одной кнопкой / командой.
+
+**Структура:**
+- `profiles/community/*.yaml` — каталог образцов. Пока 2 примера:
+  `msu-vmk-coursework` (МГУ ВМК) и `spbstu-bachelor-thesis` (СПбПУ).
+- `profile.list_community_profiles()` — список с метаданными
+  (id, name, version, description, extends).
+- `profile.read_community_profile_yaml(id)` — сырой YAML по id.
+
+**CLI:**
+- `gostforge profiles community list` — показывает доступные
+  образцы с коротким описанием.
+- `gostforge profiles community install <id> [--overwrite]` —
+  устанавливает выбранный в локальную SQLite-БД (тот же механизм,
+  что у обычного `profiles install`).
+
+**UI:**
+- Новая секция «Маркетплейс кафедральных профилей» на странице
+  «Управление профилями». Поиск по названию/описанию + expander
+  с описанием + кнопка «Установить» / «Переустановить» (если
+  профиль уже в реестре).
+
+### Прогресс-бар проверки в UI
+
+После SSE-эндпоинта в API логично показать прогресс и в Streamlit-UI.
+На странице «Нормоконтроль» батч-проверка нескольких .docx теперь
+сопровождается `st.progress` с глобальным процентом завершения и
+текстом «[N/M] file.docx: F.01 (12/115)».
+
+**Реализация:**
+- `_process_file_with_progress(uploaded, profile, on_progress)` —
+  обёртка над `validate_iter()`, вызывает callback перед каждой
+  проверкой.
+- В `_render_main` цикл по файлам обёрнут `st.progress`; после
+  цикла `progress_bar.empty()` очищает виджет.
+- Семантика идентична синхронному `_process_file` — то же
+  количество violations, фильтр `disabled_checks` в финале.
+
+### Тесты — 8 новых
+- `tests/test_community_profiles.py` (7 новых): list, read, CLI
+  list/install + UI smoke.
+- `tests/test_web_smoke.py` (1 новый): callback `on_progress`
+  вызывается, violations совпадают с синхронным вариантом.
+
+Итог: **1836+ тестов**, **33 CLI-команды**, все четыре гейта чисты.
+
 ## 2026-Q2 — SSE-прогресс в REST API
 
 Roadmap-задача «WebSocket/SSE-уведомления в REST API (живой прогресс

@@ -1,0 +1,53 @@
+# Образец кафедрального профиля для бакалаврской ВКР СПбПУ.
+# Иллюстративный — реальные требования уточняйте у научного руководителя.
+
+id: spbstu-bachelor-thesis
+name: СПбПУ — ВКР бакалавра
+version: "1.0"
+extends: gost-7.32-2017
+description: |
+  Профиль для выпускных квалификационных работ бакалавра СПбПУ.
+  Расширяет базовый ГОСТ 7.32-2017:
+
+  - кегль 12 (вместо 14 у базового);
+  - минимум 30 источников в библиографии;
+  - обязательный реферат;
+  - усиленный контроль формата подписей: тире обязательно длинное,
+    точка в конце подписи не допускается.
+
+styles:
+  body:
+    size_pt: 12
+  table:
+    caption:
+      format: "Таблица {num} — {title}"
+  figure:
+    caption:
+      format: "Рисунок {num} — {title}"
+
+checks:
+  S.01:
+    enabled: true
+    severity: error
+    params:
+      required_headings:
+        - Реферат
+        - Введение
+        - Основная часть
+        - Заключение
+        - Список использованных источников
+  R.06:
+    enabled: true
+    severity: warning
+    params:
+      min_sources: 30
+  I.03:
+    enabled: true
+    severity: error
+    params:
+      allow_dot_after_number: false
+  B.03:
+    enabled: true
+    severity: error
+    params:
+      allow_dot_after_number: false
