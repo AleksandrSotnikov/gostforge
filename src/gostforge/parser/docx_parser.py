@@ -72,6 +72,16 @@ NSMAP = {"w": W_NS, "m": M_NS, "a": A_NS, "r": R_NS}
 # Шаблон номера формулы в скобках в конце текста параграфа: «(3)» или «(3.1)».
 _FORMULA_NUMBER_RE = re.compile(r"\((\d+(?:\.\d+)?)\)\s*$")
 
+# Маркер «Продолжение таблицы N» — генерируется нашим экспортёром при
+# TableStyleProfile.continuation_caption=True. При обратном чтении мы
+# его отфильтровываем, чтобы при следующем экспорте экспортёр сам
+# добавил его заново и не было «Продолжение таблицы N — Продолжение
+# таблицы N — ...» через round-trip.
+_RE_CONTINUATION_TABLE = re.compile(
+    r"^продолжение\s+таблицы\s+[\dА-Яа-я.]+",
+    re.IGNORECASE,
+)
+
 # Соответствие WD_ALIGN_PARAGRAPH → строковая литералка модели
 _ALIGN_MAP: dict[int, ParagraphAlignment] = {
     int(WD_ALIGN_PARAGRAPH.LEFT): "left",
@@ -1280,34 +1290,120 @@ def _extract_formula_number(dp: DocxParagraph) -> int | None:
 def _build_table(dtable: DocxTable, *, idx: int) -> Table:
     """Сконвертировать docx-таблицу в модель Table.
 
-    Headers — первый ряд cells; rows — остальные ряды. Каждая ячейка
-    хранится как list[InlineElement] из текста первого параграфа
-    ячейки (без атрибутов форматирования — Фаза 1).
+    Шапка определяется по `<w:tblHeader/>` (Word: «повторять как шапку»):
+    * последняя tblHeader-строка → ``Table.headers`` (столбцы);
+    * предшествующие tblHeader-строки → ``Table.extra_header_rows``
+      (для двух/трёх-уровневой шапки по ГОСТ Р 2.105);
+    * остальные → ``Table.rows``.
 
-    Заполняет ``merges: list[CellMerge]`` информацией об объединённых
-    ячейках: ``<w:vMerge>`` (вертикальное), ``<w:gridSpan>``
-    (горизонтальное). Координаты row/col 0-based от верха таблицы.
+    Если ни одна строка не помечена tblHeader (legacy-документ), первая
+    строка берётся как ``headers`` (как было раньше).
+
+    Авто-фильтр строки-маркера «Продолжение таблицы N» (генерируется
+    нашим же экспортёром при `continuation_caption=True`) — она не нужна
+    в модели, потому что при следующем экспорте экспортёр сам её
+    добавит обратно.
+
+    Каждая ячейка — list[InlineElement] из текста первого параграфа
+    (без атрибутов форматирования). Заполняет ``merges`` информацией об
+    `<w:vMerge>` / `<w:gridSpan>`. Координаты row/col 0-based от
+    `extra_header_rows + headers + rows`.
     """
     from gostforge.model import CellMerge
 
     rows_raw = list(dtable.rows)
+    if not rows_raw:
+        return Table(id=f"t-{idx}", caption=[], headers=[], rows=[], merges=[])
+
+    # Идентифицируем «Продолжение таблицы N»-строки (по содержимому
+    # первой ячейки) и пометки `<w:tblHeader/>`.
+    is_continuation: list[bool] = []
+    is_header_marked: list[bool] = []
+    for row in rows_raw:
+        cells = list(row.cells)
+        first_text = cells[0].text.strip() if cells else ""
+        is_continuation.append(bool(_RE_CONTINUATION_TABLE.match(first_text)))
+        is_header_marked.append(_row_has_tblheader(row))
+
+    # Отфильтруем continuation-строки целиком — они синтезируются на экспорте.
+    keep_indices = [i for i, cont in enumerate(is_continuation) if not cont]
+
+    # Среди оставшихся определим, какие являются шапкой.
+    header_indices: list[int] = []
+    if any(is_header_marked):
+        header_indices = [i for i in keep_indices if is_header_marked[i]]
+    else:
+        # Legacy: нет tblHeader-маркеров → первая строка считается шапкой.
+        if keep_indices:
+            header_indices = [keep_indices[0]]
+
+    extra_header_rows: list[list[list[InlineElement]]] = []
     headers: list[list[InlineElement]] = []
     body_rows: list[list[list[InlineElement]]] = []
-    merges: list[CellMerge] = []
 
-    if rows_raw:
-        headers = [_cell_inline(cell) for cell in rows_raw[0].cells]
-        for row in rows_raw[1:]:
-            body_rows.append([_cell_inline(cell) for cell in row.cells])
-        merges = _extract_cell_merges(rows_raw)
+    if header_indices:
+        # Последняя tblHeader-строка → headers; ранее идущие → extra_header_rows.
+        main_header_idx = header_indices[-1]
+        for i in header_indices[:-1]:
+            extra_header_rows.append([_cell_inline(c) for c in rows_raw[i].cells])
+        headers = [_cell_inline(c) for c in rows_raw[main_header_idx].cells]
+        body_start_pos = keep_indices.index(main_header_idx) + 1
+    else:
+        body_start_pos = 0
+
+    for i in keep_indices[body_start_pos:]:
+        body_rows.append([_cell_inline(c) for c in rows_raw[i].cells])
+
+    # Координаты merges считаем в исходных индексах, но потом сдвигаем
+    # с учётом удалённых continuation-строк и переупорядочивания.
+    raw_merges = _extract_cell_merges(rows_raw)
+    # Маппинг: исходный индекс ряда → новый индекс в (extra + headers + rows).
+    new_index: dict[int, int] = {}
+    n = 0
+    for i in header_indices[:-1] if header_indices else []:
+        new_index[i] = n
+        n += 1
+    if header_indices:
+        new_index[header_indices[-1]] = n
+        n += 1
+    for i in keep_indices[body_start_pos:]:
+        new_index[i] = n
+        n += 1
+    merges: list[CellMerge] = []
+    for m in raw_merges:
+        if m.row in new_index:
+            merges.append(
+                CellMerge(
+                    row=new_index[m.row],
+                    col=m.col,
+                    rowspan=m.rowspan,
+                    colspan=m.colspan,
+                )
+            )
 
     return Table(
         id=f"t-{idx}",
         caption=[],
         headers=headers,
+        extra_header_rows=extra_header_rows,
         rows=body_rows,
         merges=merges,
     )
+
+
+def _row_has_tblheader(docx_row: Any) -> bool:
+    """True, если в `<w:trPr>` строки есть `<w:tblHeader/>`.
+
+    Word ставит этот атрибут на строки, которые помечены как «повторять
+    при переносе на новую страницу» (через UI или через наш экспортёр).
+    """
+    tr = getattr(docx_row, "_tr", None)
+    if tr is None:
+        return False
+    trPr = tr.find(f"{{{W_NS}}}trPr")
+    if trPr is None:
+        return False
+    return trPr.find(f"{{{W_NS}}}tblHeader") is not None
 
 
 def _extract_cell_merges(rows_raw: list[Any]) -> list[Any]:

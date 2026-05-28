@@ -95,6 +95,103 @@ def test_auto_merges_handles_no_merges_needed() -> None:
     assert _auto_merges_from_extra_header_rows([["A", "B", "C"]]) == []
 
 
+def test_multi_header_roundtrip_preserves_extra_rows(tmp_path: Path) -> None:
+    """Round-trip: экспортируем → парсим обратно, multi-header сохраняется.
+
+    Парсер ориентируется на `<w:tblHeader/>`, который ставит экспортёр
+    на каждой строке шапки.
+    """
+    pytest.importorskip("docx")
+    from gostforge.parser import parse_docx
+
+    table = Table(
+        id="t1",
+        caption=[TextRun(text="Таблица 1 — Тест")],
+        extra_header_rows=[
+            [
+                [TextRun(text="Группа 1")],
+                [TextRun(text="")],
+                [TextRun(text="Группа 2")],
+                [TextRun(text="")],
+            ]
+        ],
+        headers=[
+            [TextRun(text="A")],
+            [TextRun(text="B")],
+            [TextRun(text="C")],
+            [TextRun(text="D")],
+        ],
+        rows=[
+            [
+                [TextRun(text="1")],
+                [TextRun(text="2")],
+                [TextRun(text="3")],
+                [TextRun(text="4")],
+            ]
+        ],
+        merges=[
+            CellMerge(row=0, col=0, rowspan=1, colspan=2),
+            CellMerge(row=0, col=2, rowspan=1, colspan=2),
+        ],
+        number=1,
+    )
+    sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
+    doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
+    out = tmp_path / "rt.docx"
+    export_docx(doc, load_profile("gost-7.32-2017"), out)
+
+    reparsed = parse_docx(out)
+    parsed_tables = [
+        b
+        for ps in reparsed.page_sections
+        for s in ps.content
+        if isinstance(s, LogicalSection)
+        for b in s.children
+        if isinstance(b, Table)
+    ]
+    assert parsed_tables, "должна остаться одна таблица после round-trip"
+    t = parsed_tables[0]
+    # extra_header_rows должен содержать одну строку (верхнюю «Группа 1 / Группа 2»).
+    assert len(t.extra_header_rows) == 1
+    assert len(t.headers) == 4  # «A B C D»
+    assert len(t.rows) == 1  # одна строка данных
+
+
+def test_parser_skips_continuation_table_row(tmp_path: Path) -> None:
+    """Строка «Продолжение таблицы N» парсится обратно как маркер и в модель не попадает."""
+    pytest.importorskip("docx")
+    from gostforge.parser import parse_docx
+
+    table = Table(
+        id="t1",
+        caption=[TextRun(text="Таблица 1 — Тест")],
+        headers=[[TextRun(text="A")], [TextRun(text="B")]],
+        rows=[[[TextRun(text="1")], [TextRun(text="2")]]],
+        number=1,
+    )
+    sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
+    doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
+    out = tmp_path / "cont.docx"
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = True
+    export_docx(doc, profile, out)
+
+    reparsed = parse_docx(out)
+    parsed_tables = [
+        b
+        for ps in reparsed.page_sections
+        for s in ps.content
+        if isinstance(s, LogicalSection)
+        for b in s.children
+        if isinstance(b, Table)
+    ]
+    t = parsed_tables[0]
+    # Continuation-строка отфильтрована — в модели только обычная шапка + данные.
+    assert t.extra_header_rows == []
+    assert len(t.headers) == 2
+    assert len(t.rows) == 1
+
+
 def test_multi_header_back_compat_no_extra_rows(tmp_path: Path) -> None:
     """Таблица БЕЗ `extra_header_rows` ведёт себя как и раньше (одноуровневая шапка)."""
     pytest.importorskip("docx")
