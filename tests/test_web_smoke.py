@@ -103,3 +103,45 @@ def test_ui_command_invokes_streamlit_run(monkeypatch: pytest.MonkeyPatch) -> No
     assert cmd[cmd.index("--theme.primaryColor") + 1] == "#2F5496"
     assert "--theme.font" in cmd
     assert cmd[cmd.index("--theme.font") + 1] == "serif"
+
+
+def test_process_file_with_progress_calls_callback(tmp_path: Any) -> None:
+    """`_process_file_with_progress` зовёт on_progress(code, idx, total)
+    хотя бы раз и возвращает violations идентичные обычному `_process_file`.
+    """
+    from gostforge.profile import load_profile
+    from gostforge.web.app import _process_file, _process_file_with_progress
+
+    from tests.conftest import make_docx
+
+    docx = tmp_path / "x.docx"
+    make_docx(docx, paragraphs=["Параграф один."])
+
+    class _Uploaded:
+        name = "x.docx"
+
+        def __init__(self, p):
+            self._data = p.read_bytes()
+
+        def getvalue(self) -> bytes:
+            return self._data
+
+    uploaded = _Uploaded(docx)
+    profile = load_profile("gost-7.32-2017")
+
+    calls: list[tuple[str, int, int]] = []
+
+    def cb(code: str, idx: int, total: int) -> None:
+        calls.append((code, idx, total))
+
+    doc, violations = _process_file_with_progress(uploaded, profile, cb)
+    assert calls, "Должен быть хотя бы один вызов on_progress"
+    # idx растёт; total одинаковый.
+    indices = [c[1] for c in calls]
+    assert indices == sorted(indices)
+    totals = {c[2] for c in calls}
+    assert len(totals) == 1, "total должен быть константой между вызовами"
+
+    # violations такие же, как у синхронного варианта.
+    _, violations_sync = _process_file(_Uploaded(docx), profile)
+    assert len(violations) == len(violations_sync)

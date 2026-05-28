@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import tempfile
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,7 +43,7 @@ from gostforge.pdf_exporter import LibreOfficeNotFoundError, convert_to_pdf
 from gostforge.profile import list_profiles, load_profile
 from gostforge.stats import compute_stats
 from gostforge.validator import Violation, validate
-from gostforge.validator.engine import registered_checks
+from gostforge.validator.engine import registered_checks, validate_iter
 
 if TYPE_CHECKING:
     from gostforge.model import Document
@@ -93,6 +94,33 @@ def _process_file(uploaded_file: Any, profile: Profile) -> tuple[Document, list[
         tmp_path = Path(tmp.name)
     document = parse_docx(tmp_path)
     return document, validate(document, profile)
+
+
+def _process_file_with_progress(
+    uploaded_file: Any,
+    profile: Profile,
+    on_progress: Callable[[str, int, int], None] | None = None,
+) -> tuple[Document, list[Violation]]:
+    """Аналог `_process_file`, но вызывает ``on_progress(code, index, total)``
+    перед каждой проверкой.
+
+    ``on_progress`` — опциональный коллбэк для прогресс-бара UI. Семантика
+    идентична :func:`_process_file`; разница только в callback-уведомлениях.
+    Если ``on_progress`` — None, эквивалентно `_process_file`.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+        tmp.write(uploaded_file.getvalue())
+        tmp_path = Path(tmp.name)
+    document = parse_docx(tmp_path)
+    violations: list[Violation] = []
+    for evt in validate_iter(document, profile):
+        if evt[0] == "check":
+            if on_progress is not None:
+                _, code, idx, total = evt
+                on_progress(code, idx, total)
+        elif evt[0] == "done":
+            violations = evt[1]
+    return document, violations
 
 
 def _build_fixed_docx_bytes(document: Document, profile: Profile) -> tuple[bytes, list[FixApplied]]:
@@ -405,15 +433,30 @@ def _render_main(profile_id: str) -> None:
     results: dict[str, list[Violation]] = {}
     uploads: dict[str, Any] = {}
 
-    for uf in uploaded:
+    total_files = len(uploaded)
+    progress_bar = st.progress(0.0, text="Подготовка…")
+    for fi, uf in enumerate(uploaded):
+
+        def _on_progress(
+            code: str, idx: int, total: int, _fi: int = fi, _name: str = uf.name
+        ) -> None:
+            # Глобальный прогресс: завершённые файлы + текущий внутри файла.
+            per_file = (idx + 1) / max(total, 1)
+            global_frac = (_fi + per_file) / total_files
+            progress_bar.progress(
+                min(global_frac, 1.0),
+                text=f"[{_fi + 1}/{total_files}] {_name}: {code} ({idx + 1}/{total})",
+            )
+
         try:
-            document, violations = _process_file(uf, prof)
+            document, violations = _process_file_with_progress(uf, prof, _on_progress)
         except Exception as e:
             st.error(f"Не удалось обработать «{uf.name}»: {e}")
             continue
         documents[uf.name] = document
         results[uf.name] = violations
         uploads[uf.name] = uf
+    progress_bar.empty()
 
     if not results:
         return
