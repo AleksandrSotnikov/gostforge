@@ -3,6 +3,50 @@
 > Хронология значимых изменений в проекте. Подробные планы развития —
 > [docs/roadmap.md](roadmap.md). Полная история — `git log`.
 
+## 2026-Q2 — SSE-прогресс в REST API
+
+Roadmap-задача «WebSocket/SSE-уведомления в REST API (живой прогресс
+длинной проверки)» переведена в ✅. Реализована через
+Server-Sent Events (SSE) — проще WebSocket-а (HTTP, однонаправленно),
+достаточно для прогресс-бара.
+
+### Новый endpoint
+- **`POST /check/stream`** — потоковая версия `/check`. Mime:
+  `text/event-stream`. Заголовки против буферизации в reverse-proxy
+  (`Cache-Control: no-cache`, `X-Accel-Buffering: no`).
+- События в потоке:
+  - `parse` — начали парсить .docx.
+  - `check` — `{code, index, total}` перед запуском очередной
+    проверки; клиент использует для процент-бара.
+  - `done` — `{profile_id, violations, summary}`; гарантированно
+    последнее событие.
+  - `error` — фатальная ошибка парсинга.
+
+### Реализация
+- **Engine**: `validator.engine.validate_iter(document, profile)` —
+  generator-вариант `validate`, yields `("check", code, index, total)`
+  по очереди и `("done", violations)` в конце. Фильтр
+  `disabled_checks` применяется в финале — семантика идентична
+  `validate`.
+- **API**: `_sse_event(name, payload)` хелпер формирует SSE-фрейм
+  `event: <name>\\ndata: <json>\\n\\n`.
+- **Submission в БД не пишется** — стрим рассчитан на интерактивные
+  UI с прогресс-баром, а не на запись в историю. Для записи в
+  историю используется обычный `/check`.
+
+### Тесты — 6 новых
+- `tests/test_api.py`: 5 SSE-тестов (happy path, прогресс-метаданные
+  в check-событиях, summary в done, отказ на не-.docx, 404 на
+  неизвестный профиль) + 1 unit на `validate_iter`.
+- `_parse_sse_stream(text)` — хелпер парсинга SSE-потока (event +
+  json payload).
+
+### Документация
+- `docs/api.md` §4.1.1: пример `curl -N` и JavaScript-клиент с
+  чтением `ReadableStream` через `getReader()`.
+
+Итог: **1828+ тестов**, все четыре гейта чисты.
+
 ## 2026-Q2 — drag-and-drop разделов и блоков
 
 Roadmap-задача «Drag-and-drop порядка разделов и блоков» закрыта
