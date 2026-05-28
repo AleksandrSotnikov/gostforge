@@ -6,8 +6,9 @@
 ## Текущее состояние
 
 **115 проверок** в 16 категориях · **28 автофиксеров** · **31 CLI-команда** ·
-**6 режимов веб-UI** · **REST API на FastAPI** · **локальная SQLite-БД** ·
-**1781+ тестов** (`ruff check`, `ruff format`, `mypy --strict` чисты).
+**10 страниц веб-UI** (multi-page `st.navigation`) · **REST API на FastAPI** ·
+**локальная SQLite-БД** · **1791+ тестов**
+(`ruff check`, `ruff format`, `mypy --strict` чисты).
 
 Что уже работает «из коробки» — см. [README.md](../README.md#статус).
 
