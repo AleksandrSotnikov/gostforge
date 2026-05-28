@@ -1463,6 +1463,136 @@ def _opt_float(value: Any) -> float | None:
         return None
 
 
+# --- HTML ↔ runs (для WYSIWYG-режима через Quill) ------------------------
+
+
+def _runs_to_html(runs: list[dict[str, Any]]) -> str:
+    """Сконвертировать список text-run-ов в HTML для Quill-редактора.
+
+    Поддерживает bold / italic / underline. Не-текстовые run-ы
+    (formula / xref / citation) пропускаются — WYSIWYG-режим рассчитан
+    только на параграф без них; UI это гарантирует через toggle gate.
+
+    Возвращает HTML-фрагмент. Пустой вход → пустая строка (Quill
+    отобразит placeholder).
+    """
+    import html as _html
+
+    parts: list[str] = []
+    for run in runs:
+        if run.get("kind") != "text":
+            continue
+        text = str(run.get("text") or "")
+        if not text:
+            continue
+        # Перевод строки → отдельный параграф для Quill.
+        chunks = text.split("\n")
+        for i, chunk in enumerate(chunks):
+            inner = _html.escape(chunk)
+            if run.get("bold"):
+                inner = f"<strong>{inner}</strong>"
+            if run.get("italic"):
+                inner = f"<em>{inner}</em>"
+            if run.get("underline"):
+                inner = f"<u>{inner}</u>"
+            if i > 0:
+                parts.append("<br>")
+            parts.append(inner)
+    if not parts:
+        return ""
+    return f"<p>{''.join(parts)}</p>"
+
+
+def _html_to_runs(value: str) -> list[dict[str, Any]]:
+    """Сконвертировать HTML из Quill обратно в список text-run-ов.
+
+    Стратегия — итерация через :class:`html.parser.HTMLParser` с учётом
+    вложенности bold/italic/underline тегов. Между ``<p>``-блоками
+    вставляется ``\\n``; ``<br>`` тоже даёт ``\\n``. Смежные run-ы с
+    идентичным форматом склеиваются — это важно, иначе Quill после
+    нескольких правок генерирует фрагментированный HTML и в state
+    окажется много мелких run-ов.
+
+    Поддерживаемые теги: ``<b>``/``<strong>`` → bold; ``<i>``/``<em>``
+    → italic; ``<u>`` → underline. Прочие игнорируются (содержимое всё
+    равно проходит через handle_data как plain text).
+    """
+    from html.parser import HTMLParser
+
+    class _Parser(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=True)
+            self.runs: list[dict[str, Any]] = []
+            self._bold = 0
+            self._italic = 0
+            self._underline = 0
+            self._seen_paragraph = False
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            if tag in ("b", "strong"):
+                self._bold += 1
+            elif tag in ("i", "em"):
+                self._italic += 1
+            elif tag == "u":
+                self._underline += 1
+            elif tag == "p":
+                # Между параграфами вставляем \n; первый paragraph — без.
+                if self._seen_paragraph:
+                    self._append("\n")
+                self._seen_paragraph = True
+            elif tag == "br":
+                self._append("\n")
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag in ("b", "strong") and self._bold > 0:
+                self._bold -= 1
+            elif tag in ("i", "em") and self._italic > 0:
+                self._italic -= 1
+            elif tag == "u" and self._underline > 0:
+                self._underline -= 1
+
+        def handle_data(self, data: str) -> None:
+            if data:
+                self._append(data)
+
+        def _append(self, text: str) -> None:
+            run: dict[str, Any] = {"kind": "text", "text": text}
+            if self._bold:
+                run["bold"] = True
+            if self._italic:
+                run["italic"] = True
+            if self._underline:
+                run["underline"] = True
+            if self.runs:
+                last = self.runs[-1]
+                if (
+                    last.get("kind") == "text"
+                    and last.get("bold", False) == run.get("bold", False)
+                    and last.get("italic", False) == run.get("italic", False)
+                    and last.get("underline", False) == run.get("underline", False)
+                ):
+                    last["text"] = last["text"] + text
+                    return
+            self.runs.append(run)
+
+    parser = _Parser()
+    parser.feed(value or "")
+    # Убираем пустые «хвостовые» run-ы (Quill часто оставляет «\n» в конце).
+    while parser.runs and not parser.runs[-1].get("text"):
+        parser.runs.pop()
+    # Убираем хвостовые «\n» в последнем run-е (Quill часто оставляет
+    # пустые `<p><br></p>` в конце, что плодит мусор при rerun-ах).
+    if parser.runs:
+        last_run = parser.runs[-1]
+        last_text = str(last_run.get("text", ""))
+        stripped = last_text.rstrip("\n")
+        if stripped != last_text:
+            last_run["text"] = stripped
+            if not stripped:
+                parser.runs.pop()
+    return parser.runs
+
+
 def _runs_from_inline(content: list[Any]) -> list[dict[str, Any]]:
     """Сериализовать Paragraph.content в список run-dict для state."""
     return [_inline_to_run_dict(el) for el in content if el is not None]
@@ -3971,6 +4101,66 @@ def _block_label(block: dict[str, Any]) -> str:
     return f"Блок: {kind}"
 
 
+def _render_paragraph_wysiwyg_editor(
+    block: dict[str, Any],
+    runs: list[dict[str, Any]],
+    *,
+    base: str,
+) -> bool:
+    """Отрисовать WYSIWYG-редактор параграфа через streamlit-quill.
+
+    Возвращает ``True``, если WYSIWYG-режим активен и редактор уже
+    отрисован (вызывающий должен пропустить старый per-run рендер).
+    ``False`` — режим выключен пользователем или streamlit-quill
+    недоступен, нужно идти классическим путём.
+
+    Toggle хранится в state по ключу ``wysiwyg_<base>`` — выключен по
+    умолчанию, потому что это β-фича. На каждое изменение HTML
+    конвертируется в text-run-ы и сохраняется в ``block["runs"]``.
+    """
+    toggle_key = f"{base}_wysiwyg_toggle"
+    enabled = st.toggle(
+        "WYSIWYG-режим (β)",
+        value=bool(st.session_state.get(toggle_key, False)),
+        key=toggle_key,
+        help=(
+            "Включить визуальное форматирование текста (bold / italic / "
+            "underline) через панель Quill. Формулы / ссылки / цитаты "
+            "в WYSIWYG не поддерживаются — выключите toggle, если они "
+            "вам нужны в этом параграфе."
+        ),
+    )
+    if not enabled:
+        return False
+
+    try:
+        from streamlit_quill import st_quill  # type: ignore[import-untyped]
+    except ImportError:
+        st.warning(
+            "Модуль `streamlit-quill` не установлен. Установите "
+            "`gostforge[ui]` или `pip install streamlit-quill`, "
+            "либо снимите toggle «WYSIWYG-режим»."
+        )
+        return False
+
+    initial_html = _runs_to_html(runs)
+    new_html = st_quill(
+        value=initial_html,
+        placeholder="Введите текст параграфа…",
+        html=True,
+        toolbar=[["bold", "italic", "underline"], ["clean"]],
+        key=f"{base}_quill",
+    )
+    if isinstance(new_html, str) and new_html != initial_html:
+        # Сохраняем стабильные id у уцелевших run-ов: матчинг по
+        # порядку — Quill не выдаёт «идентичность» текста после
+        # форматирования, так что переноса id точечно нет смысла.
+        # Для UI достаточно, что block["runs"] заменяется новым
+        # списком и Streamlit перерисовывает виджеты по новым ключам.
+        block["runs"] = _html_to_runs(new_html)
+    return True
+
+
 def _render_paragraph_inline_editor(block: dict[str, Any], *, base: str) -> None:
     """Inline-редактор параграфа: список run-ов + панель добавления (Фаза 2.5).
 
@@ -3981,11 +4171,20 @@ def _render_paragraph_inline_editor(block: dict[str, Any], *, base: str) -> None
 
     Внизу — четыре кнопки добавления: + Текст, + Формула, + Ссылка,
     + Цитата. Каждая добавляет stub-run и триггерит rerun.
+
+    Опциональный WYSIWYG-режим (β): toggle переключает редактор на
+    встроенный Quill — пользователь печатает и форматирует мышкой /
+    Ctrl+B/I/U. Доступен только если все элементы — text-run (формулы
+    / ссылки / цитаты в Quill не поддерживаются).
     """
     # Гарантируем что block в формате runs (нормализация на месте).
     _normalize_paragraph_state(block)
     runs: list[dict[str, Any]] = block.setdefault("runs", [])
     state = _get_state()
+
+    only_text = all(r.get("kind", "text") == "text" for r in runs)
+    if only_text and _render_paragraph_wysiwyg_editor(block, runs, base=base):
+        return
 
     if not runs:
         st.caption("Параграф пуст — добавьте элементы кнопками ниже.")

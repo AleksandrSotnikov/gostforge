@@ -3,6 +3,40 @@
 > Хронология значимых изменений в проекте. Подробные планы развития —
 > [docs/roadmap.md](roadmap.md). Полная история — `git log`.
 
+## 2026-Q2 — WYSIWYG-режим для параграфа (β)
+
+Roadmap-задача «Inline-WYSIWYG для параграфа (требует
+streamlit-quill)» переведена в ✅. У параграфа появился toggle
+«WYSIWYG-режим (β)» — переключает per-run редактор на встроенный
+Quill: пользователь печатает в реальном rich-text-поле, форматирует
+через панель (B / I / U) или Ctrl+B/I/U, видит результат «как
+в Word».
+
+### Реализация
+- **`_runs_to_html(runs)`** — text-run-ы сериализуются в `<p>`-блок
+  с `<strong>` / `<em>` / `<u>`. Не-текстовые элементы (формулы /
+  xref / citation) пропускаются — WYSIWYG-режим рассчитан на чисто
+  текстовый параграф.
+- **`_html_to_runs(html)`** — Quill HTML парсится через
+  `html.parser.HTMLParser`. Стек bold / italic / underline учитывает
+  вложенность; смежные run-ы с идентичным форматом склеиваются;
+  хвостовой `<br>` от Quill стрипается.
+- **UI**: новый toggle «WYSIWYG-режим (β)» в
+  `_render_paragraph_inline_editor`. Доступен только если все
+  элементы — text (формулы / ссылки / цитаты не поддерживаются).
+  По умолчанию выключен — β-фича, классический per-run редактор
+  остаётся стандартом.
+- **Зависимости**: `streamlit-quill>=0.0.3` добавлен в `[ui]`-extra.
+  При его отсутствии toggle деградирует с warning.
+
+### Тесты — 13 новых (`tests/test_web_wysiwyg.py`)
+- Конвертеры HTML↔runs (без Streamlit) — 12 unit-тестов:
+  bold/italic/underline, escape, `<br>`, multi-paragraph, склейка,
+  trailing-newline strip, round-trip, пропуск не-текстовых run-ов.
+- UI-смок (через AppTest) — toggle отображается на параграфе.
+
+Итог: **1812+ тестов**, все четыре гейта чисты.
+
 ## 2026-Q2 — per-section override схемы нумерации
 
 Roadmap-задача «Per-section override схемы нумерации рисунков/таблиц»
