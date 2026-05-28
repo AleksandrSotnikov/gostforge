@@ -2020,11 +2020,16 @@ def _render_sidebar_metadata() -> None:
 
     work_types = list(_WORK_TYPE_LABELS.keys())
     current_wt = state.get("work_type", "coursework")
+    # ВАЖНО: явный стабильный `key=` обязателен для multi-page Streamlit.
+    # Без него виджеты получают разные авто-id на каждой подстранице
+    # навигации, теряют состояние и сбрасываются к `index`. Поэтому
+    # после клика «Содержимое → Структура» казалось, что выбор сбрасывается.
     state["work_type"] = st.sidebar.selectbox(
         "Вид работы",
         options=work_types,
         index=work_types.index(current_wt) if current_wt in work_types else 0,
         format_func=lambda key: _WORK_TYPE_LABELS[key],
+        key="builder_meta_work_type",
     )
 
     profiles = list_profiles()
@@ -2034,6 +2039,7 @@ def _render_sidebar_metadata() -> None:
         options=profiles,
         index=(profiles.index(current_profile) if current_profile in profiles else 0),
         help="Профиль определяет, какие проверки нормоконтроля будут запущены.",
+        key="builder_meta_profile_id",
     )
 
     _render_style_overrides_section(state)
@@ -3490,6 +3496,17 @@ def _apply_autofixes_to_state() -> None:
         profile = load_profile(profile_id)
         applied = run_fix(document, profile)
         new_state = document_to_state(document)
+        # Картинки: parse_docx ставит `image_path = "embedded:rIdN"`,
+        # ссылающийся на ВРЕМЕННЫЙ .docx, который мы тут же удаляем.
+        # Без этого шага после автофикса картинки терялись. Зеркалим
+        # логику импорта .docx через UI: извлекаем media и вшиваем
+        # data-URI в state.
+        import time
+
+        images_dir = Path.home() / ".gostforge" / "autofix" / f"after-{int(time.time())}"
+        rid_to_path = extract_embedded_images(tmp_path, images_dir)
+        if rid_to_path:
+            embed_images_as_data_uri_in_state(new_state, rid_to_path)
     except Exception as exc:
         st.error(f"Не удалось применить автофиксы: {exc}")
         return

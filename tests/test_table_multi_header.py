@@ -55,7 +55,11 @@ def test_multi_header_writes_extra_rows_before_main_header(tmp_path: Path) -> No
     sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
     doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
     out = tmp_path / "multi_header.docx"
-    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    # Отключаем continuation_caption — это поведение тестируется отдельно
+    # в test_table_continuation.py. Здесь смотрим только extra_header_rows.
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = False
+    export_docx(doc, profile, out)
     raw = DocxDocument(str(out))
     t = raw.tables[0]
     # 1 extra + 1 main header + 1 data = 3 строки.
@@ -138,7 +142,11 @@ def test_multi_header_roundtrip_preserves_extra_rows(tmp_path: Path) -> None:
     sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
     doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
     out = tmp_path / "rt.docx"
-    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    # Отключаем continuation_caption — round-trip тест на extra_header_rows,
+    # continuation проверяется отдельно.
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = False
+    export_docx(doc, profile, out)
 
     reparsed = parse_docx(out)
     parsed_tables = [
@@ -205,7 +213,10 @@ def test_multi_header_back_compat_no_extra_rows(tmp_path: Path) -> None:
     sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
     doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
     out = tmp_path / "single_header.docx"
-    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    # Отключаем continuation_caption — тест проверяет одноуровневую шапку.
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = False
+    export_docx(doc, profile, out)
     raw = DocxDocument(str(out))
     t = raw.tables[0]
     # 1 шапка + 1 данные.
