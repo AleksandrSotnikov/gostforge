@@ -317,3 +317,95 @@ def test_profile_manager_page_has_help_block() -> None:
     assert any("Что доступно" in lbl for lbl in expander_labels), (
         f"Help-блок не найден; expanders: {expander_labels}"
     )
+
+
+def test_table_block_uses_visual_data_editor_by_default() -> None:
+    """Табличный блок открывается в визуальном режиме (st.data_editor).
+
+    Roadmap Q2/2026: «Визуальный табличный редактор (вместо
+    `|`-separated text)». Регресс на случай, если кто-то откатит
+    data_editor обратно на text_area.
+    """
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.pages.builder.content import page\npage()\n")
+    at.session_state["builder_state"] = {
+        "title": "Тест",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава",
+                "blocks": [
+                    {
+                        "kind": "table",
+                        "headers": ["Параметр", "Значение"],
+                        "rows": [["скорость", "10"], ["масса", "5"]],
+                        "caption": "Параметры",
+                    }
+                ],
+                "subsections": [],
+            }
+        ],
+        "active_section_index": 0,
+    }
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    # st.data_editor виден в AppTest как at.dataframe (читает обе ветки
+    # streamlit). Если его нет — редактор откатился на текстовый.
+    has_data_editor = (
+        len(getattr(at, "data_editor", [])) > 0 or len(getattr(at, "dataframe", [])) > 0
+    )
+    assert has_data_editor, "Визуальный data_editor не отрисован для табличного блока"
+    # Toggle для сырого режима тоже должен быть.
+    toggle_labels = [t.label for t in getattr(at, "toggle", [])]
+    assert any("Сырой текстовый режим" in lbl for lbl in toggle_labels), (
+        f"Toggle «Сырой текстовый режим» не найден; toggles: {toggle_labels}"
+    )
+
+
+def test_table_block_raw_mode_keeps_text_area() -> None:
+    """Когда раw-toggle включён, появляется text_area с pipe-separated строками."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.pages.builder.content import page\npage()\n")
+    at.session_state["builder_state"] = {
+        "title": "Тест",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава",
+                "blocks": [
+                    {
+                        "kind": "table",
+                        "headers": ["A", "B"],
+                        "rows": [["1", "2"]],
+                        "caption": "",
+                    }
+                ],
+                "subsections": [],
+            }
+        ],
+        "active_section_index": 0,
+    }
+    at.run(timeout=60)
+    # Включаем raw-toggle и проверяем, что появился text_area.
+    toggles = getattr(at, "toggle", [])
+    raw_toggles = [t for t in toggles if "Сырой текстовый режим" in t.label]
+    assert raw_toggles, "Toggle «Сырой текстовый режим» не найден"
+    raw_toggles[0].set_value(True)
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    text_area_labels = [ta.label for ta in at.text_area]
+    assert any("Строки таблицы" in lbl for lbl in text_area_labels), (
+        f"Сырой text_area для строк не найден; text_area: {text_area_labels}"
+    )

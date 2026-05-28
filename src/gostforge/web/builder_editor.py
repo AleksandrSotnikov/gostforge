@@ -4208,6 +4208,170 @@ def _render_move_block_to_section_panel(section: dict[str, Any], sec_idx: int) -
             st.rerun()
 
 
+def _render_table_block_editor(block: dict[str, Any], *, base: str) -> None:
+    """Визуальный редактор табличного блока.
+
+    Главная зона редактирования — ``st.data_editor`` с
+    ``num_rows="dynamic"``: ячейки правятся inline, строки добавляются
+    через «+»-кнопку snapshot-а внизу, можно вставить блок из Excel /
+    LibreOffice через Ctrl+V. По умолчанию открывается именно этот
+    режим — он стал стандартом UI после roadmap Q2/2026.
+
+    Шапка (``headers``) остаётся как простой ``text_input`` через
+    запятую — таблицы редко имеют 10+ колонок, и для 2-5 это
+    компактнее. Доп. шапка (``extra_header_rows`` для многоуровневой)
+    тоже остаётся текстовой, потому что в ней нужна склейка ячеек
+    через пустые места — это сложно выразить в data_editor.
+
+    Toggle «Сырой текстовый режим» — fallback для опытных
+    пользователей, которые хотят paste-нуть pipe-separated блок.
+    """
+    headers_str = ",".join(block.get("headers") or [])
+    new_headers = st.text_input(
+        "Заголовки колонок (через запятую)",
+        value=headers_str,
+        key=f"{base}_headers",
+        help=(
+            "Пример: «Параметр, Значение, Единица». Запятая внутри названия "
+            "колонки не поддерживается — переименуйте."
+        ),
+    )
+    headers = [h.strip() for h in new_headers.split(",") if h.strip()]
+    block["headers"] = headers
+
+    # Доп. шапка (двух/трёх-уровневая по ГОСТ Р 2.105) — остаётся
+    # текстовой: склейка ячеек через пустые места проще задаётся
+    # символами «|», чем кликабельным интерфейсом.
+    extra_rows_str = "\n".join("|".join(row) for row in (block.get("extra_header_rows") or []))
+    new_extra = st.text_area(
+        "Доп. шапка над заголовками (опц., ячейки через «|»)",
+        value=extra_rows_str,
+        key=f"{base}_extra_headers",
+        height=80,
+        help=(
+            "Для многоуровневой шапки. Пример: «Группа 1||Группа 2|» — "
+            "«Группа 1» займёт 2 колонки и «Группа 2» — следующие 2. "
+            "Каждая строка — отдельный ряд шапки сверху вниз."
+        ),
+    )
+    parsed_extra: list[list[str]] = []
+    for line in new_extra.splitlines():
+        if not line.strip():
+            continue
+        parsed_extra.append([cell.strip() for cell in line.split("|")])
+    block["extra_header_rows"] = parsed_extra
+    block["merges"] = _auto_merges_from_extra_header_rows(parsed_extra)
+
+    if parsed_extra:
+        data_sample = (block.get("rows") or [[]])[0] if block.get("rows") else None
+        preview_html = _build_multi_header_preview_html(
+            extra_rows=parsed_extra,
+            headers=block.get("headers") or [],
+            merges=block.get("merges") or [],
+            data_sample=data_sample,
+        )
+        if preview_html:
+            st.caption("Превью шапки:")
+            st.markdown(preview_html, unsafe_allow_html=True)
+
+    # Без заголовков визуальный редактор бесполезен.
+    if not headers:
+        st.info(
+            "Сначала укажите заголовки колонок выше — после этого появится "
+            "визуальный редактор строк."
+        )
+    else:
+        ncols = len(headers)
+        # Подгоняем существующие строки под количество колонок (могло
+        # измениться после добавления/удаления заголовка).
+        adjusted: list[list[str]] = []
+        for r in block.get("rows") or []:
+            rr = [str(c) for c in (r or [])]
+            if len(rr) < ncols:
+                rr = rr + [""] * (ncols - len(rr))
+            elif len(rr) > ncols:
+                rr = rr[:ncols]
+            adjusted.append(rr)
+
+        use_raw = st.toggle(
+            "Сырой текстовый режим (для copy-paste большой таблицы)",
+            key=f"{base}_raw_toggle",
+            value=False,
+            help="Включите, чтобы редактировать строки в pipe-separated формате.",
+        )
+
+        if use_raw:
+            rows_str = "\n".join("|".join(row) for row in adjusted)
+            new_rows = st.text_area(
+                "Строки таблицы (одна строка ввода = одна строка таблицы; ячейки через «|»)",
+                value=rows_str,
+                key=f"{base}_rows_raw",
+                height=140,
+            )
+            parsed_rows: list[list[str]] = []
+            for line in new_rows.splitlines():
+                if not line.strip():
+                    continue
+                cells = [c.strip() for c in line.split("|")]
+                if len(cells) < ncols:
+                    cells = cells + [""] * (ncols - len(cells))
+                elif len(cells) > ncols:
+                    cells = cells[:ncols]
+                parsed_rows.append(cells)
+            block["rows"] = parsed_rows
+        else:
+            _render_table_data_editor(block, base=base, headers=headers, rows=adjusted)
+
+    block["caption"] = st.text_input(
+        "Подпись таблицы",
+        value=block.get("caption", ""),
+        key=f"{base}_caption",
+    )
+
+
+def _render_table_data_editor(
+    block: dict[str, Any],
+    *,
+    base: str,
+    headers: list[str],
+    rows: list[list[str]],
+) -> None:
+    """Подсекция: ``st.data_editor`` для основных строк таблицы.
+
+    Отделена в свою функцию, чтобы импорт pandas не падал на ImportError
+    в окружении без UI-зависимостей: если pandas нет (например,
+    pip-установка без ``[ui]``-extra), показываем предупреждение и
+    падаем на raw-режим.
+    """
+    try:
+        import pandas as pd  # type: ignore[import-untyped]
+    except ImportError:  # pragma: no cover - pandas идёт в streamlit
+        st.warning(
+            "pandas недоступен — переключитесь в «Сырой текстовый режим». "
+            "Обычно pandas ставится автоматически вместе со streamlit."
+        )
+        return
+
+    ncols = len(headers)
+    # Стартуем хотя бы с одной пустой строкой, чтобы data_editor не
+    # выглядел заброшенным.
+    if not rows:
+        rows = [[""] * ncols]
+
+    df = pd.DataFrame(rows, columns=headers)
+    edited = st.data_editor(
+        df,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=f"{base}_rows_grid",
+        column_config={name: st.column_config.TextColumn(name) for name in headers},
+    )
+    block["rows"] = [
+        ["" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v) for v in row]
+        for row in edited.values.tolist()
+    ]
+
+
 def _render_single_block(
     block: dict[str, Any],
     blocks: list[dict[str, Any]],
@@ -4226,67 +4390,7 @@ def _render_single_block(
     if kind == "paragraph":
         _render_paragraph_inline_editor(block, base=base)
     elif kind == "table":
-        # Простейший табличный редактор: два text_area — заголовки и строки.
-        # Это сознательно низкоуровнево: data_editor в Streamlit требует
-        # pandas DataFrame и непросто меняет схему при добавлении колонок.
-        headers_str = ",".join(block.get("headers") or [])
-        new_headers = st.text_input(
-            "Заголовки (через запятую)",
-            value=headers_str,
-            key=f"{base}_headers",
-        )
-        block["headers"] = [h.strip() for h in new_headers.split(",") if h.strip()]
-        # Дополнительные ряды шапки (для двух-/трёх-уровневой шапки по ГОСТ Р 2.105).
-        extra_rows_str = "\n".join("|".join(row) for row in (block.get("extra_header_rows") or []))
-        new_extra = st.text_area(
-            "Доп. шапка (один ряд = одна строка; пустая ячейка склеится с левой соседней)",
-            value=extra_rows_str,
-            key=f"{base}_extra_headers",
-            height=80,
-            help=(
-                "Пример: «Группа 1||Группа 2|» — «Группа 1» займёт 2 колонки и "
-                "«Группа 2» — следующие 2. Каждая строка — отдельный ряд шапки сверху вниз."
-            ),
-        )
-        parsed_extra: list[list[str]] = []
-        for line in new_extra.splitlines():
-            if not line.strip():
-                continue
-            parsed_extra.append([cell.strip() for cell in line.split("|")])
-        block["extra_header_rows"] = parsed_extra
-        # Авто-генерация merges из пустых ячеек: подряд идущие пустые → colspan.
-        block["merges"] = _auto_merges_from_extra_header_rows(parsed_extra)
-        # Превью шапки — даёт пользователю увидеть, как auto-склейка
-        # сработает в финальной таблице (без необходимости генерировать .docx).
-        if parsed_extra:
-            data_sample = (block.get("rows") or [[]])[0] if block.get("rows") else None
-            preview_html = _build_multi_header_preview_html(
-                extra_rows=parsed_extra,
-                headers=block.get("headers") or [],
-                merges=block.get("merges") or [],
-                data_sample=data_sample,
-            )
-            if preview_html:
-                st.caption("Превью шапки:")
-                st.markdown(preview_html, unsafe_allow_html=True)
-        rows_str = "\n".join("|".join(row) for row in (block.get("rows") or []))
-        new_rows = st.text_area(
-            "Строки (одна строка таблицы — одна строка ввода; ячейки разделять символом «|»)",
-            value=rows_str,
-            key=f"{base}_rows",
-            height=140,
-        )
-        parsed_rows: list[list[str]] = []
-        for line in new_rows.splitlines():
-            if not line.strip():
-                continue
-            parsed_rows.append([cell.strip() for cell in line.split("|")])
-        block["rows"] = parsed_rows
-        block["caption"] = st.text_input(
-            "Подпись таблицы",
-            value=block.get("caption", ""),
-            key=f"{base}_caption",
-        )
+        _render_table_block_editor(block, base=base)
     elif kind == "figure":
         block["caption"] = st.text_input(
             "Подпись рисунка",
