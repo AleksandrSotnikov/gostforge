@@ -590,6 +590,7 @@ def render() -> None:
     from gostforge.web.pages import home as home_page
     from gostforge.web.pages import normocontrol as normocontrol_page
     from gostforge.web.pages import profile_editor as profile_editor_page
+    from gostforge.web.pages import profile_manager as profile_manager_page
     from gostforge.web.pages.builder import (
         content as builder_content,
     )
@@ -651,6 +652,12 @@ def render() -> None:
                 title="Редактор профиля",
                 icon="⚙️",
                 url_path="profile-editor",
+            ),
+            st.Page(
+                profile_manager_page.page,
+                title="Управление профилями",
+                icon="📋",
+                url_path="profile-manager",
             ),
         ],
         "Справка": [

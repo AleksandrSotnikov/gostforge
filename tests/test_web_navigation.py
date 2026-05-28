@@ -19,13 +19,21 @@ def test_all_page_modules_importable() -> None:
     Конструктор — это подпакет с 4 страницами (structure / content /
     validation / export); каждая отдельный URL.
     """
-    from gostforge.web.pages import docs, history, home, normocontrol, profile_editor
+    from gostforge.web.pages import (
+        docs,
+        history,
+        home,
+        normocontrol,
+        profile_editor,
+        profile_manager,
+    )
     from gostforge.web.pages.builder import content, export, structure, validation
 
     modules = (
         home,
         normocontrol,
         profile_editor,
+        profile_manager,
         history,
         docs,
         structure,
@@ -73,17 +81,35 @@ def test_builder_subpages_render_without_exceptions() -> None:
         "export": "Экспорт",
     }
     for name, expected_title in expected_titles.items():
-        at = AppTest.from_string(
-            f"from gostforge.web.pages.builder.{name} import page\npage()\n"
-        )
+        at = AppTest.from_string(f"from gostforge.web.pages.builder.{name} import page\npage()\n")
         at.run(timeout=60)
-        assert not at.exception, (
-            f"builder/{name}.page() упала с: {[str(e) for e in at.exception]}"
-        )
+        assert not at.exception, f"builder/{name}.page() упала с: {[str(e) for e in at.exception]}"
         titles = [t.value for t in at.title]
         assert expected_title in titles, (
             f"builder/{name} не отрисовала заголовок «{expected_title}»; были: {titles}"
         )
+
+
+def test_profile_manager_page_renders_without_exceptions() -> None:
+    """«Управление профилями» рендерится — список + загрузка YAML."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.pages.profile_manager import page\npage()\n")
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    titles = [t.value for t in at.title]
+    assert "Управление профилями" in titles, f"Ожидался заголовок, были: {titles}"
+    # У страницы есть две секции: список установленных + загрузка YAML.
+    subheaders = [s.value for s in at.subheader]
+    assert any("Установленные" in s for s in subheaders), (
+        f"Нет секции «Установленные»: {subheaders}"
+    )
+    assert any("Загрузить YAML" in s for s in subheaders), (
+        f"Нет секции «Загрузить YAML»: {subheaders}"
+    )
 
 
 def test_navigation_url_paths_are_unique() -> None:
@@ -100,10 +126,13 @@ def test_navigation_url_paths_are_unique() -> None:
     import re
 
     paths = re.findall(r'url_path="([^"]+)"', source)
-    # 5 верхнеуровневых режимов + 4 подстраницы Конструктора = 9.
-    assert len(paths) == 9, f"Ожидалось 9 страниц, найдено {len(paths)}: {paths}"
+    # 5 верхнеуровневых страниц + 1 «Управление профилями» + 4 подстраницы
+    # Конструктора = 10.
+    assert len(paths) == 10, f"Ожидалось 10 страниц, найдено {len(paths)}: {paths}"
     assert len(set(paths)) == len(paths), f"Дубли URL pathname: {paths}"
     # Подстраницы конструктора — отдельные URL.
     assert {"builder-structure", "builder-content", "builder-validation", "builder-export"} <= set(
         paths
     )
+    # «Управление профилями» отделено от «Редактора профиля».
+    assert {"profile-editor", "profile-manager"} <= set(paths)
