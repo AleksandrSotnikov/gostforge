@@ -612,7 +612,13 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
     """Записать таблицу с подписью НАД ней (по ГОСТ).
 
     Применяет рамки и стиль ячеек из ``profile.styles.table``. Шапка
-    bold. Подпись таблицы — слева, ВЫШЕ таблицы (профиль).
+    bold. Подпись таблицы — слева, ВЫШЕ таблицы (профиль). Если
+    ``repeat_header`` включён, на шапочные строки ставится
+    ``<w:tblHeader/>`` — Word повторяет их на каждой continuation-странице
+    (ГОСТ 7.32 «шапка таблицы повторяется при переносе»). При
+    ``continuation_caption`` экспортёр прибавляет первой строкой
+    «Продолжение таблицы N» (объединённую по всем колонкам, тоже
+    tblHeader); см. комментарий в схеме профиля про ограничения.
     """
     _write_caption_paragraph(doc, table.caption, caption_kind="table")
     column_count = len(table.headers) if table.headers else 0
@@ -621,17 +627,44 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
     if column_count == 0:
         return
 
-    rows_total = (1 if table.headers else 0) + len(table.rows)
+    cfg = _current_profile.styles.table if _current_profile is not None else None
+    add_continuation = cfg is not None and cfg.continuation_caption and table.number is not None
+    continuation_text = (
+        f"Продолжение таблицы {table.number}" if add_continuation else None
+    )
+
+    rows_total = (
+        (1 if continuation_text else 0)
+        + (1 if table.headers else 0)
+        + len(table.rows)
+    )
     if rows_total == 0:
         return
     docx_table = doc.add_table(rows=rows_total, cols=column_count)
 
-    # Применяем стиль таблицы (рамки + шрифт ячеек) из профиля.
-    cfg = _current_profile.styles.table if _current_profile is not None else None
     if cfg is not None:
         _apply_table_borders(docx_table, cfg)
 
+    repeat_header = cfg is None or cfg.repeat_header
+
     row_idx = 0
+    # Опциональная строка «Продолжение таблицы N» — широкая на все колонки,
+    # tblHeader-репитер для continuation-страниц.
+    if continuation_text is not None:
+        cell0 = docx_table.rows[row_idx].cells[0]
+        cell0.text = ""
+        _write_runs(cell0.paragraphs[0], [TextRun(text=continuation_text, italic=True)])
+        _apply_cell_paragraph_format(cell0, cfg, is_header=True)
+        _apply_cell_font(cell0, cfg)
+        # Сливаем все ячейки строки в одну (colspan=column_count).
+        if column_count > 1:
+            _apply_cell_merges(
+                docx_table,
+                [CellMerge(row=row_idx, col=0, rowspan=1, colspan=column_count)],
+            )
+        _mark_row_as_header(docx_table.rows[row_idx])
+        row_idx += 1
+
     if table.headers:
         header_bold = cfg.header_bold if cfg is not None else True
         for col_idx, cell_content in enumerate(table.headers):
@@ -643,6 +676,8 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
             if header_bold:
                 for run in cell.paragraphs[0].runs:
                     run.bold = True
+        if repeat_header:
+            _mark_row_as_header(docx_table.rows[row_idx])
         row_idx += 1
     for row in table.rows:
         for col_idx, cell_content in enumerate(row):
@@ -655,9 +690,30 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
             _apply_cell_font(cell, cfg)
         row_idx += 1
 
-    # Применяем объединения ячеек, если есть.
+    # CellMerge из модели применяем С УЧЁТОМ сдвига строк из-за continuation-row.
     if table.merges:
-        _apply_cell_merges(docx_table, table.merges)
+        row_offset = 1 if continuation_text else 0
+        shifted = [
+            CellMerge(row=m.row + row_offset, col=m.col, rowspan=m.rowspan, colspan=m.colspan)
+            for m in table.merges
+        ]
+        _apply_cell_merges(docx_table, shifted)
+
+
+def _mark_row_as_header(docx_row: Any) -> None:
+    """Пометить строку таблицы как повторяющуюся шапку через `<w:tblHeader/>`.
+
+    Word при переносе таблицы на следующую страницу будет повторять эту
+    строку (и все строки выше с тем же атрибутом) в виде шапки.
+    """
+    tr = docx_row._tr
+    trPr = tr.find(f"{{{W_NS}}}trPr")
+    if trPr is None:
+        trPr = etree.SubElement(tr, f"{{{W_NS}}}trPr")
+        tr.insert(0, trPr)
+    # Не дублируем — если уже есть, ничего не делаем.
+    if trPr.find(f"{{{W_NS}}}tblHeader") is None:
+        etree.SubElement(trPr, f"{{{W_NS}}}tblHeader")
 
 
 def _apply_cell_merges(docx_table: Any, merges: list[CellMerge]) -> None:

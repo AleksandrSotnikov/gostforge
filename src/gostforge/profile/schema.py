@@ -117,6 +117,16 @@ class TableStyleProfile(BaseModel):
     # * "by_chapter" — Таблица 1.1, 1.2, ..., 2.1, ... .
     # Приложения — буквенно (Таблица А.1, ...) независимо от режима.
     numbering: Literal["continuous", "by_chapter"] = "continuous"
+    # Шапка таблицы повторяется на каждой следующей странице, если
+    # таблица перенесена (Word/<w:tblHeader/>). По ГОСТ это обязательно.
+    repeat_header: bool = True
+    # Опционально: вставлять «Продолжение таблицы N» как первую строку
+    # таблицы, объединённую по всем колонкам и помеченную tblHeader. Word
+    # покажет её и на первой странице (рядом с обычной подписью НАД
+    # таблицей), и на каждой continuation-странице — это компромисс,
+    # т.к. чисто-OOXML способа показывать строку «только на 2+ странице»
+    # не существует. Включается на профиль, дефолт — выкл.
+    continuation_caption: bool = False
     # Выравнивание подписи таблицы.
     caption: CaptionStyleProfile = Field(
         default_factory=lambda: CaptionStyleProfile(

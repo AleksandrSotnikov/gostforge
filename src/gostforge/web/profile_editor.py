@@ -356,6 +356,21 @@ def _edit_table(data: dict[str, Any]) -> None:
         "pe_tb_num",
         format_func=lambda v: _NUMBERING_LABELS.get(v, v),
     )
+    t["repeat_header"] = st.checkbox(
+        "Повторять шапку при переносе на новую страницу",
+        value=t.get("repeat_header", True),
+        key="pe_tb_repeat_h",
+        help="ГОСТ 7.32: шапка таблицы должна повторяться на каждой continuation-странице.",
+    )
+    t["continuation_caption"] = st.checkbox(
+        "Добавлять строку «Продолжение таблицы N»",
+        value=t.get("continuation_caption", False),
+        key="pe_tb_cont_cap",
+        help=(
+            "Word покажет строку и на первой странице, и на continuation. "
+            "Чисто-OOXML способа показывать её только на 2+ странице нет."
+        ),
+    )
     t["cell_alignment"] = _select(
         "Выравнивание ячеек", _ALIGN_FULL, t["cell_alignment"], "pe_tb_calign"
     )
