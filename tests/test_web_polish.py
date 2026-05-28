@@ -266,3 +266,22 @@ def test_normocontrol_page_has_help_block() -> None:
     assert any("Что доступно" in lbl for lbl in expander_labels), (
         f"Help-блок не найден; expanders: {expander_labels}"
     )
+
+
+def test_history_page_has_help_block() -> None:
+    """На странице «История» свёрнут help-блок «Что доступно».
+
+    Описывает submission-ы, фильтр в sidebar, две вкладки
+    (Нарушения / Обсуждение), управление комментариями и путь к БД.
+    """
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+    at = AppTest.from_string("from gostforge.web.pages.history import page\npage()\n")
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    expander_labels = [e.label for e in at.expander]
+    assert any("Что доступно" in lbl for lbl in expander_labels), (
+        f"Help-блок не найден; expanders: {expander_labels}"
+    )
