@@ -4134,16 +4134,109 @@ def _render_single_section_pdf_preview(section: dict[str, Any], idx: int) -> Non
 
 
 def _render_blocks_editor(blocks: list[dict[str, Any]], *, key_prefix: str) -> None:
-    """Отрисовать редакторы для каждого блока списка."""
+    """Отрисовать редакторы для каждого блока списка.
+
+    Поддерживает опциональный drag-and-drop переупорядочивания через
+    ``streamlit-sortables`` (toggle над списком, по умолчанию выкл).
+    Когда DnD активен — блоки рендерятся как переcтавляемые метки
+    без expander-ов; редактор открывается через переключение в
+    обычный режим. Это компромисс: streamlit-sortables работает со
+    строками, expander-ы не пересаживаются.
+    """
     if not blocks:
         st.caption("Блоков пока нет — добавьте кнопками ниже.")
         return
+
+    if _render_blocks_dnd_panel(blocks, key_prefix=key_prefix):
+        return
+
     for b_idx, block in enumerate(blocks):
         with st.expander(
             f"{b_idx + 1}. {_block_label(block)}",
             expanded=False,
         ):
             _render_single_block(block, blocks, b_idx, key_prefix=key_prefix)
+
+
+def _reorder_blocks_by_dnd_items(
+    blocks: list[dict[str, Any]],
+    sorted_items: list[str],
+) -> list[dict[str, Any]] | None:
+    """Чистая функция: переставить ``blocks`` по DnD-итемам ``"#{id}: <label>"``.
+
+    Симметрична :func:`_reorder_sections_by_dnd_items`. Возвращает
+    новый список блоков в нужном порядке, либо ``None`` при
+    нестабильном матчинге (защита от потери блоков).
+    """
+    if len(sorted_items) != len(blocks):
+        return None
+    id_to_index: dict[str, int] = {}
+    for idx, blk in enumerate(blocks):
+        blk_id = blk.get("id")
+        if isinstance(blk_id, str):
+            id_to_index[blk_id] = idx
+    new_blocks: list[dict[str, Any]] = []
+    for item in sorted_items:
+        if not (isinstance(item, str) and item.startswith("#")):
+            return None
+        sep_idx = item.find(": ")
+        if sep_idx < 1:
+            return None
+        blk_id = item[1:sep_idx]
+        if blk_id not in id_to_index:
+            return None
+        new_blocks.append(blocks[id_to_index[blk_id]])
+    if len(new_blocks) != len(blocks):
+        return None
+    return new_blocks
+
+
+def _render_blocks_dnd_panel(blocks: list[dict[str, Any]], *, key_prefix: str) -> bool:
+    """Toggle + DnD переупорядочивания блоков внутри раздела.
+
+    Возвращает ``True``, если DnD-режим активен и список уже
+    отрисован — вызывающий пропускает классический рендер expander-ов.
+    """
+    enabled = st.toggle(
+        "Drag-and-drop блоков",
+        value=bool(st.session_state.get(f"blocks_dnd_{key_prefix}", False)),
+        key=f"blocks_dnd_{key_prefix}_toggle",
+        help=(
+            "Перетаскивайте блоки мышкой вместо ↑/↓. В DnD-режиме "
+            "expander-ы редактирования закрыты — выключите toggle, "
+            "чтобы вернуться к правке содержимого."
+        ),
+    )
+    st.session_state[f"blocks_dnd_{key_prefix}"] = enabled
+    if not enabled:
+        return False
+
+    try:
+        from streamlit_sortables import sort_items
+    except ImportError:
+        st.warning(
+            "Модуль `streamlit-sortables` не установлен. Установите "
+            "`gostforge[ui]` или `pip install streamlit-sortables`, "
+            "либо снимите toggle «Drag-and-drop блоков»."
+        )
+        return False
+
+    # Гарантируем id у каждого блока (нужен для матчинга).
+    items: list[str] = []
+    for b_idx, blk in enumerate(blocks):
+        blk_id = blk.setdefault("id", _new_block_id())
+        items.append(f"#{blk_id}: {b_idx + 1}. {_block_label(blk)}")
+
+    sorted_items = sort_items(items, direction="vertical", key=f"blocks_dnd_{key_prefix}_sortable")
+    if not isinstance(sorted_items, list) or sorted_items == items:
+        return True
+
+    new_blocks = _reorder_blocks_by_dnd_items(blocks, sorted_items)
+    if new_blocks is None:
+        return True
+    blocks[:] = new_blocks
+    st.rerun()
+    return True
 
 
 def _paragraph_text_only(block: dict[str, Any]) -> str:

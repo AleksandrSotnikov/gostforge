@@ -129,6 +129,62 @@ def test_reorder_sections_by_dnd_items_returns_none_on_bad_format() -> None:
     assert _reorder_sections_by_dnd_items(sections, ["#noseparator", "#a: x"]) is None
 
 
+def test_reorder_blocks_by_dnd_items_simple() -> None:
+    """`_reorder_blocks_by_dnd_items` симметрично переcтавляет блоки по id."""
+    from gostforge.web.builder_editor import _reorder_blocks_by_dnd_items
+
+    blocks = [
+        {"id": "b1", "kind": "paragraph", "text": "abc"},
+        {"id": "b2", "kind": "table", "headers": [], "rows": []},
+        {"id": "b3", "kind": "list", "items": []},
+    ]
+    sorted_items = ["#b3: x", "#b1: y", "#b2: z"]
+    out = _reorder_blocks_by_dnd_items(blocks, sorted_items)
+    assert out is not None
+    assert [b["id"] for b in out] == ["b3", "b1", "b2"]
+
+
+def test_reorder_blocks_by_dnd_items_rejects_unknown_id() -> None:
+    """Неизвестный id блока → None (защита от потери блоков)."""
+    from gostforge.web.builder_editor import _reorder_blocks_by_dnd_items
+
+    blocks = [{"id": "b1"}, {"id": "b2"}]
+    assert _reorder_blocks_by_dnd_items(blocks, ["#b1: x", "#wat: y"]) is None
+
+
+def test_content_page_shows_blocks_dnd_toggle() -> None:
+    """На странице «Содержимое» виден toggle «Drag-and-drop блоков»."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.pages.builder.content import page\npage()\n")
+    at.session_state["builder_state"] = {
+        "title": "Тест",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава",
+                "blocks": [
+                    {"kind": "paragraph", "text": "первый"},
+                    {"kind": "paragraph", "text": "второй"},
+                ],
+                "subsections": [],
+            }
+        ],
+        "active_section_index": 0,
+    }
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    toggle_labels = [t.label for t in at.toggle]
+    assert any("Drag-and-drop блоков" in lbl for lbl in toggle_labels), (
+        f"Toggle DnD блоков не найден; toggles: {toggle_labels}"
+    )
+
+
 def test_section_dnd_state_persists_in_session() -> None:
     """`section_dnd_enabled` сохраняется в state при переключении toggle."""
     try:
