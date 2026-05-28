@@ -1018,6 +1018,111 @@ def check_doi_url_format(document: Document, profile: Profile) -> list[Violation
     return violations
 
 
+def _check_url_reachable_http(url: str, timeout: float) -> str | None:
+    """HTTP HEAD-запрос к URL. Возвращает None при успехе, иначе человекочитаемое
+    описание проблемы.
+
+    Поведение:
+
+    * 2xx / 3xx (включая редиректы) — успех, возвращается None.
+    * 4xx — `"HTTP {status}"` (для 405 «Method Not Allowed» делаем
+      fallback на GET — некоторые сервера блокируют HEAD политикой).
+    * 5xx — `"HTTP {status}"`.
+    * URLError / TimeoutError / прочие — `"таймаут (Ns)"` или
+      `"сетевая ошибка: …"`.
+
+    Вынесено отдельной функцией, чтобы в тестах можно было мокать через
+    ``monkeypatch.setattr`` на этот один символ.
+    """
+    import urllib.error
+    import urllib.request
+
+    def _do(method: str) -> str | None:
+        req = urllib.request.Request(
+            url,
+            method=method,
+            headers={"User-Agent": "gostforge/url-reachability-check"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                # urlopen уже разрешил редиректы; считаем 2xx/3xx живыми.
+                status = getattr(resp, "status", 200)
+                if 200 <= int(status) < 400:
+                    return None
+                return f"HTTP {status}"
+        except urllib.error.HTTPError as exc:
+            return f"HTTP {exc.code}"
+        except TimeoutError:
+            return f"таймаут ({timeout:g} с)"
+        except urllib.error.URLError as exc:
+            return f"сетевая ошибка: {exc.reason}"
+        except Exception as exc:
+            return f"ошибка соединения: {exc}"
+
+    result = _do("HEAD")
+    # Некоторые сервера отвергают HEAD (405). Пробуем GET как fallback.
+    if result == "HTTP 405":
+        return _do("GET")
+    return result
+
+
+@register("R.15")
+def check_url_reachable(document: Document, profile: Profile) -> list[Violation]:
+    """Опциональная HTTP-проверка доступности URL из списка литературы.
+
+    По умолчанию выключена (``enabled: false`` в профиле). Включается
+    явно через ``profile.checks["R.15"].enabled = True``, обычно — для
+    финальной проверки перед сдачей работы. Делает HEAD-запрос (или
+    fallback на GET, если HEAD = 405) с таймаутом из профиля.
+
+    Сетевые ошибки (4xx/5xx/таймаут) выдаются как **warning**, а не
+    error — мёртвая ссылка не делает работу непроходимой, но требует
+    внимания (заменить на актуальный URL или указать дату обращения).
+
+    Форматно-некорректные URL пропускаются — их ловит R.14.
+
+    Параметры профиля (`checks.R.15.params`):
+
+    * ``timeout`` — таймаут одного запроса в секундах (default 5.0);
+    * ``max_urls`` — лимит на число проверяемых URL (default 50,
+      защита от медленных нормоконтролей с тысячами источников).
+    """
+    config = profile.checks.get("R.15")
+    if not (config and config.enabled):
+        return []
+    timeout = _float_param(config.params, "timeout", 5.0)
+    max_urls = _int_param(config.params, "max_urls", 50)
+
+    violations: list[Violation] = []
+    checked = 0
+    for idx, entry in enumerate(document.bibliography, start=1):
+        url = entry.fields.get("url")
+        if not url or _diagnose_url_format(url) is not None:
+            # Форматно-сломанные URL — ответственность R.14.
+            continue
+        if checked >= max_urls:
+            break
+        checked += 1
+        problem = _check_url_reachable_http(url, timeout)
+        if problem is None:
+            continue
+        violations.append(
+            Violation(
+                check_code="R.15",
+                severity="warning",
+                message=f"Источник {idx}: URL «{url}» недоступен — {problem}",
+                location=f"bibliography[{entry.id}].url",
+                suggestion=(
+                    "Проверить ссылку вручную. Если страница переехала — "
+                    "указать актуальный URL. Если временный сбой — повторить "
+                    "проверку позже."
+                ),
+                details={"entry_id": entry.id, "url": url, "problem": problem},
+            )
+        )
+    return violations
+
+
 __all__ = [
     "check_access_date_for_web",
     "check_bibliography_format",
@@ -1033,4 +1138,5 @@ __all__ = [
     "check_references_resolve_alias",
     "check_required_fields_by_type",
     "check_suspicious_domains",
+    "check_url_reachable",
 ]

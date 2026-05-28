@@ -246,6 +246,10 @@ checks:
         - studwood.net
         - studfile.net
   R.14: {enabled: true}   # формат DOI и URL
+  # R.15 — опциональная HTTP-проверка доступности URL. По умолчанию
+  # выключена: требует доступа к сети и заметно замедляет проверку.
+  # Включить вручную перед финальной сдачей: enabled: true.
+  R.15: {enabled: false, params: {timeout: 5.0, max_urls: 50}}
   C.01: {enabled: true}
   C.02: {enabled: true}
   C.03: {enabled: true}
