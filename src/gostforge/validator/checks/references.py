@@ -889,19 +889,91 @@ def check_suspicious_domains(document: Document, profile: Profile) -> list[Viola
 _DOI_FORMAT_RE = re.compile(r"^10\.\d{4,9}/\S+$")
 # URL: http(s):// + домен.
 _URL_FORMAT_RE = re.compile(r"^https?://[^\s/$.?#].\S*$", re.IGNORECASE)
+# DOI, обёрнутый в URL ("https://doi.org/10.NNNN/..." или
+# "doi.org/10.NNNN/...") — частая ошибка: в поле DOI кладут ссылку.
+_DOI_AS_URL_RE = re.compile(
+    r"^(?:https?://)?(?:dx\.)?doi\.org/(10\.\d{4,9}/\S+)$",
+    re.IGNORECASE,
+)
+# Типичные опечатки в URL (схема без двоеточия / двоеточие без слешей и пр.).
+_URL_TYPO_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"^https?//", re.IGNORECASE),
+        "пропущено двоеточие в схеме: `https//` вместо `https://`",
+    ),
+    (
+        re.compile(r"^https?:/[^/]", re.IGNORECASE),
+        "пропущен слэш в схеме: `https:/x` вместо `https://x`",
+    ),
+    (re.compile(r"^https?;//", re.IGNORECASE), "точка с запятой вместо двоеточия в схеме"),
+    # Специфичные опечатки в схеме. Порядок важен: более длинный
+    # паттерн `htps://` (без второй `t` в `https`) должен матчиться
+    # раньше, чем `htp://`, иначе `htps://...` подцепится как `htp` +
+    # «лишний `s`».
+    (re.compile(r"^htps://", re.IGNORECASE), "опечатка в схеме: `htps` вместо `https`"),
+    (re.compile(r"^htp://", re.IGNORECASE), "опечатка в схеме: `htp` вместо `http`"),
+)
+
+
+def _diagnose_doi_format(doi: str) -> str | None:
+    """Найти конкретную ошибку в формате DOI или None если всё ок.
+
+    Различает: пробелы в начале/конце, обёрнутый в URL DOI («https://doi.org/...»),
+    отсутствие префикса 10.NNNN/, общий «не тот формат».
+    """
+    if not doi:
+        return None
+    if doi != doi.strip():
+        return "лишние пробелы в начале или конце"
+    if " " in doi or "\t" in doi:
+        return "пробелы или табы внутри значения"
+    if _DOI_AS_URL_RE.match(doi):
+        # «https://doi.org/10.1234/abc» — частая ошибка, в поле DOI должен
+        # быть «голый» идентификатор без https://.
+        return "DOI обёрнут в URL — оставьте только идентификатор после `doi.org/`"
+    if _DOI_FORMAT_RE.match(doi):
+        return None
+    if not doi.startswith("10."):
+        return "DOI должен начинаться с «10.» (например, «10.1234/abc»)"
+    if "/" not in doi:
+        return "после префикса «10.NNNN» должен быть `/` и идентификатор"
+    return "не соответствует стандарту «10.NNNN/...»"
+
+
+def _diagnose_url_format(url: str) -> str | None:
+    """Найти конкретную ошибку в формате URL или None если всё ок.
+
+    Ловит типичные опечатки (https//, http;//, htp://) и даёт явное
+    сообщение вместо общего «не тот формат».
+    """
+    if not url:
+        return None
+    if url != url.strip():
+        return "лишние пробелы в начале или конце"
+    if " " in url or "\t" in url:
+        return "пробелы или табы внутри URL"
+    for pattern, msg in _URL_TYPO_PATTERNS:
+        if pattern.match(url):
+            return msg
+    if _URL_FORMAT_RE.match(url):
+        return None
+    if not url.lower().startswith(("http://", "https://")):
+        return "URL должен начинаться с `http://` или `https://`"
+    return "не соответствует формату `https://domain/path`"
 
 
 @register("R.14")
 def check_doi_url_format(document: Document, profile: Profile) -> list[Violation]:
     """Валидация формата DOI и URL в записях библиографии.
 
-    DOI должен соответствовать паттерну ``10.NNNN/...`` (где NNNN —
-    4-9 цифр регистратора, дальше произвольный suffix).
-    URL должен начинаться с ``http://`` или ``https://`` и содержать
-    минимум один символ после ``//`` (валидный домен).
+    Сообщение нарушения содержит **конкретную** диагностику ошибки:
+    лишние пробелы, DOI обёрнут в URL, типовая опечатка в схеме
+    (`https//` без двоеточия, `htp://`, `http;//`), отсутствие
+    префикса `10.` и т. п. — пользователь сразу видит, что чинить,
+    без необходимости знать формат DOI наизусть.
 
-    Severity = warning — это не критическая ошибка, но может
-    указать на опечатку (например, «https//» вместо «https://»).
+    Severity = warning — это не критическая ошибка, но почти всегда
+    указывает на опечатку при копировании из PDF/Word.
 
     Параметров профиля нет.
     """
@@ -909,41 +981,40 @@ def check_doi_url_format(document: Document, profile: Profile) -> list[Violation
     violations: list[Violation] = []
     for idx, entry in enumerate(document.bibliography, start=1):
         doi = entry.fields.get("doi")
-        if doi and not _DOI_FORMAT_RE.match(doi):
-            violations.append(
-                Violation(
-                    check_code="R.14",
-                    severity="warning",
-                    message=(
-                        f"Источник {idx}: DOI «{doi}» не соответствует "
-                        f"стандартному формату «10.NNNN/...»"
-                    ),
-                    location=f"bibliography[{entry.id}].doi",
-                    suggestion=(
-                        "Проверить формат DOI: должен быть «10.NNNN/...» "
-                        "(подробнее: https://www.doi.org)"
-                    ),
-                    details={"entry_id": entry.id, "doi": doi},
+        if doi:
+            problem = _diagnose_doi_format(doi)
+            if problem:
+                violations.append(
+                    Violation(
+                        check_code="R.14",
+                        severity="warning",
+                        message=f"Источник {idx}: DOI «{doi}» — {problem}",
+                        location=f"bibliography[{entry.id}].doi",
+                        suggestion=(
+                            "DOI должен быть «голым» идентификатором вида "
+                            "«10.NNNN/suffix» без https://doi.org/ и без пробелов "
+                            "(подробнее: https://www.doi.org)"
+                        ),
+                        details={"entry_id": entry.id, "doi": doi, "problem": problem},
+                    )
                 )
-            )
         url = entry.fields.get("url")
-        if url and not _URL_FORMAT_RE.match(url):
-            violations.append(
-                Violation(
-                    check_code="R.14",
-                    severity="warning",
-                    message=(
-                        f"Источник {idx}: URL «{url}» не соответствует "
-                        f"формату «http(s)://domain/...»"
-                    ),
-                    location=f"bibliography[{entry.id}].url",
-                    suggestion=(
-                        "Проверить URL: должен начинаться с http:// "
-                        "или https:// и содержать валидный домен"
-                    ),
-                    details={"entry_id": entry.id, "url": url},
+        if url:
+            problem = _diagnose_url_format(url)
+            if problem:
+                violations.append(
+                    Violation(
+                        check_code="R.14",
+                        severity="warning",
+                        message=f"Источник {idx}: URL «{url}» — {problem}",
+                        location=f"bibliography[{entry.id}].url",
+                        suggestion=(
+                            "URL должен быть полным: `https://domain/path` "
+                            "(или `http://...`), без пробелов и опечаток в схеме"
+                        ),
+                        details={"entry_id": entry.id, "url": url, "problem": problem},
+                    )
                 )
-            )
     return violations
 
 
