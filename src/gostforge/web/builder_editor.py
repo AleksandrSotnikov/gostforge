@@ -29,6 +29,7 @@ import json
 import mimetypes
 import re
 import tempfile
+import uuid
 from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -160,6 +161,29 @@ def _get_state() -> dict[str, Any]:
     """Вернуть текущий builder_state. Перед использованием — _ensure_state()."""
     state: dict[str, Any] = st.session_state["builder_state"]
     return state
+
+
+def _new_block_id() -> str:
+    """Уникальный идентификатор блока (8 hex-символов).
+
+    Используется как стабильный ключ для Streamlit-виджетов, чтобы при
+    удалении/перемещении блока кэшированный state виджета не «прилипал»
+    к соседу по позиции (после `pop`/`insert` индексы сдвигаются).
+    """
+    return uuid.uuid4().hex[:8]
+
+
+def _purge_block_ids_recursively(section: dict[str, Any]) -> None:
+    """Убрать `id` у всех блоков секции (включая вложенные подразделы).
+
+    При дублировании раздела клон должен получить свежие id блоков —
+    иначе два набора одинаковых id вызовут коллизию ключей Streamlit-виджетов
+    и состояние полей перемешается между оригиналом и копией.
+    """
+    for block in section.get("blocks") or []:
+        block.pop("id", None)
+    for sub in section.get("subsections") or []:
+        _purge_block_ids_recursively(sub)
 
 
 # --- Undo / Redo (Фаза 2.5) -------------------------------------------------
@@ -608,18 +632,35 @@ def _strip_caption_prefix(caption: str, *, kind: Literal["table", "figure"]) -> 
     Builder сам добавляет такой префикс при экспорте; в state мы храним
     «голую» подпись, чтобы при следующей сборке не получить «Таблица 1
     — Таблица 1 — ...».
+
+    Распознаём разные форматы из реальных .docx:
+    * «Таблица 1 — подпись» (em-dash, как у builder-а)
+    * «Таблица 1 – подпись» (en-dash)
+    * «Таблица 1 - подпись» (дефис)
+    * «Таблица 1. Подпись» (точка, ГОСТ Р 2.105)
+    * «Таблица 1: подпись» (двоеточие)
+    * «Таблица 1.2 — подпись» (многоуровневая нумерация)
+    * NBSP (\\u00A0) вместо обычного пробела.
+
+    Применяется итеративно — чтобы вычистить уже задвоённый
+    «Таблица 1 — Таблица 1 — ...», если он успел протечь.
     """
-    text = caption.strip()
     prefix_word = "Таблица" if kind == "table" else "Рисунок"
-    if not text.startswith(prefix_word):
-        return text
-    rest = text[len(prefix_word) :].lstrip()
-    # Ожидаем «N — ...» или «N - ...»; ищем em-dash или дефис после числа.
-    for sep in (" — ", " - "):
-        idx = rest.find(sep)
-        if idx != -1 and rest[:idx].strip().isdigit():
-            return rest[idx + len(sep) :].strip()
-    return text
+    # Граница: или разделитель (тире/точка/двоеточие) с пробелами вокруг,
+    # или просто пробел перед текстом подписи, или конец строки.
+    pattern = re.compile(
+        rf"^{prefix_word}[\s ]+\d+(?:\.\d+)*"
+        r"(?:[\s ]*[—–\-.:][\s ]*|[\s ]+|$)"
+    )
+    text = caption.strip()
+    while True:
+        match = pattern.match(text)
+        if not match:
+            return text
+        stripped = text[match.end() :].lstrip()
+        if stripped == text:
+            return text
+        text = stripped
 
 
 # --- Document → state ---------------------------------------------------------
@@ -3272,6 +3313,10 @@ def _duplicate_section(idx: int) -> None:
         return
     original = sections[idx]
     copy = json.loads(json.dumps(original))
+    # Очищаем id у всех блоков копии (на любом уровне вложенности) —
+    # иначе клонированные блоки получили бы такие же ключи виджетов,
+    # как у оригинала, и состояние редактора перепуталось бы.
+    _purge_block_ids_recursively(copy)
     original_heading = str(copy.get("heading", "Раздел")).strip()
     copy["heading"] = f"{original_heading} (копия)"
     # Bib-секцию НЕ дублируем как is_bibliography — две bib-секции
@@ -3841,6 +3886,9 @@ def _duplicate_block(blocks: list[dict[str, Any]], b_idx: int) -> None:
     if b_idx < 0 or b_idx >= len(blocks):
         return
     clone = json.loads(json.dumps(blocks[b_idx]))
+    # Свежий id для клона — иначе два блока с одинаковым id вызовут
+    # коллизию ключей виджетов Streamlit.
+    clone.pop("id", None)
     blocks.insert(b_idx + 1, clone)
 
 
@@ -3901,7 +3949,11 @@ def _render_single_block(
 ) -> None:
     """Отрисовать редактор одного блока + кнопки перемещения и удаления."""
     kind = block.get("kind")
-    base = f"{key_prefix}_b{b_idx}"
+    # Стабильный per-block id вместо позиционного индекса: при
+    # delete/move виджеты Streamlit не «приклеиваются» к соседу
+    # (см. _new_block_id).
+    block_id = block.setdefault("id", _new_block_id())
+    base = f"{key_prefix}_b{block_id}"
 
     if kind == "paragraph":
         _render_paragraph_inline_editor(block, base=base)
