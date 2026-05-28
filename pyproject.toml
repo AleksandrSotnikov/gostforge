@@ -107,3 +107,6 @@ warn_unused_configs = true
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 addopts = "-v --tb=short"
+markers = [
+    "slow: тесты, которые работают долго (стресс-тесты на крупные документы)",
+]
