@@ -93,10 +93,13 @@ class WorkBuilder:
         # Счётчик обычных (не-приложений) глав — для нумерации «1», «2», ...
         # в режиме by_chapter.
         self._regular_chapter_counter = 0
-        # Режимы нумерации читаем лениво из профиля.
-        self._figure_numbering_mode, self._table_numbering_mode = (
-            _resolve_numbering_modes_from_profile(profile_id)
-        )
+        # Режимы нумерации и форматы подписей читаем лениво из профиля.
+        (
+            self._figure_numbering_mode,
+            self._table_numbering_mode,
+            self._figure_caption_format,
+            self._table_caption_format,
+        ) = _resolve_caption_settings_from_profile(profile_id)
 
     # --- Внутренние утилиты для SectionBuilder ------------------------------
 
@@ -355,22 +358,46 @@ def _parse_appendix_letter(heading: str) -> str | None:
     return match.group(1).upper()
 
 
-def _resolve_numbering_modes_from_profile(
+def _resolve_caption_settings_from_profile(
     profile_id: str,
-) -> tuple[Literal["continuous", "by_chapter"], Literal["continuous", "by_chapter"]]:
-    """Прочитать схемы нумерации рисунков и таблиц из профиля.
+) -> tuple[
+    Literal["continuous", "by_chapter"],
+    Literal["continuous", "by_chapter"],
+    str,
+    str,
+]:
+    """Прочитать схемы нумерации и форматы подписей из профиля.
 
-    Возвращает (figure_mode, table_mode). При ошибке загрузки — «continuous»
-    для обоих (как было до Сессии 22, чтобы поведение оставалось
-    обратносовместимым).
+    Возвращает кортеж (figure_mode, table_mode, figure_caption_format,
+    table_caption_format). При ошибке загрузки — («continuous»,
+    «continuous», «Рисунок {num} — {title}», «Таблица {num} — {title}»),
+    т.е. поведение до этой сессии остаётся обратносовместимым.
     """
+    default_fig_fmt = "Рисунок {num} — {title}"
+    default_tbl_fmt = "Таблица {num} — {title}"
     try:
         from gostforge.profile import load_profile
 
         profile = load_profile(profile_id)
     except Exception:
-        return "continuous", "continuous"
-    return profile.styles.figure.numbering, profile.styles.table.numbering
+        return "continuous", "continuous", default_fig_fmt, default_tbl_fmt
+    fig_fmt = profile.styles.figure.caption.format or default_fig_fmt
+    tbl_fmt = profile.styles.table.caption.format or default_tbl_fmt
+    return (
+        profile.styles.figure.numbering,
+        profile.styles.table.numbering,
+        fig_fmt,
+        tbl_fmt,
+    )
+
+
+def _resolve_numbering_modes_from_profile(
+    profile_id: str,
+) -> tuple[Literal["continuous", "by_chapter"], Literal["continuous", "by_chapter"]]:
+    """Прочитать только схемы нумерации (back-compat-обёртка над
+    `_resolve_caption_settings_from_profile`)."""
+    fig, tbl, _, _ = _resolve_caption_settings_from_profile(profile_id)
+    return fig, tbl
 
 
 def _resolve_page_params_from_profile(

@@ -125,6 +125,49 @@ def test_figure_number_field_is_continuous_ordinal() -> None:
     assert [f.number for f in figs] == [1, 2]
 
 
+def test_custom_caption_format_with_period() -> None:
+    """Профильный формат «Рисунок {num}. {title}» (точка) — экспортёр уважает."""
+    b = WorkBuilder("X")
+    b._figure_caption_format = "Рисунок {num}. {title}"
+    doc = b.section("Глава").figure(image_path="a.png", caption="Схема").build()
+    assert _figure_captions(doc) == ["Рисунок 1. Схема"]
+
+
+def test_custom_caption_format_combines_with_chapter_numbering() -> None:
+    """Формат + by_chapter работают вместе: «Рисунок 3.1. Title»."""
+    b = WorkBuilder("X")
+    b._figure_numbering_mode = "by_chapter"
+    b._figure_caption_format = "Рисунок {num}. {title}"
+    doc = (
+        b.section("Глава 1")
+        .figure(image_path="a.png", caption="A")
+        .section("Глава 2")
+        .figure(image_path="b.png", caption="B")
+        .figure(image_path="c.png", caption="C")
+        .build()
+    )
+    assert _figure_captions(doc) == [
+        "Рисунок 1.1. A",
+        "Рисунок 2.1. B",
+        "Рисунок 2.2. C",
+    ]
+
+
+def test_table_caption_format_is_independent_from_figure_format() -> None:
+    """Формат подписи таблицы независим от формата рисунка."""
+    b = WorkBuilder("X")
+    b._figure_caption_format = "Fig {num}: {title}"
+    b._table_caption_format = "Tbl. {num} – {title}"
+    doc = (
+        b.section("Глава")
+        .figure(image_path="a.png", caption="F")
+        .table(headers=["A"], rows=[["x"]], caption="T")
+        .build()
+    )
+    assert _figure_captions(doc) == ["Fig 1: F"]
+    assert _table_captions(doc) == ["Tbl. 1 – T"]
+
+
 def test_parse_appendix_letter() -> None:
     """`_parse_appendix_letter` распознаёт «Приложение X[. ...]» и возвращает X."""
     assert _parse_appendix_letter("Приложение А") == "А"

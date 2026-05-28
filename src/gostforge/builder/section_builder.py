@@ -100,10 +100,11 @@ class SectionBuilder:
         и валидатора, которые матчатся по позиции (а не по строковой метке).
         """
         label, ordinal = self._root._next_figure_label_with_ordinal()
+        caption_text = _format_caption(self._root._figure_caption_format, num=label, title=caption)
         fig = Figure(
             id=self._root._next_id("fig"),
             image_path=image_path,
-            caption=[TextRun(text=f"Рисунок {label} — {caption}")],
+            caption=[TextRun(text=caption_text)],
             number=ordinal,
         )
         self._section.children.append(fig)
@@ -205,9 +206,10 @@ class SectionBuilder:
         """
         label, ordinal = self._root._next_table_label_with_ordinal()
         extra = extra_header_rows or []
+        caption_text = _format_caption(self._root._table_caption_format, num=label, title=caption)
         tbl = Table(
             id=self._root._next_id("tbl"),
-            caption=[TextRun(text=f"Таблица {label} — {caption}")],
+            caption=[TextRun(text=caption_text)],
             headers=[[TextRun(text=h)] for h in headers],
             extra_header_rows=[[[TextRun(text=c)] for c in row] for row in extra],
             rows=[[[TextRun(text=cell)] for cell in row] for row in rows],
@@ -307,6 +309,25 @@ class SectionBuilder:
     def save(self, path: str | Path, profile: str | Profile | None = None) -> None:
         """Делегирует корневому WorkBuilder."""
         self._root.save(path, profile)
+
+
+def _format_caption(template: str, *, num: str, title: str) -> str:
+    """Подставить ``{num}``/``{title}`` в шаблон подписи из профиля.
+
+    Если в шаблоне нет ни ``{num}``, ни ``{title}`` (например, профиль
+    кастомный без плейсхолдеров) — возвращаем шаблон + " — " + title
+    как мягкий fallback, чтобы заголовок не потерялся.
+
+    Любые KeyError-исключения (опечатки в шаблоне) перехватываются и
+    возвращается дефолтная форма «num — title», чтобы билдер не падал.
+    """
+    if "{num}" not in template and "{title}" not in template:
+        return f"{template} — {title}".strip()
+    try:
+        return template.format(num=num, title=title)
+    except (KeyError, IndexError):
+        # Кастомный шаблон с неизвестным плейсхолдером → fallback.
+        return f"{num} — {title}".strip()
 
 
 def _heading_text(section: LogicalSection) -> str:
