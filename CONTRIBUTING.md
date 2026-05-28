@@ -46,14 +46,11 @@ python -m pytest -q
 
 * **test** — `python -m pytest -q` на Python 3.11 и 3.12 (matrix).
 * **lint** — `ruff check`, `ruff format --check`, `mypy --strict`.
-  Сейчас в warn-only режиме из-за pre-existing baseline; новые
-  изменения должны не ухудшать baseline (проверяется руками в PR).
+  Все три должны проходить чисто; baseline не толерируется.
 * **docker** — `docker build` + `docker compose config` (валидация
   Dockerfile и compose-yaml; image публиковать не пытаемся).
 
-Если CI красный из-за чужих pre-existing baseline-ошибок — это
-нормально для warn-only шагов. Если упал именно pytest или docker
-build — нужно чинить перед merge.
+Красный CI блокирует merge.
 
 ## Коммиты
 

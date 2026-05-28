@@ -686,8 +686,8 @@ def serve(host: str, port: int, reload: bool) -> None:
     """Запустить REST API gostforge на FastAPI/uvicorn.
 
     Опциональная зависимость: pip install -e ".[api]". Полный список
-    endpoints — docs/phase-3-api-spec.md. По умолчанию слушает только
-    127.0.0.1 (запуск из публичной сети — за reverse-proxy с auth).
+    endpoints — docs/api.md. По умолчанию слушает только 127.0.0.1
+    (запуск из публичной сети — за reverse-proxy с auth).
     """
     try:
         import uvicorn

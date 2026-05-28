@@ -45,9 +45,7 @@ _MENU_ORDER: list[tuple[str, str]] = [
     ("plugins", "Плагины проверок"),
     ("page-sections", "Колонтитулы и секции"),
     ("roadmap", "Roadmap"),
-    ("phase-2.5-spec", "ТЗ Фазы 2.5"),
-    ("phase-3-api-spec", "ТЗ Фазы 3 (API)"),
-    ("claude-code-workflow", "Работа с Claude Code"),
+    ("changelog", "История изменений"),
 ]
 
 

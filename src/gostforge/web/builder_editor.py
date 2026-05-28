@@ -1222,9 +1222,9 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
 def _inline_to_run_dict(element: InlineElement) -> dict[str, Any]:
     """Сериализовать один InlineElement в run-dict для state.
 
-    Формат run-dict совпадает со схемой, описанной в
-    docs/phase-2.5-spec.md §4.2. Атрибуты со значением None
-    в state не пишутся — это уменьшает шум JSON-save.
+    Атрибуты со значением None в state не пишутся — это уменьшает шум
+    JSON-save. Полный список поддерживаемых полей — см. docstring
+    `_run_dict_to_inline` и сам код ниже.
     """
     if isinstance(element, TextRun):
         result: dict[str, Any] = {"kind": "text", "text": element.text}

@@ -1,9 +1,9 @@
 """FastAPI-приложение для gostforge.
 
-Структура endpoints — см. docs/phase-3-api-spec.md. Главная фабрика
-`create_app()` собирает приложение и регистрирует все маршруты;
-объект `app` доступен на уровне модуля для прямого запуска
-``uvicorn gostforge.api.app:app``.
+Реестр endpoints и формат ответов — см. ``docs/api.md``. Главная
+фабрика `create_app()` собирает приложение и регистрирует все
+маршруты; объект `app` доступен на уровне модуля для прямого
+запуска ``uvicorn gostforge.api.app:app``.
 """
 
 from __future__ import annotations
@@ -204,7 +204,7 @@ def create_app() -> FastAPI:
         version=__version__,
         description=(
             "REST API нормоконтроля и автоисправления .docx по ГОСТу. "
-            "Полная спецификация: docs/phase-3-api-spec.md."
+            "Реестр endpoints — docs/api.md."
         ),
     )
 
