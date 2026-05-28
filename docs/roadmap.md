@@ -7,7 +7,7 @@
 
 **115 проверок** в 16 категориях · **28 автофиксеров** · **31 CLI-команда** ·
 **10 страниц веб-UI** (multi-page `st.navigation`) · **REST API на FastAPI** ·
-**локальная SQLite-БД** · **1812+ тестов**
+**локальная SQLite-БД** · **1819+ тестов**
 (`ruff check`, `ruff format`, `mypy --strict` чисты).
 
 Что уже работает «из коробки» — см. [README.md](../README.md#статус).
@@ -20,7 +20,8 @@
 
 | Задача | Сложность | Статус |
 |---|---|---|
-| Drag-and-drop порядка разделов и блоков (требует `streamlit-sortables`) | M | ⬜ |
+| Drag-and-drop порядка разделов (через `streamlit-sortables`) | M | ✅ |
+| Drag-and-drop порядка блоков внутри раздела | S | ⬜ |
 | Inline-WYSIWYG для параграфа (требует `streamlit-quill`) | M | ✅ |
 | Визуальный табличный редактор (вместо `\|`-separated text) | M | ✅ |
 | Per-section override схемы нумерации рисунков/таблиц | S | ✅ |

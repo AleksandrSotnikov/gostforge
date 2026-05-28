@@ -34,7 +34,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-ui = ["streamlit>=1.30", "streamlit-quill>=0.0.3"]
+ui = ["streamlit>=1.30", "streamlit-quill>=0.0.3", "streamlit-sortables>=0.3.1"]
 api = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
@@ -51,6 +51,7 @@ dev = [
     "types-openpyxl",
     "streamlit>=1.30",
     "streamlit-quill>=0.0.3",
+    "streamlit-sortables>=0.3.1",
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",
     "python-multipart>=0.0.9",

@@ -2283,6 +2283,124 @@ def _section_matches_query(section: dict[str, Any], query: str) -> bool:
     return search_in_section(section)
 
 
+def _reorder_sections_by_dnd_items(
+    sections: list[dict[str, Any]],
+    sorted_items: list[str],
+) -> list[dict[str, Any]] | None:
+    """Чистая функция: переставить ``sections`` по DnD-итемам ``"#{id}: {heading}"``.
+
+    Возвращает новый список разделов в нужном порядке, либо ``None``,
+    если матчинг id-ов нестабилен (например, sorted_items содержит
+    мусор или пропущенные id). Не мутирует вход.
+    """
+    if len(sorted_items) != len(sections):
+        return None
+    id_to_index: dict[str, int] = {}
+    for idx, sec in enumerate(sections):
+        sec_id = sec.get("id")
+        if isinstance(sec_id, str):
+            id_to_index[sec_id] = idx
+    new_sections: list[dict[str, Any]] = []
+    for item in sorted_items:
+        if not (isinstance(item, str) and item.startswith("#")):
+            return None
+        sep_idx = item.find(": ")
+        if sep_idx < 1:
+            return None
+        sec_id = item[1:sep_idx]
+        if sec_id not in id_to_index:
+            return None
+        new_sections.append(sections[id_to_index[sec_id]])
+    if len(new_sections) != len(sections):
+        return None
+    return new_sections
+
+
+def _render_section_dnd_panel(sections: list[dict[str, Any]], state: dict[str, Any]) -> bool:
+    """Toggle + drag-and-drop переупорядочивания разделов через streamlit-sortables.
+
+    Возвращает ``True``, если DnD активен и порядок уже отрендерен
+    (вызывающий пропускает классический рендер с кнопками ↑/↓).
+    ``False`` — toggle выключен либо streamlit-sortables недоступен,
+    нужно рендерить старый интерфейс.
+
+    Стратегия идентификации: каждой записи назначается строка
+    ``"#{id}: {heading}"``. ``id`` — стабильный идентификатор раздела
+    из state. После возврата из ``sort_items`` парсим id из префикса
+    и переставляем ``sections`` в найденном порядке.
+    """
+    enabled = st.toggle(
+        "Drag-and-drop разделов",
+        value=bool(state.get("section_dnd_enabled", False)),
+        key="section_dnd_toggle",
+        help=(
+            "Перетаскивайте разделы мышкой вместо ↑/↓. В DnD-режиме "
+            "кнопки дублирования / удаления исчезают — выключите "
+            "toggle, чтобы вернуть их."
+        ),
+    )
+    state["section_dnd_enabled"] = enabled
+    if not enabled:
+        return False
+
+    try:
+        from streamlit_sortables import sort_items  # type: ignore[import-untyped]
+    except ImportError:
+        st.warning(
+            "Модуль `streamlit-sortables` не установлен. Установите "
+            "`gostforge[ui]` или `pip install streamlit-sortables`, "
+            "либо снимите toggle «Drag-and-drop разделов»."
+        )
+        return False
+
+    # Гарантируем, что у всех разделов есть id (нужно для матчинга).
+    items: list[str] = []
+    for idx, sec in enumerate(sections):
+        sec_id = sec.setdefault("id", _new_block_id())
+        heading = sec.get("heading") or f"Раздел {idx + 1}"
+        items.append(f"#{sec_id}: {heading}")
+
+    sorted_items = sort_items(items, direction="vertical", key="section_dnd_sortable")
+    if not isinstance(sorted_items, list) or sorted_items == items:
+        return True
+
+    new_sections = _reorder_sections_by_dnd_items(sections, sorted_items)
+    if new_sections is None:
+        # Нестабильный матчинг — оставляем порядок без изменений.
+        return True
+
+    # Найдём, куда переехал активный раздел, и обновим индекс.
+    active_idx_old = state.get("active_section_index", 0)
+    if 0 <= active_idx_old < len(sections):
+        active_section = sections[active_idx_old]
+        try:
+            state["active_section_index"] = new_sections.index(active_section)
+        except ValueError:
+            state["active_section_index"] = 0
+
+    sections[:] = new_sections
+    st.rerun()
+    return True
+
+
+def _render_section_dnd_select(sections: list[dict[str, Any]], state: dict[str, Any]) -> None:
+    """В DnD-режиме активный раздел выбирается селект-боксом."""
+    options = list(range(len(sections)))
+    active_idx = state.get("active_section_index", 0)
+    if not 0 <= active_idx < len(sections):
+        active_idx = 0
+    chosen = st.selectbox(
+        "Активный раздел",
+        options=options,
+        index=active_idx,
+        format_func=lambda i: sections[i].get("heading") or f"Раздел {i + 1}",
+        key="section_dnd_active_select",
+    )
+    if isinstance(chosen, int) and chosen != active_idx:
+        state["active_section_index"] = chosen
+        st.rerun()
+
+
 def _render_section_tree() -> None:
     """Список разделов с кнопками ↑/↓/⎘/✕ и фильтром-поиском."""
     state = _get_state()
@@ -2315,6 +2433,10 @@ def _render_section_tree() -> None:
 
     if not sections:
         st.info("Нет ни одного раздела. Добавьте раздел кнопкой ниже.")
+    elif _render_section_dnd_panel(sections, state):
+        # DnD активен: классические кнопки ↑/↓/⎘/✕ заменяются
+        # перетаскиванием. Активный раздел выбирается селект-боксом.
+        _render_section_dnd_select(sections, state)
     else:
         for idx, section in enumerate(sections):
             # Если активен фильтр и текущий раздел не совпал — скрываем.
