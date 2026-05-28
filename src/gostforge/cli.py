@@ -2750,5 +2750,252 @@ def import_pdf_cmd(path: Path, output: Path, profile_id: str, title: str | None)
     )
 
 
+# --- gostforge doctor: диагностика окружения --------------------------------
+
+
+def _collect_doctor_report() -> dict[str, Any]:
+    """Собрать состояние окружения для команды `gostforge doctor`.
+
+    Возвращает структурированный отчёт со следующими разделами:
+
+    * ``python``: версия интерпретатора и платформа;
+    * ``gostforge``: версия пакета;
+    * ``dependencies``: статус core-deps (python-docx, lxml, pydantic,
+      click) и опциональных extras (streamlit, fastapi, pdfplumber);
+    * ``libreoffice``: найден ли бинарник (нужен для `pdf` / `convert`);
+    * ``profiles``: каталог + список профилей;
+    * ``registry``: число зарегистрированных проверок и фиксеров;
+    * ``database``: путь к локальной БД истории и доступность.
+
+    Чистая функция (никакого I/O в stdout, всё через словарь) —
+    тестируется без CliRunner и легко переиспользуется UI-доктором
+    или REST endpoint-ом в будущем.
+    """
+    import importlib
+    import platform
+    import shutil
+
+    from gostforge.fixer.engine import registered_fixers
+    from gostforge.profile import list_profiles
+    from gostforge.validator.engine import registered_checks
+
+    report: dict[str, Any] = {}
+
+    # --- Python / gostforge -----------------------------------------------
+    report["python"] = {
+        "version": platform.python_version(),
+        "platform": platform.platform(),
+        "min_required": "3.11",
+        "ok": sys.version_info >= (3, 11),
+    }
+    report["gostforge"] = {"version": __version__}
+
+    # --- Зависимости -------------------------------------------------------
+    # Маппинг python module name → имя дистрибутива на PyPI (для метаданных).
+    # У большинства пакетов совпадает; ниже — известные исключения.
+    _dist_names = {"docx": "python-docx", "yaml": "PyYAML", "PIL": "Pillow"}
+
+    def _module_info(modname: str, *, optional: bool = False) -> dict[str, Any]:
+        try:
+            importlib.import_module(modname)
+        except ImportError as exc:
+            return {"installed": False, "optional": optional, "error": str(exc)}
+        # `importlib.metadata.version` — современный способ узнать версию.
+        # `mod.__version__` deprecated в Click 9.1+ и не всегда есть у пакетов.
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            ver = version(_dist_names.get(modname, modname))
+        except PackageNotFoundError:
+            ver = "?"
+        return {"installed": True, "optional": optional, "version": ver}
+
+    report["dependencies"] = {
+        # Обязательные.
+        "python-docx": _module_info("docx"),
+        "lxml": _module_info("lxml"),
+        "pydantic": _module_info("pydantic"),
+        "yaml": _module_info("yaml"),
+        "click": _module_info("click"),
+        "openpyxl": _module_info("openpyxl"),
+        # Опциональные extras.
+        "streamlit": _module_info("streamlit", optional=True),
+        "fastapi": _module_info("fastapi", optional=True),
+        "uvicorn": _module_info("uvicorn", optional=True),
+        "pdfplumber": _module_info("pdfplumber", optional=True),
+        "PIL": _module_info("PIL", optional=True),
+    }
+
+    # --- LibreOffice (нужен для PDF / DOC→DOCX конверсии) -----------------
+    libre = shutil.which("libreoffice") or shutil.which("soffice")
+    report["libreoffice"] = {"installed": libre is not None, "path": libre}
+
+    # --- Профили -----------------------------------------------------------
+    try:
+        prof_ids = list_profiles()
+        report["profiles"] = {
+            "count": len(prof_ids),
+            "ids": list(prof_ids),
+            "ok": len(prof_ids) > 0,
+        }
+    except Exception as exc:  # pragma: no cover - реестр может упасть только при поломке файла
+        report["profiles"] = {"count": 0, "ids": [], "ok": False, "error": str(exc)}
+
+    # --- Реестр проверок/фиксеров ------------------------------------------
+    report["registry"] = {
+        "checks_count": len(registered_checks()),
+        "fixers_count": len(registered_fixers()),
+    }
+
+    # --- Локальная БД ------------------------------------------------------
+    db_path = Path.home() / ".gostforge" / "gostforge.db"
+    report["database"] = {
+        "path": str(db_path),
+        "exists": db_path.exists(),
+        "size_bytes": db_path.stat().st_size if db_path.exists() else 0,
+    }
+
+    # --- Плагины -----------------------------------------------------------
+    try:
+        from gostforge.plugins import discover_plugin_files, plugins_dir
+
+        plug_dir = plugins_dir()
+        plug_files = discover_plugin_files() if plug_dir.exists() else []
+        report["plugins"] = {
+            "dir": str(plug_dir),
+            "exists": plug_dir.exists(),
+            "files_count": len(plug_files),
+        }
+    except Exception as exc:  # pragma: no cover
+        report["plugins"] = {"dir": "?", "exists": False, "error": str(exc)}
+
+    return report
+
+
+def _doctor_status(report: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Определить общий статус: ok + список warning-сообщений.
+
+    `ok=True` означает, что критичных проблем нет (Python ≥ 3.11,
+    core-deps установлены, хотя бы один профиль). Опциональные deps
+    и LibreOffice дают warning, но не делают окружение «не рабочим».
+    """
+    warnings: list[str] = []
+    ok = True
+
+    py = report.get("python", {})
+    if not py.get("ok"):
+        warnings.append(
+            f"Python {py.get('version', '?')} — требуется ≥ {py.get('min_required', '3.11')}"
+        )
+        ok = False
+
+    deps = report.get("dependencies", {})
+    for name, info in deps.items():
+        if info.get("installed"):
+            continue
+        if info.get("optional"):
+            warnings.append(f"{name} (опционально) не установлен")
+        else:
+            warnings.append(f"{name} (обязательно) не установлен")
+            ok = False
+
+    if not report.get("libreoffice", {}).get("installed"):
+        warnings.append("LibreOffice не найден — команды `pdf` и `convert` не сработают")
+
+    profs = report.get("profiles", {})
+    if not profs.get("ok"):
+        warnings.append("Не найдено ни одного профиля (`profiles/` пуст?)")
+        ok = False
+
+    reg = report.get("registry", {})
+    if reg.get("checks_count", 0) == 0:
+        warnings.append("Реестр проверок пуст — что-то не так с пакетом")
+        ok = False
+
+    return ok, warnings
+
+
+@main.command()
+@click.option("--json", "as_json", is_flag=True, help="Вывести отчёт как JSON (machine-readable).")
+def doctor(as_json: bool) -> None:
+    """Диагностика окружения gostforge.
+
+    Показывает: версии Python и зависимостей, наличие LibreOffice,
+    каталог и список профилей, число зарегистрированных проверок и
+    фиксеров, путь к локальной БД, каталог плагинов.
+
+    Exit codes:
+    * 0 — критичных проблем нет, можно работать;
+    * 1 — есть критичные проблемы (нет core-deps, нет профилей, и т. п.).
+    """
+    report = _collect_doctor_report()
+    ok, warnings = _doctor_status(report)
+
+    if as_json:
+        out = {"ok": ok, "warnings": warnings, "report": report}
+        click.echo(json.dumps(out, ensure_ascii=False, indent=2))
+        sys.exit(0 if ok else 1)
+
+    # Человекочитаемый вывод.
+    click.echo(click.style(f"gostforge v{__version__}", bold=True))
+    py = report["python"]
+    py_mark = click.style("✓", fg="green") if py["ok"] else click.style("✗", fg="red")
+    click.echo(f"{py_mark} Python: {py['version']} ({py['platform']})")
+
+    click.echo("\n📦 Зависимости:")
+    for name, info in report["dependencies"].items():
+        if info.get("installed"):
+            mark = click.style("✓", fg="green")
+            ver = info.get("version", "?")
+            tag = " (опционально)" if info.get("optional") else ""
+            click.echo(f"  {mark} {name}: {ver}{tag}")
+        else:
+            mark = (
+                click.style("⚠", fg="yellow")
+                if info.get("optional")
+                else click.style("✗", fg="red")
+            )
+            tag = " (опционально)" if info.get("optional") else " (ОБЯЗАТЕЛЬНО)"
+            click.echo(f"  {mark} {name}: не установлен{tag}")
+
+    lo = report["libreoffice"]
+    mark = click.style("✓", fg="green") if lo["installed"] else click.style("⚠", fg="yellow")
+    where = lo["path"] or "не найден"
+    click.echo(f"\n📄 LibreOffice: {mark} {where}")
+
+    profs = report["profiles"]
+    mark = click.style("✓", fg="green") if profs.get("ok") else click.style("✗", fg="red")
+    click.echo(f"\n⚙ Профили: {mark} {profs.get('count', 0)} шт.")
+    for pid in profs.get("ids", []):
+        click.echo(f"    • {pid}")
+
+    reg = report["registry"]
+    click.echo(f"\n🔍 Реестр: проверок {reg['checks_count']} · автофиксеров {reg['fixers_count']}")
+
+    db = report["database"]
+    if db.get("exists"):
+        size_kb = db.get("size_bytes", 0) // 1024
+        click.echo(f"\n📊 БД истории: {db['path']} ({size_kb} КБ)")
+    else:
+        click.echo(f"\n📊 БД истории: {db['path']} (создастся при первой проверке)")
+
+    plug = report["plugins"]
+    if plug.get("exists"):
+        click.echo(f"\n🔌 Плагины: {plug['dir']} ({plug['files_count']} файлов)")
+    else:
+        click.echo(f"\n🔌 Плагины: {plug['dir']} (каталог не создан)")
+
+    # Сводка.
+    if warnings:
+        click.echo("\n" + click.style("Предупреждения:", fg="yellow", bold=True))
+        for w in warnings:
+            click.echo(f"  • {w}")
+    if ok:
+        click.echo("\n" + click.style("Готово к работе.", fg="green"))
+    else:
+        click.echo("\n" + click.style("Есть критичные проблемы — см. выше.", fg="red"))
+    sys.exit(0 if ok else 1)
+
+
 if __name__ == "__main__":
     main()

@@ -24,8 +24,8 @@
 
 ## Статус
 
-**115 проверок** в 16 категориях · **28 автофиксеров** · **30 CLI-команд** ·
-**6 режимов веб-UI** · **REST API на FastAPI** · **1738+ тестов**
+**115 проверок** в 16 категориях · **28 автофиксеров** · **31 CLI-команда** ·
+**6 режимов веб-UI** · **REST API на FastAPI** · **1749+ тестов**
 (`ruff check`, `ruff format`, `mypy --strict` чисты).
 
 ### Ядро
@@ -146,6 +146,7 @@
 | `serve` | REST API на FastAPI |
 | `history` | Submission-ы из локальной БД |
 | `checks` | Список всех проверок |
+| `doctor [--json]` | Диагностика окружения: версии deps, профили, LibreOffice |
 | `profiles list/show/install/uninstall/validate/diff` | Управление профилями |
 | `comment add/list/resolve/delete` | Комментарии руководитель↔студент |
 | `plugins list/dir` | Управление пользовательскими плагинами проверок |
