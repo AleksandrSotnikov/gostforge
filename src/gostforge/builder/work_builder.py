@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import contextlib
 import itertools
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -81,6 +82,22 @@ class WorkBuilder:
         self._table_counter = itertools.count(1)
         self._formula_counter = itertools.count(1)
 
+        # Per-chapter счётчики и схема нумерации (из профиля).
+        # Ключ — метка главы ("1", "2", "А", "Б", ...).
+        self._figure_counters_by_chapter: dict[str, int] = {}
+        self._table_counters_by_chapter: dict[str, int] = {}
+        # Метка текущей главы, выставляется при каждом .section(...).
+        # Пустая строка — фигура/таблица добавлены до первого раздела.
+        self._current_chapter_label: str = ""
+        self._is_current_chapter_appendix: bool = False
+        # Счётчик обычных (не-приложений) глав — для нумерации «1», «2», ...
+        # в режиме by_chapter.
+        self._regular_chapter_counter = 0
+        # Режимы нумерации читаем лениво из профиля.
+        self._figure_numbering_mode, self._table_numbering_mode = (
+            _resolve_numbering_modes_from_profile(profile_id)
+        )
+
     # --- Внутренние утилиты для SectionBuilder ------------------------------
 
     def _next_id(self, prefix: str) -> str:
@@ -95,6 +112,41 @@ class WorkBuilder:
 
     def _next_formula_number(self) -> int:
         return next(self._formula_counter)
+
+    def _next_figure_label_with_ordinal(self) -> tuple[str, int]:
+        """Метка для подписи рисунка + сквозной ordinal-номер.
+
+        Метка зависит от схемы нумерации профиля и текущей главы:
+        * приложение → «А.1», «А.2», «Б.1», ... (буква главы);
+        * by_chapter (обычная глава) → «1.1», «1.2», ... (номер главы);
+        * continuous либо нет текущей главы → «1», «2», ... .
+
+        Ordinal — сквозной int независимо от схемы (1, 2, 3, ...) —
+        используется как `Figure.number` для матчинга xref-ов по позиции.
+        """
+        ordinal = self._next_figure_number()
+        chapter = self._current_chapter_label
+        use_chapter = chapter and (
+            self._is_current_chapter_appendix or self._figure_numbering_mode == "by_chapter"
+        )
+        if use_chapter:
+            n = self._figure_counters_by_chapter.get(chapter, 0) + 1
+            self._figure_counters_by_chapter[chapter] = n
+            return f"{chapter}.{n}", ordinal
+        return str(ordinal), ordinal
+
+    def _next_table_label_with_ordinal(self) -> tuple[str, int]:
+        """Зеркально к `_next_figure_label_with_ordinal`, но для таблиц."""
+        ordinal = self._next_table_number()
+        chapter = self._current_chapter_label
+        use_chapter = chapter and (
+            self._is_current_chapter_appendix or self._table_numbering_mode == "by_chapter"
+        )
+        if use_chapter:
+            n = self._table_counters_by_chapter.get(chapter, 0) + 1
+            self._table_counters_by_chapter[chapter] = n
+            return f"{chapter}.{n}", ordinal
+        return str(ordinal), ordinal
 
     def _set_active(self, builder: SectionBuilder) -> None:
         self._active = builder
@@ -121,6 +173,15 @@ class WorkBuilder:
             level=1,
         )
         self._sections.append(sec)
+        # Обновляем контекст текущей главы для нумерации рисунков/таблиц.
+        appendix_letter = _parse_appendix_letter(heading)
+        if appendix_letter is not None:
+            self._current_chapter_label = appendix_letter
+            self._is_current_chapter_appendix = True
+        else:
+            self._regular_chapter_counter += 1
+            self._current_chapter_label = str(self._regular_chapter_counter)
+            self._is_current_chapter_appendix = False
         builder = SectionBuilder(self, sec)
         self._active = builder
         return builder
@@ -275,6 +336,41 @@ def work(
 
 _DEFAULT_MARGINS_MM = {"top": 20.0, "right": 15.0, "bottom": 20.0, "left": 30.0}
 _DEFAULT_START_VALUE = 3
+
+# Заголовок приложения по ГОСТ Р 2.105/7.32: «Приложение А», «Приложение Б», ...
+# Кириллические буквы кроме «Ё», «З», «Й», «О», «Ч», «Ъ», «Ы», «Ь» — но в
+# простой эвристике принимаем любые А-Я. Захватываем сам буквенный
+# идентификатор.
+_APPENDIX_HEADING_RE = re.compile(r"^\s*приложение\s+([А-Я])\b", re.IGNORECASE)
+
+
+def _parse_appendix_letter(heading: str) -> str | None:
+    """Если заголовок — «Приложение X[. ...]», вернуть букву X в верхнем регистре.
+
+    Иначе None — это обычная глава, не приложение.
+    """
+    match = _APPENDIX_HEADING_RE.match(heading)
+    if not match:
+        return None
+    return match.group(1).upper()
+
+
+def _resolve_numbering_modes_from_profile(
+    profile_id: str,
+) -> tuple[Literal["continuous", "by_chapter"], Literal["continuous", "by_chapter"]]:
+    """Прочитать схемы нумерации рисунков и таблиц из профиля.
+
+    Возвращает (figure_mode, table_mode). При ошибке загрузки — «continuous»
+    для обоих (как было до Сессии 22, чтобы поведение оставалось
+    обратносовместимым).
+    """
+    try:
+        from gostforge.profile import load_profile
+
+        profile = load_profile(profile_id)
+    except Exception:
+        return "continuous", "continuous"
+    return profile.styles.figure.numbering, profile.styles.table.numbering
 
 
 def _resolve_page_params_from_profile(

@@ -112,6 +112,11 @@ class TableStyleProfile(BaseModel):
     cell_space_after_pt: float = 0.0
     # Выравнивание текста в шапке — обычно центрирование.
     header_alignment: Literal["left", "right", "center", "justify"] = "center"
+    # Схема нумерации (зеркально к FigureStyleProfile.numbering):
+    # * "continuous" — Таблица 1, Таблица 2, ... сквозь весь документ;
+    # * "by_chapter" — Таблица 1.1, 1.2, ..., 2.1, ... .
+    # Приложения — буквенно (Таблица А.1, ...) независимо от режима.
+    numbering: Literal["continuous", "by_chapter"] = "continuous"
     # Выравнивание подписи таблицы.
     caption: CaptionStyleProfile = Field(
         default_factory=lambda: CaptionStyleProfile(
@@ -139,6 +144,13 @@ class FigureStyleProfile(BaseModel):
     # ограничиваем по умолчанию 22 см (оставляем место под подпись и
     # часть текста). Картинка крупнее — масштабируется пропорционально.
     max_height_cm: float = 22.0
+    # Схема нумерации:
+    # * "continuous" — сквозная: Рисунок 1, Рисунок 2, ... через весь
+    #   документ (без главы);
+    # * "by_chapter" — по главам: Рисунок 1.1, 1.2, ..., 2.1, ... .
+    # В приложениях нумерация всегда буквенная (А.1, А.2, Б.1, ...)
+    # независимо от выбранного режима.
+    numbering: Literal["continuous", "by_chapter"] = "continuous"
     # keep_with_next: параграф с рисунком не отрывается от подписи под
     # ним (Word не переносит рисунок отдельно на следующую страницу,
     # оставляя подпись внизу прежней).

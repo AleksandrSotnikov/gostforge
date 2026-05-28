@@ -92,13 +92,18 @@ class SectionBuilder:
 
         Если `image_path` указывает на существующий файл, экспортёр вставит
         реальное изображение; иначе — placeholder-параграф `[Рисунок: id]`.
+
+        Формат метки зависит от ``profile.styles.figure.numbering`` и
+        текущей главы: «1» (сквозная), «3.1» (by_chapter), «А.1» (приложение).
+        Поле `Figure.number` хранит сквозной порядковый int — для xref-ов
+        и валидатора, которые матчатся по позиции (а не по строковой метке).
         """
-        number = self._root._next_figure_number()
+        label, ordinal = self._root._next_figure_label_with_ordinal()
         fig = Figure(
             id=self._root._next_id("fig"),
             image_path=image_path,
-            caption=[TextRun(text=f"Рисунок {number} — {caption}")],
-            number=number,
+            caption=[TextRun(text=f"Рисунок {label} — {caption}")],
+            number=ordinal,
         )
         self._section.children.append(fig)
         return self
@@ -182,14 +187,18 @@ class SectionBuilder:
         rows: builtins.list[builtins.list[str]],
         caption: str,
     ) -> SectionBuilder:
-        """Добавить таблицу с автонумерованной подписью."""
-        number = self._root._next_table_number()
+        """Добавить таблицу с автонумерованной подписью.
+
+        Формат метки — как у figure (continuous / by_chapter / appendix).
+        Поле `Table.number` — сквозной int (для xref-ов).
+        """
+        label, ordinal = self._root._next_table_label_with_ordinal()
         tbl = Table(
             id=self._root._next_id("tbl"),
-            caption=[TextRun(text=f"Таблица {number} — {caption}")],
+            caption=[TextRun(text=f"Таблица {label} — {caption}")],
             headers=[[TextRun(text=h)] for h in headers],
             rows=[[[TextRun(text=cell)] for cell in row] for row in rows],
-            number=number,
+            number=ordinal,
         )
         self._section.children.append(tbl)
         return self
