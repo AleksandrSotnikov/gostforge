@@ -18,8 +18,14 @@ from gostforge.model import (
 
 
 def test_schema_version_bumped_for_phase_25() -> None:
-    """SCHEMA_VERSION = 0.3.0 после расширения inline-элементов."""
-    assert SCHEMA_VERSION == "0.3.0"
+    """SCHEMA_VERSION ≥ 0.3.0 после расширения inline-элементов.
+
+    Версия двигается дальше при последующих изменениях модели
+    (например, 0.4.0 добавил Table.extra_header_rows для многоуровневой
+    шапки).
+    """
+    parts = [int(p) for p in SCHEMA_VERSION.split(".")]
+    assert parts >= [0, 3, 0]
 
 
 def test_text_run_underline_default_none() -> None:

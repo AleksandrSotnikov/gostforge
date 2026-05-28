@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
-SCHEMA_VERSION = "0.3.0"
+SCHEMA_VERSION = "0.4.0"
 
 
 # --- Inline content -----------------------------------------------------------
@@ -194,12 +194,21 @@ class Table(Block):
     type: BlockType = BlockType.TABLE
     caption: list[InlineElement] = field(default_factory=list)
     headers: list[list[InlineElement]] = field(default_factory=list)
+    # Дополнительные строки шапки НАД основной (`headers`). Пустой
+    # список = одноуровневая шапка (поведение по умолчанию). Полезно для
+    # таблиц с многоуровневыми заголовками типа «Группа 1 | Группа 2»
+    # сверху и «Подзаг A | Подзаг B | ...» снизу.
+    # Порядок — сверху вниз: extra_header_rows[0] — самая верхняя строка,
+    # extra_header_rows[-1] непосредственно над headers. Колонки внутри
+    # ряда часто склеиваются через `merges` (CellMerge с colspan).
+    extra_header_rows: list[list[list[InlineElement]]] = field(default_factory=list)
     rows: list[list[list[InlineElement]]] = field(default_factory=list)
     column_widths_pct: list[float] | None = None
     number: int | None = None
     # Объединённые ячейки. Пустой список = плоская таблица.
     # Заполняется парсером из <w:vMerge>/<w:gridSpan>; экспортёр пишет
-    # обратно. Координаты row/col — индексы в (headers + rows), 0-based.
+    # обратно. Координаты row/col — индексы в (extra_header_rows +
+    # headers + rows), 0-based.
     merges: list[CellMerge] = field(default_factory=list)
 
 

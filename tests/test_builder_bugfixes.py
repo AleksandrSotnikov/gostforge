@@ -143,9 +143,7 @@ def test_purge_section_ids_recursively_clears_nested_subsections() -> None:
             {
                 "id": "sub-1-1",
                 "heading": "1.1",
-                "subsections": [
-                    {"id": "subsub-1-1-1", "heading": "1.1.1", "subsections": []}
-                ],
+                "subsections": [{"id": "subsub-1-1-1", "heading": "1.1.1", "subsections": []}],
             }
         ],
     }

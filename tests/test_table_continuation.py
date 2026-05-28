@@ -17,7 +17,7 @@ def _docx_part(out: Path, part: str) -> str:
         return zf.read(part).decode("utf-8")
 
 
-def test_table_header_row_has_tblHeader_by_default(tmp_path: Path) -> None:
+def test_table_header_row_has_tblheader_by_default(tmp_path: Path) -> None:
     """По умолчанию `repeat_header=True` → шапка получает `<w:tblHeader/>`."""
     b = (
         work("X", year=2026)

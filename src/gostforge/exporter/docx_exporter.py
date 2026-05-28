@@ -622,6 +622,8 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
     """
     _write_caption_paragraph(doc, table.caption, caption_kind="table")
     column_count = len(table.headers) if table.headers else 0
+    for extra_row in table.extra_header_rows:
+        column_count = max(column_count, len(extra_row))
     for row in table.rows:
         column_count = max(column_count, len(row))
     if column_count == 0:
@@ -629,12 +631,11 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
 
     cfg = _current_profile.styles.table if _current_profile is not None else None
     add_continuation = cfg is not None and cfg.continuation_caption and table.number is not None
-    continuation_text = (
-        f"Продолжение таблицы {table.number}" if add_continuation else None
-    )
+    continuation_text = f"Продолжение таблицы {table.number}" if add_continuation else None
 
     rows_total = (
         (1 if continuation_text else 0)
+        + len(table.extra_header_rows)
         + (1 if table.headers else 0)
         + len(table.rows)
     )
@@ -646,6 +647,7 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
         _apply_table_borders(docx_table, cfg)
 
     repeat_header = cfg is None or cfg.repeat_header
+    header_bold = cfg.header_bold if cfg is not None else True
 
     row_idx = 0
     # Опциональная строка «Продолжение таблицы N» — широкая на все колонки,
@@ -656,7 +658,6 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
         _write_runs(cell0.paragraphs[0], [TextRun(text=continuation_text, italic=True)])
         _apply_cell_paragraph_format(cell0, cfg, is_header=True)
         _apply_cell_font(cell0, cfg)
-        # Сливаем все ячейки строки в одну (colspan=column_count).
         if column_count > 1:
             _apply_cell_merges(
                 docx_table,
@@ -665,8 +666,24 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
         _mark_row_as_header(docx_table.rows[row_idx])
         row_idx += 1
 
+    # Дополнительные строки шапки (для двух/трёх-уровневой шапки).
+    for extra_row in table.extra_header_rows:
+        for col_idx, cell_content in enumerate(extra_row):
+            if col_idx >= column_count:
+                break
+            cell = docx_table.rows[row_idx].cells[col_idx]
+            cell.text = ""
+            _write_runs(cell.paragraphs[0], cell_content)
+            _apply_cell_paragraph_format(cell, cfg, is_header=True)
+            _apply_cell_font(cell, cfg)
+            if header_bold:
+                for run in cell.paragraphs[0].runs:
+                    run.bold = True
+        if repeat_header:
+            _mark_row_as_header(docx_table.rows[row_idx])
+        row_idx += 1
+
     if table.headers:
-        header_bold = cfg.header_bold if cfg is not None else True
         for col_idx, cell_content in enumerate(table.headers):
             cell = docx_table.rows[row_idx].cells[col_idx]
             cell.text = ""
@@ -690,13 +707,18 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
             _apply_cell_font(cell, cfg)
         row_idx += 1
 
-    # CellMerge из модели применяем С УЧЁТОМ сдвига строк из-за continuation-row.
+    # CellMerge — индексы заданы в координатах (extra_header_rows +
+    # headers + rows). Если есть continuation-row, сдвигаем все на 1.
     if table.merges:
         row_offset = 1 if continuation_text else 0
-        shifted = [
-            CellMerge(row=m.row + row_offset, col=m.col, rowspan=m.rowspan, colspan=m.colspan)
-            for m in table.merges
-        ]
+        shifted = (
+            [
+                CellMerge(row=m.row + row_offset, col=m.col, rowspan=m.rowspan, colspan=m.colspan)
+                for m in table.merges
+            ]
+            if row_offset
+            else list(table.merges)
+        )
         _apply_cell_merges(docx_table, shifted)
 
 

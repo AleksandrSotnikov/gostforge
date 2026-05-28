@@ -186,6 +186,41 @@ def _purge_block_ids_recursively(section: dict[str, Any]) -> None:
         _purge_block_ids_recursively(sub)
 
 
+def _auto_merges_from_extra_header_rows(
+    extra_header_rows: list[list[str]],
+) -> list[dict[str, int]]:
+    """Сгенерировать `merges` для двух/трёх-уровневой шапки из текстовых
+    рядов.
+
+    Эвристика: подряд идущие пустые ячейки склеиваются с ближайшей слева
+    непустой. Пример: ``["Группа 1", "", "Группа 2", ""]`` → одно слияние
+    col 0 colspan 2 и одно col 2 colspan 2.
+
+    Координаты в возвращённых dict-ах — относительно начала
+    extra_header_rows (т.е. row 0 — самый верхний ряд шапки). Это
+    согласуется с моделью `Table.merges`, где координаты считаются от
+    extra_header_rows + headers + rows.
+    """
+    merges: list[dict[str, int]] = []
+    for r_idx, row in enumerate(extra_header_rows):
+        c_idx = 0
+        while c_idx < len(row):
+            if row[c_idx].strip() == "":
+                # Пустая в самом начале — пропускаем (некуда сливать).
+                c_idx += 1
+                continue
+            # Считаем, сколько пустых ячеек справа.
+            colspan = 1
+            j = c_idx + 1
+            while j < len(row) and row[j].strip() == "":
+                colspan += 1
+                j += 1
+            if colspan > 1:
+                merges.append({"row": r_idx, "col": c_idx, "rowspan": 1, "colspan": colspan})
+            c_idx = j
+    return merges
+
+
 def _purge_section_ids_recursively(section: dict[str, Any]) -> None:
     """Убрать `id` у самой секции и всех вложенных подразделов.
 
@@ -1497,12 +1532,36 @@ def _apply_blocks(section_builder: SectionBuilder, blocks: list[dict[str, Any]])
             headers = list(block.get("headers") or [])
             rows = [list(r) for r in (block.get("rows") or [])]
             caption = block.get("caption", "")
+            extra_header_rows_raw = block.get("extra_header_rows") or []
+            merges_raw = block.get("merges") or []
             if not headers and not rows:
                 continue
             # Все ячейки должны быть str — на всякий случай приводим.
             headers = [str(h) for h in headers]
             rows = [[str(c) for c in r] for r in rows]
-            section_builder.table(headers=headers, rows=rows, caption=str(caption))
+            extra_rows: list[list[str]] = [
+                [str(c) for c in (row or [])] for row in extra_header_rows_raw
+            ]
+            # Сериализация в state: {"row": int, "col": int, "rowspan": int, "colspan": int}.
+            from gostforge.model import CellMerge as _CellMerge
+
+            merges_typed = [
+                _CellMerge(
+                    row=int(m.get("row", 0)),
+                    col=int(m.get("col", 0)),
+                    rowspan=int(m.get("rowspan", 1)),
+                    colspan=int(m.get("colspan", 1)),
+                )
+                for m in merges_raw
+                if isinstance(m, dict)
+            ]
+            section_builder.table(
+                headers=headers,
+                rows=rows,
+                caption=str(caption),
+                extra_header_rows=extra_rows or None,
+                merges=merges_typed or None,
+            )
         elif kind == "figure":
             image_path = block.get("image_path") or ""
             # Канонический источник — вшитый в state data-URI (переживает
@@ -3989,6 +4048,26 @@ def _render_single_block(
             key=f"{base}_headers",
         )
         block["headers"] = [h.strip() for h in new_headers.split(",") if h.strip()]
+        # Дополнительные ряды шапки (для двух-/трёх-уровневой шапки по ГОСТ Р 2.105).
+        extra_rows_str = "\n".join("|".join(row) for row in (block.get("extra_header_rows") or []))
+        new_extra = st.text_area(
+            "Доп. шапка (один ряд = одна строка; пустая ячейка склеится с левой соседней)",
+            value=extra_rows_str,
+            key=f"{base}_extra_headers",
+            height=80,
+            help=(
+                "Пример: «Группа 1||Группа 2|» — «Группа 1» займёт 2 колонки и "
+                "«Группа 2» — следующие 2. Каждая строка — отдельный ряд шапки сверху вниз."
+            ),
+        )
+        parsed_extra: list[list[str]] = []
+        for line in new_extra.splitlines():
+            if not line.strip():
+                continue
+            parsed_extra.append([cell.strip() for cell in line.split("|")])
+        block["extra_header_rows"] = parsed_extra
+        # Авто-генерация merges из пустых ячеек: подряд идущие пустые → colspan.
+        block["merges"] = _auto_merges_from_extra_header_rows(parsed_extra)
         rows_str = "\n".join("|".join(row) for row in (block.get("rows") or []))
         new_rows = st.text_area(
             "Строки (одна строка таблицы — одна строка ввода; ячейки разделять символом «|»)",

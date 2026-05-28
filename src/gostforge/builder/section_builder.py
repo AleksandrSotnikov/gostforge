@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from gostforge.model import (
+    CellMerge,
     Document,
     Figure,
     Formula,
@@ -186,18 +187,31 @@ class SectionBuilder:
         headers: builtins.list[str],
         rows: builtins.list[builtins.list[str]],
         caption: str,
+        *,
+        extra_header_rows: builtins.list[builtins.list[str]] | None = None,
+        merges: builtins.list[CellMerge] | None = None,
     ) -> SectionBuilder:
         """Добавить таблицу с автонумерованной подписью.
 
         Формат метки — как у figure (continuous / by_chapter / appendix).
         Поле `Table.number` — сквозной int (для xref-ов).
+
+        Для двух/трёх-уровневой шапки (ГОСТ Р 2.105):
+        * ``extra_header_rows`` — дополнительные ряды НАД основной шапкой,
+          сверху вниз. Каждый ряд — список строк-ячеек.
+        * ``merges`` — объединения колонок (обычно colspan у группирующих
+          ячеек верхних рядов). Координаты — в (extra_header_rows + headers
+          + rows).
         """
         label, ordinal = self._root._next_table_label_with_ordinal()
+        extra = extra_header_rows or []
         tbl = Table(
             id=self._root._next_id("tbl"),
             caption=[TextRun(text=f"Таблица {label} — {caption}")],
             headers=[[TextRun(text=h)] for h in headers],
+            extra_header_rows=[[[TextRun(text=c)] for c in row] for row in extra],
             rows=[[[TextRun(text=cell)] for cell in row] for row in rows],
+            merges=list(merges or []),
             number=ordinal,
         )
         self._section.children.append(tbl)
