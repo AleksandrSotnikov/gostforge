@@ -585,27 +585,28 @@ def render() -> None:
 
     # Импорты обёрток отложены до самого st.navigation — они в свою очередь
     # делают lazy-import тяжёлого модуля только при заходе на страницу.
-    from gostforge.web.pages import (
-        builder as builder_page,
+    from gostforge.web.pages import docs as docs_page
+    from gostforge.web.pages import history as history_page
+    from gostforge.web.pages import home as home_page
+    from gostforge.web.pages import normocontrol as normocontrol_page
+    from gostforge.web.pages import profile_editor as profile_editor_page
+    from gostforge.web.pages.builder import (
+        content as builder_content,
     )
-    from gostforge.web.pages import (
-        docs as docs_page,
+    from gostforge.web.pages.builder import (
+        export as builder_export,
     )
-    from gostforge.web.pages import (
-        history as history_page,
+    from gostforge.web.pages.builder import (
+        structure as builder_structure,
     )
-    from gostforge.web.pages import (
-        home as home_page,
-    )
-    from gostforge.web.pages import (
-        normocontrol as normocontrol_page,
-    )
-    from gostforge.web.pages import (
-        profile_editor as profile_editor_page,
+    from gostforge.web.pages.builder import (
+        validation as builder_validation,
     )
 
     # Группируем по смыслу — у пользователя сразу видна иерархия
-    # (workflow «обзор → действие → справка»).
+    # (workflow «обзор → действие → справка»). Конструктор — отдельная
+    # группа из 4 подстраниц, отражающих workflow «структура → контент
+    # → проверка → экспорт».
     pages = {
         "Старт": [
             st.Page(home_page.page, title="Главная", icon="🏠", url_path="home", default=True),
@@ -617,7 +618,32 @@ def render() -> None:
                 icon="🔍",
                 url_path="normocontrol",
             ),
-            st.Page(builder_page.page, title="Конструктор", icon="🛠️", url_path="builder"),
+        ],
+        "Конструктор": [
+            st.Page(
+                builder_structure.page,
+                title="Структура",
+                icon="🏗️",
+                url_path="builder-structure",
+            ),
+            st.Page(
+                builder_content.page,
+                title="Содержимое",
+                icon="✏️",
+                url_path="builder-content",
+            ),
+            st.Page(
+                builder_validation.page,
+                title="Проверка",
+                icon="✅",
+                url_path="builder-validation",
+            ),
+            st.Page(
+                builder_export.page,
+                title="Экспорт",
+                icon="📤",
+                url_path="builder-export",
+            ),
         ],
         "Настройка": [
             st.Page(

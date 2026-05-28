@@ -14,17 +14,26 @@ pytest.importorskip("streamlit")
 
 
 def test_all_page_modules_importable() -> None:
-    """Каждый модуль в `web.pages` импортируется и имеет callable `page`."""
-    from gostforge.web.pages import (
-        builder,
-        docs,
-        history,
+    """Каждый модуль в `web.pages` импортируется и имеет callable `page`.
+
+    Конструктор — это подпакет с 4 страницами (structure / content /
+    validation / export); каждая отдельный URL.
+    """
+    from gostforge.web.pages import docs, history, home, normocontrol, profile_editor
+    from gostforge.web.pages.builder import content, export, structure, validation
+
+    modules = (
         home,
         normocontrol,
         profile_editor,
+        history,
+        docs,
+        structure,
+        content,
+        validation,
+        export,
     )
-
-    for module in (home, normocontrol, builder, profile_editor, history, docs):
+    for module in modules:
         assert hasattr(module, "page"), f"{module.__name__} должен иметь функцию page()"
         assert callable(module.page)
 
@@ -57,5 +66,10 @@ def test_navigation_url_paths_are_unique() -> None:
     import re
 
     paths = re.findall(r'url_path="([^"]+)"', source)
-    assert len(paths) == 6, f"Ожидалось 6 страниц, найдено {len(paths)}: {paths}"
+    # 5 верхнеуровневых режимов + 4 подстраницы Конструктора = 9.
+    assert len(paths) == 9, f"Ожидалось 9 страниц, найдено {len(paths)}: {paths}"
     assert len(set(paths)) == len(paths), f"Дубли URL pathname: {paths}"
+    # Подстраницы конструктора — отдельные URL.
+    assert {"builder-structure", "builder-content", "builder-validation", "builder-export"} <= set(
+        paths
+    )
