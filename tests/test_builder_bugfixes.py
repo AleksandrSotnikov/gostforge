@@ -22,6 +22,7 @@ from gostforge.web.builder_editor import (
     _duplicate_block,
     _new_block_id,
     _purge_block_ids_recursively,
+    _purge_section_ids_recursively,
     _strip_caption_prefix,
 )
 
@@ -131,3 +132,28 @@ def test_purge_block_ids_handles_missing_keys() -> None:
     section: dict[str, object] = {"id": "s", "heading": "x"}
     _purge_block_ids_recursively(section)  # должно отработать без ошибок
     assert section == {"id": "s", "heading": "x"}
+
+
+def test_purge_section_ids_recursively_clears_nested_subsections() -> None:
+    """`_purge_section_ids_recursively` очищает id у самой секции и всех подразделов."""
+    section = {
+        "id": "sec-1",
+        "heading": "Глава 1",
+        "subsections": [
+            {
+                "id": "sub-1-1",
+                "heading": "1.1",
+                "subsections": [
+                    {"id": "subsub-1-1-1", "heading": "1.1.1", "subsections": []}
+                ],
+            }
+        ],
+    }
+    _purge_section_ids_recursively(section)
+    assert "id" not in section
+    sub = section["subsections"][0]
+    assert "id" not in sub
+    subsub = sub["subsections"][0]
+    assert "id" not in subsub
+    # heading и структура сохраняются.
+    assert section["heading"] == "Глава 1"

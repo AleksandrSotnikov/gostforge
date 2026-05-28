@@ -186,6 +186,18 @@ def _purge_block_ids_recursively(section: dict[str, Any]) -> None:
         _purge_block_ids_recursively(sub)
 
 
+def _purge_section_ids_recursively(section: dict[str, Any]) -> None:
+    """Убрать `id` у самой секции и всех вложенных подразделов.
+
+    Парный к `_purge_block_ids_recursively`. На клонировании раздела
+    оригинал и копия должны различаться id, чтобы Streamlit не путал
+    их виджеты.
+    """
+    section.pop("id", None)
+    for sub in section.get("subsections") or []:
+        _purge_section_ids_recursively(sub)
+
+
 # --- Undo / Redo (Фаза 2.5) -------------------------------------------------
 
 
@@ -2049,7 +2061,7 @@ def _render_section_tree() -> None:
         if st.button("+ Раздел", key="add_section"):
             sections.append(
                 {
-                    "id": f"sec-{len(sections) + 1}",
+                    "id": _new_block_id(),
                     "heading": f"Новый раздел {len(sections) + 1}",
                     "blocks": [],
                     "subsections": [],
@@ -2061,7 +2073,7 @@ def _render_section_tree() -> None:
         if st.button("+ Список литературы", key="add_bib"):
             sections.append(
                 {
-                    "id": f"bib-{len(sections) + 1}",
+                    "id": _new_block_id(),
                     "heading": "Список использованных источников",
                     "blocks": [],
                     "subsections": [],
@@ -3313,10 +3325,11 @@ def _duplicate_section(idx: int) -> None:
         return
     original = sections[idx]
     copy = json.loads(json.dumps(original))
-    # Очищаем id у всех блоков копии (на любом уровне вложенности) —
-    # иначе клонированные блоки получили бы такие же ключи виджетов,
-    # как у оригинала, и состояние редактора перепуталось бы.
+    # Очищаем id у всех блоков и самой секции/подразделов копии — иначе
+    # клон получит те же ключи виджетов, что у оригинала, и состояние
+    # редактора перепутается. Свежий id назначится на ближайшем рендере.
     _purge_block_ids_recursively(copy)
+    _purge_section_ids_recursively(copy)
     original_heading = str(copy.get("heading", "Раздел")).strip()
     copy["heading"] = f"{original_heading} (копия)"
     # Bib-секцию НЕ дублируем как is_bibliography — две bib-секции
@@ -3472,6 +3485,11 @@ def _render_active_section_editor() -> None:
         idx = 0
         state["active_section_index"] = 0
     section = sections[idx]
+    # Стабильный per-section id для ключей виджетов: после
+    # удаления/перемещения раздела позиционный idx сдвигается, а закэшированные
+    # Streamlit-ом значения «приклеиваются» к соседу. id переживает любые
+    # перестановки и одинаков для каждого раздела.
+    sec_id = section.setdefault("id", _new_block_id())
 
     st.divider()
     st.subheader("Редактор раздела")
@@ -3479,7 +3497,7 @@ def _render_active_section_editor() -> None:
     section["heading"] = st.text_input(
         "Название раздела",
         value=section.get("heading", ""),
-        key=f"edit_heading_{idx}",
+        key=f"edit_heading_{sec_id}",
     )
 
     # Быстрое переупорядочивание: select-box с целевой позицией.
@@ -3506,8 +3524,8 @@ def _render_active_section_editor() -> None:
     if section.get("is_bibliography"):
         _render_references_editor(section, idx)
     else:
-        _render_blocks_editor(section.get("blocks", []), key_prefix=f"sec{idx}")
-        _render_add_block_buttons(section.get("blocks", []), key_prefix=f"sec{idx}")
+        _render_blocks_editor(section.get("blocks", []), key_prefix=f"sec_{sec_id}")
+        _render_add_block_buttons(section.get("blocks", []), key_prefix=f"sec_{sec_id}")
         _render_move_block_to_section_panel(section, idx)
         _render_subsections_editor(section, idx)
 
@@ -3664,11 +3682,14 @@ def _render_paragraph_inline_editor(block: dict[str, Any], *, base: str) -> None
     for r_idx in list(range(len(runs))):
         if r_idx >= len(runs):
             break
+        # Стабильный per-run id (как у блоков) — иначе после удаления
+        # run-а Streamlit «приклеивает» текст соседа по позиции.
+        run_id = runs[r_idx].setdefault("id", _new_block_id())
         _render_inline_run_row(
             runs[r_idx],
             runs,
             r_idx,
-            base=f"{base}_r{r_idx}",
+            base=f"{base}_r{run_id}",
             state=state,
         )
 
@@ -4227,6 +4248,9 @@ def _render_subsections_editor(section: dict[str, Any], sec_idx: int) -> None:
     if not subs:
         st.caption("Подразделов нет.")
     for s_idx, sub in enumerate(subs):
+        # Стабильный per-subsection id — иначе после delete/move
+        # виджеты Streamlit «приклеиваются» к соседу по позиции.
+        sub_id = sub.setdefault("id", _new_block_id())
         with st.expander(
             f"{sec_idx + 1}.{s_idx + 1} {sub.get('heading') or '(без названия)'}",
             expanded=False,
@@ -4234,11 +4258,11 @@ def _render_subsections_editor(section: dict[str, Any], sec_idx: int) -> None:
             sub["heading"] = st.text_input(
                 "Название подраздела",
                 value=sub.get("heading", ""),
-                key=f"sub_heading_{sec_idx}_{s_idx}",
+                key=f"sub_heading_{sub_id}",
             )
             sub_blocks = sub.setdefault("blocks", [])
-            _render_blocks_editor(sub_blocks, key_prefix=f"sec{sec_idx}_sub{s_idx}")
-            _render_add_block_buttons(sub_blocks, key_prefix=f"sec{sec_idx}_sub{s_idx}")
+            _render_blocks_editor(sub_blocks, key_prefix=f"sub_{sub_id}")
+            _render_add_block_buttons(sub_blocks, key_prefix=f"sub_{sub_id}")
 
             # Подразделы 3-го уровня (sub-subsections).
             _render_subsubsections_editor(sub, sec_idx, s_idx)
@@ -4270,7 +4294,7 @@ def _render_subsections_editor(section: dict[str, Any], sec_idx: int) -> None:
     if st.button("+ Подраздел", key=f"add_sub_{sec_idx}"):
         subs.append(
             {
-                "id": f"sub-{sec_idx}-{len(subs) + 1}",
+                "id": _new_block_id(),
                 "heading": f"Подраздел {len(subs) + 1}",
                 "blocks": [],
                 "subsections": [],
@@ -4286,6 +4310,8 @@ def _render_subsubsections_editor(sub: dict[str, Any], sec_idx: int, s_idx: int)
     if not subsubs:
         st.caption("Пунктов нет.")
     for ss_idx, subsub in enumerate(subsubs):
+        # Стабильный per-sub-subsection id (см. _render_subsections_editor).
+        subsub_id = subsub.setdefault("id", _new_block_id())
         with st.expander(
             f"{sec_idx + 1}.{s_idx + 1}.{ss_idx + 1} {subsub.get('heading') or '(без названия)'}",
             expanded=False,
@@ -4293,10 +4319,10 @@ def _render_subsubsections_editor(sub: dict[str, Any], sec_idx: int, s_idx: int)
             subsub["heading"] = st.text_input(
                 "Название пункта",
                 value=subsub.get("heading", ""),
-                key=f"subsub_heading_{sec_idx}_{s_idx}_{ss_idx}",
+                key=f"subsub_heading_{subsub_id}",
             )
             subsub_blocks = subsub.setdefault("blocks", [])
-            prefix = f"sec{sec_idx}_sub{s_idx}_ss{ss_idx}"
+            prefix = f"subsub_{subsub_id}"
             _render_blocks_editor(subsub_blocks, key_prefix=prefix)
             _render_add_block_buttons(subsub_blocks, key_prefix=prefix)
             # Перемещение ↑/↓, дублирование, удаление пункта.
@@ -4329,7 +4355,7 @@ def _render_subsubsections_editor(sub: dict[str, Any], sec_idx: int, s_idx: int)
     ):
         subsubs.append(
             {
-                "id": f"subsub-{sec_idx}-{s_idx}-{len(subsubs) + 1}",
+                "id": _new_block_id(),
                 "heading": f"Пункт {len(subsubs) + 1}",
                 "blocks": [],
             }
