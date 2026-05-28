@@ -187,3 +187,62 @@ def test_content_page_exposes_inline_element_buttons_inside_paragraph() -> None:
     expected = {"+ Текст", "+ Формула", "+ Ссылка", "+ Цитата"}
     missing = expected - button_labels
     assert not missing, f"Не хватает inline-кнопок: {missing}"
+
+
+def test_structure_page_has_help_block() -> None:
+    """На странице «Структура» свёрнут help-блок «Что доступно»."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+    at = AppTest.from_string("from gostforge.web.pages.builder.structure import page\npage()\n")
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    expander_labels = [e.label for e in at.expander]
+    assert any("Что доступно" in lbl for lbl in expander_labels), (
+        f"Help-блок не найден; expanders: {expander_labels}"
+    )
+
+
+def test_validation_page_has_help_block() -> None:
+    """На странице «Проверка» свёрнут help-блок «Что доступно»."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+    at = AppTest.from_string("from gostforge.web.pages.builder.validation import page\npage()\n")
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    expander_labels = [e.label for e in at.expander]
+    assert any("Что доступно" in lbl for lbl in expander_labels), (
+        f"Help-блок не найден; expanders: {expander_labels}"
+    )
+
+
+def test_export_page_has_help_block() -> None:
+    """На странице «Экспорт» свёрнут help-блок «Что доступно»."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+    at = AppTest.from_string("from gostforge.web.pages.builder.export import page\npage()\n")
+    at.session_state["builder_state"] = {
+        "title": "Тест",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава",
+                "blocks": [{"kind": "paragraph", "text": "x"}],
+                "subsections": [],
+            }
+        ],
+        "active_section_index": 0,
+    }
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    expander_labels = [e.label for e in at.expander]
+    assert any("Что доступно" in lbl for lbl in expander_labels), (
+        f"Help-блок не найден; expanders: {expander_labels}"
+    )
