@@ -4622,11 +4622,18 @@ def _render_generate_button() -> None:
     )
 
     cols = st.columns(2)
-    do_generate = cols[0].button("Сгенерировать .docx", key="builder_generate")
+    # Primary-кнопка: главное действие страницы «Экспорт».
+    do_generate = cols[0].button(
+        "Сгенерировать .docx",
+        key="builder_generate",
+        type="primary",
+        use_container_width=True,
+    )
     do_preview = cols[1].button(
         "Сгенерировать + превью PDF",
         key="builder_generate_preview",
         help="Требует LibreOffice. Превращает .docx → .pdf для просмотра в браузере.",
+        use_container_width=True,
     )
 
     if not (do_generate or do_preview):
@@ -4656,6 +4663,8 @@ def _render_generate_button() -> None:
         file_name="work.docx",
         mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         key="builder_download_docx",
+        type="primary",
+        use_container_width=True,
     )
     # Markdown / HTML — те же функции, что у CLI export-md/export-html.
     from gostforge.cli import _state_to_html, _state_to_markdown

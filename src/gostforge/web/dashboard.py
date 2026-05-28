@@ -218,6 +218,29 @@ def render_dashboard() -> None:
         "ГОСТу с нуля. Оба режима работают через единую модель документа."
     )
 
+    # Onboarding-баннер для первого визита: подскажет, с какой страницы
+    # начать. Прячется кнопкой «Скрыть» — флаг живёт в session_state.
+    if not st.session_state.get("home_onboarding_dismissed"):
+        with st.container(border=True):
+            st.markdown("### 👋 С чего начать")
+            cols = st.columns(2)
+            with cols[0]:
+                st.markdown(
+                    "**Проверить готовую работу?**  \n"
+                    "Откройте **Нормоконтроль** в меню слева — загрузите `.docx`, "
+                    "посмотрите нарушения, скачайте исправленный файл."
+                )
+            with cols[1]:
+                st.markdown(
+                    "**Написать работу с нуля?**  \n"
+                    "Откройте **Конструктор → Структура** — соберите скелет работы "
+                    "(шаблон или вручную), наполните во «Содержимом», экспортируйте."
+                )
+            if st.button("Скрыть подсказку", key="home_onboarding_dismiss"):
+                st.session_state["home_onboarding_dismissed"] = True
+                st.rerun()
+        st.divider()
+
     _render_metrics()
     st.divider()
 

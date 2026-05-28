@@ -54,4 +54,15 @@ def page() -> None:
         state["active_section_index"] = int(new_idx)
         st.rerun()
 
+    # Breadcrumb текущей позиции — пользователь сразу видит, где он
+    # в иерархии работы (особенно полезно когда разделов 20+).
+    active = sections[new_idx]
+    heading = active.get("heading") or "(без названия)"
+    n_subs = len(active.get("subsections") or [])
+    n_blocks = len(active.get("blocks") or [])
+    st.caption(
+        f"📍 Раздел **{new_idx + 1} / {len(sections)}**: "
+        f"«{heading}» · блоков {n_blocks} · подразделов {n_subs}"
+    )
+
     _render_active_section_editor()
