@@ -10,6 +10,7 @@ from __future__ import annotations
 import contextlib
 import itertools
 import re
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     from gostforge.profile import Profile
 
 
+NumberingMode = Literal["continuous", "by_chapter"]
 WorkType = Literal["coursework", "bachelor_thesis", "master_thesis", "research_report", "other"]
 
 
@@ -153,6 +155,47 @@ class WorkBuilder:
 
     def _set_active(self, builder: SectionBuilder) -> None:
         self._active = builder
+
+    # --- Per-section override нумерации -------------------------------------
+
+    @contextlib.contextmanager
+    def numbering_override(
+        self,
+        *,
+        figure: NumberingMode | None = None,
+        table: NumberingMode | None = None,
+    ) -> Iterator[None]:
+        """Временно переопределить схему нумерации рисунков/таблиц.
+
+        Полезен для разделов с нестандартной нумерацией: например,
+        большая глава с по-главе-нумерацией внутри документа с глобальной
+        сквозной схемой, или наоборот. После выхода из контекста режим
+        восстанавливается.
+
+        ``figure`` / ``table`` — желаемый режим (``"continuous"`` или
+        ``"by_chapter"``) или ``None`` (не менять — оставить как в
+        профиле). Сквозной ``ordinal`` (для xref) продолжает тикать
+        независимо от режима, поэтому матчинг ссылок по позиции не
+        ломается.
+
+        Пример::
+
+            with work_builder.numbering_override(figure="by_chapter"):
+                sec_builder = work_builder.section("Большая глава")
+                sec_builder.image("img.png", "Распределение")
+                # Подпись: «Рисунок 1.1 — Распределение»
+        """
+        saved_fig = self._figure_numbering_mode
+        saved_tbl = self._table_numbering_mode
+        if figure is not None:
+            self._figure_numbering_mode = figure
+        if table is not None:
+            self._table_numbering_mode = table
+        try:
+            yield
+        finally:
+            self._figure_numbering_mode = saved_fig
+            self._table_numbering_mode = saved_tbl
 
     # --- Fluent API ----------------------------------------------------------
 

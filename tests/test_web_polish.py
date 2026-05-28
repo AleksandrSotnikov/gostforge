@@ -368,6 +368,39 @@ def test_table_block_uses_visual_data_editor_by_default() -> None:
     )
 
 
+def test_content_page_has_per_section_numbering_override_panel() -> None:
+    """На странице «Содержимое» есть expander «Нумерация рисунков и таблиц в этом разделе».
+
+    Roadmap Q2/2026: Per-section override схемы нумерации рисунков/таблиц.
+    """
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.pages.builder.content import page\npage()\n")
+    at.session_state["builder_state"] = {
+        "title": "Тест",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава",
+                "blocks": [{"kind": "paragraph", "text": "abc"}],
+                "subsections": [],
+            }
+        ],
+        "active_section_index": 0,
+    }
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    expander_labels = [e.label for e in at.expander]
+    assert any("Нумерация рисунков и таблиц" in lbl for lbl in expander_labels), (
+        f"Expander «Нумерация рисунков и таблиц» не найден; expanders: {expander_labels}"
+    )
+
+
 def test_table_block_raw_mode_keeps_text_area() -> None:
     """Когда раw-toggle включён, появляется text_area с pipe-separated строками."""
     try:

@@ -3,6 +3,44 @@
 > Хронология значимых изменений в проекте. Подробные планы развития —
 > [docs/roadmap.md](roadmap.md). Полная история — `git log`.
 
+## 2026-Q2 — per-section override схемы нумерации
+
+Roadmap-задача «Per-section override схемы нумерации рисунков/таблиц»
+переведена в ✅. У каждого раздела появилась опция переопределить
+схему нумерации (`continuous` / `by_chapter`) только для этого
+раздела, не трогая остальной документ.
+
+### Реализация
+- **WorkBuilder.numbering_override(figure=..., table=...)** —
+  контекст-менеджер: временно меняет режим, после выхода
+  восстанавливает. Сквозной `ordinal` (для xref) продолжает тикать
+  независимо от режима — матчинг ссылок по позиции не ломается.
+- **State**: новые поля `section["figure_numbering_override"]` и
+  `section["table_numbering_override"]` (None / "by_chapter" /
+  "continuous"). Невалидные значения молча игнорируются.
+- **UI**: новый expander «Нумерация рисунков и таблиц в этом
+  разделе» в редакторе активного раздела. Два selectbox-а:
+  «По профилю» (default) / «Сквозная (1, 2, 3, …)» / «По главе
+  (1.1, 1.2, 2.1, …)».
+- **`_build_document_from_state`** оборачивает обработку каждой
+  секции в `numbering_override`-контекст.
+
+### Тесты
+- `test_numbering_override_context_manager` — глобально continuous
+  + override by_chapter для одной главы → правильные подписи.
+- `test_numbering_override_separately_for_figures_and_tables` —
+  фигуры/таблицы переопределяются независимо.
+- `test_numbering_override_restores_previous_mode_on_exit` —
+  после `with` режим восстанавливается.
+- `test_build_document_from_state_applies_figure_numbering_override` —
+  state→docx с override-ом не падает.
+- `test_build_document_from_state_ignores_invalid_override` —
+  невалидное значение игнорируется.
+- `test_content_page_has_per_section_numbering_override_panel` —
+  UI-смок: expander отображается.
+
+Итог: **1799+ тестов**, все четыре гейта чисты.
+
 ## 2026-Q2 — визуальный редактор таблиц
 
 Roadmap-задача «Визуальный табличный редактор (вместо `|`-separated

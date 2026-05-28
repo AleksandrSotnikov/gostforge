@@ -1296,26 +1296,41 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
         builder.section("Введение").paragraph("")
     else:
         for sec in sections:
-            sec_builder = builder.section(sec.get("heading", "Раздел"))
-            _apply_blocks(sec_builder, sec.get("blocks") or [])
-            for sub in sec.get("subsections") or []:
-                sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))
-                _apply_blocks(sub_builder, sub.get("blocks") or [])
-                # Рекурсия для подразделов 3-го уровня и глубже.
-                for subsub in sub.get("subsections") or []:
-                    subsub_builder = sub_builder.subsection(subsub.get("heading", "Подраздел"))
-                    _apply_blocks(subsub_builder, subsub.get("blocks") or [])
-            if sec.get("is_bibliography"):
-                for ref in sec.get("references") or []:
-                    if isinstance(ref, str) and ref.strip():
-                        sec_builder.reference(ref)
-            # Отключённые проверки раздела (UI: «Нормоконтроль раздела»).
-            disabled = sec.get("disabled_checks") or []
-            if isinstance(disabled, list) and disabled:
-                if "*" in disabled:
-                    sec_builder.skip_all_checks()
-                else:
-                    sec_builder.skip_checks(*[str(c) for c in disabled])
+            # Per-section override схемы нумерации рисунков/таблиц.
+            # Допустимые значения: "by_chapter" / "continuous" / None
+            # (использовать профиль). Невалидные значения молча
+            # игнорируются — UI всегда даёт корректные.
+            fig_override_raw = sec.get("figure_numbering_override")
+            tbl_override_raw = sec.get("table_numbering_override")
+            fig_override = cast(
+                "Literal['continuous', 'by_chapter'] | None",
+                fig_override_raw if fig_override_raw in ("continuous", "by_chapter") else None,
+            )
+            tbl_override = cast(
+                "Literal['continuous', 'by_chapter'] | None",
+                tbl_override_raw if tbl_override_raw in ("continuous", "by_chapter") else None,
+            )
+            with builder.numbering_override(figure=fig_override, table=tbl_override):
+                sec_builder = builder.section(sec.get("heading", "Раздел"))
+                _apply_blocks(sec_builder, sec.get("blocks") or [])
+                for sub in sec.get("subsections") or []:
+                    sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))
+                    _apply_blocks(sub_builder, sub.get("blocks") or [])
+                    # Рекурсия для подразделов 3-го уровня и глубже.
+                    for subsub in sub.get("subsections") or []:
+                        subsub_builder = sub_builder.subsection(subsub.get("heading", "Подраздел"))
+                        _apply_blocks(subsub_builder, subsub.get("blocks") or [])
+                if sec.get("is_bibliography"):
+                    for ref in sec.get("references") or []:
+                        if isinstance(ref, str) and ref.strip():
+                            sec_builder.reference(ref)
+                # Отключённые проверки раздела (UI: «Нормоконтроль раздела»).
+                disabled = sec.get("disabled_checks") or []
+                if isinstance(disabled, list) and disabled:
+                    if "*" in disabled:
+                        sec_builder.skip_all_checks()
+                    else:
+                        sec_builder.skip_checks(*[str(c) for c in disabled])
 
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         out_path = Path(tmp.name)
@@ -3721,6 +3736,54 @@ def _render_section_validation_panel(section: dict[str, Any], idx: int) -> None:
             )
 
 
+def _render_section_numbering_override_panel(section: dict[str, Any], sec_id: str) -> None:
+    """Панель «Нумерация рисунков и таблиц в этом разделе».
+
+    Позволяет переопределить схему нумерации (`continuous` /
+    `by_chapter`) только для этого раздела. По умолчанию работает
+    схема из профиля. Полезно, например, когда в одной большой главе
+    хочется по-главе-нумерацию, а в остальном документе — сквозная.
+    """
+    section.setdefault("figure_numbering_override", None)
+    section.setdefault("table_numbering_override", None)
+
+    # Маппинг для UI selectbox: внутреннее значение -> метка.
+    options: list[str | None] = [None, "continuous", "by_chapter"]
+    labels = {
+        None: "По профилю",
+        "continuous": "Сквозная (1, 2, 3, …)",
+        "by_chapter": "По главе (1.1, 1.2, 2.1, …)",
+    }
+
+    with st.expander("Нумерация рисунков и таблиц в этом разделе", expanded=False):
+        st.caption(
+            "По умолчанию схема нумерации берётся из профиля. "
+            "Здесь можно переопределить её только для этого раздела."
+        )
+        fig_current = section.get("figure_numbering_override")
+        tbl_current = section.get("table_numbering_override")
+        if fig_current not in options:
+            fig_current = None
+        if tbl_current not in options:
+            tbl_current = None
+        new_fig = st.selectbox(
+            "Нумерация рисунков",
+            options=options,
+            index=options.index(fig_current),
+            format_func=lambda v: labels[v],
+            key=f"sec_fig_num_{sec_id}",
+        )
+        new_tbl = st.selectbox(
+            "Нумерация таблиц",
+            options=options,
+            index=options.index(tbl_current),
+            format_func=lambda v: labels[v],
+            key=f"sec_tbl_num_{sec_id}",
+        )
+        section["figure_numbering_override"] = new_fig
+        section["table_numbering_override"] = new_tbl
+
+
 def _render_active_section_editor() -> None:
     """Редактор активного раздела: heading, блоки, подразделы, references."""
     state = _get_state()
@@ -3767,6 +3830,7 @@ def _render_active_section_editor() -> None:
                 st.rerun()
 
     _render_section_validation_panel(section, idx)
+    _render_section_numbering_override_panel(section, sec_id)
 
     if section.get("is_bibliography"):
         _render_references_editor(section, idx)

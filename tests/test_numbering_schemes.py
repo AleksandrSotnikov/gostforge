@@ -177,3 +177,55 @@ def test_parse_appendix_letter() -> None:
     assert _parse_appendix_letter("Введение") is None
     # «Приложение» без буквы — не приложение.
     assert _parse_appendix_letter("Приложение") is None
+
+
+def test_numbering_override_context_manager() -> None:
+    """Контекст-менеджер `numbering_override` временно меняет режим нумерации.
+
+    Roadmap Q2/2026: «Per-section override схемы нумерации рисунков/таблиц».
+    Документ — глобально continuous; одна глава внутри `with`-блока
+    получает by_chapter, после выхода нумерация возвращается к continuous.
+    """
+    b = WorkBuilder("X")  # default continuous
+    b.section("Глава 1").figure(image_path="a.png", caption="A")
+    with b.numbering_override(figure="by_chapter"):
+        b.section("Глава 2").figure(image_path="b.png", caption="B").figure(
+            image_path="c.png", caption="C"
+        )
+    b.section("Глава 3").figure(image_path="d.png", caption="D")
+    doc = b.build()
+    # Глава 1 (continuous): «1»; Глава 2 (by_chapter): «2.1», «2.2»;
+    # Глава 3 (восстановили continuous): «4» (ordinal не сбрасывается).
+    assert _figure_captions(doc) == [
+        "Рисунок 1 — A",
+        "Рисунок 2.1 — B",
+        "Рисунок 2.2 — C",
+        "Рисунок 4 — D",
+    ]
+
+
+def test_numbering_override_separately_for_figures_and_tables() -> None:
+    """Override-режимы для рисунков и таблиц задаются независимо."""
+    b = WorkBuilder("X")
+    with b.numbering_override(figure="by_chapter"):
+        # table остаётся в default-режиме (continuous).
+        b.section("Глава 1").figure(image_path="a.png", caption="A").table(
+            headers=["H"], rows=[["v"]], caption="T1"
+        )
+    assert _figure_captions(b.build()) == ["Рисунок 1.1 — A"]
+    # Пересоберём отдельно для таблицы — счётчики у b сбрасываются заново.
+    b2 = WorkBuilder("X")
+    with b2.numbering_override(table="by_chapter"):
+        b2.section("Глава 1").table(headers=["H"], rows=[["v"]], caption="T1").table(
+            headers=["H"], rows=[["v"]], caption="T2"
+        )
+    assert _table_captions(b2.build()) == ["Таблица 1.1 — T1", "Таблица 1.2 — T2"]
+
+
+def test_numbering_override_restores_previous_mode_on_exit() -> None:
+    """После выхода из `with` режим восстанавливается, даже если внутри он менялся."""
+    b = WorkBuilder("X")
+    b._figure_numbering_mode = "continuous"
+    with b.numbering_override(figure="by_chapter"):
+        assert b._figure_numbering_mode == "by_chapter"
+    assert b._figure_numbering_mode == "continuous"
