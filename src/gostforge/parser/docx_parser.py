@@ -93,9 +93,34 @@ _ALIGN_MAP: dict[int, ParagraphAlignment] = {
 # Регэксп заголовков Word: "Heading 1", "Heading 2" и т.д.
 _HEADING_RE = re.compile(r"^Heading\s+(\d+)$")
 
-# Шаблоны подписей по тексту: «Рисунок 1 — ...», «Рис. 1 ...»; «Таблица 1 — ...».
-_FIGURE_CAPTION_TEXT_RE = re.compile(r"^Рис(?:унок)?\.?\s+\d")
-_TABLE_CAPTION_TEXT_RE = re.compile(r"^Таблица\s+\d")
+# Шаблоны подписей по тексту: распознаём широкий набор форматов:
+# «Рисунок 1 — ...», «Рис. 1.», «Рисунок 1.2 — ...», «Рисунок А.1: ...»,
+# с NBSP вместо пробелов. Аналогично для таблиц.
+# `[\s\xa0]+` явно включает NBSP — обычный `\s` в Python regex NBSP не матчит.
+_FIGURE_CAPTION_TEXT_RE = re.compile(r"^Рис(?:унок)?\.?[\s\xa0]+(?:\d|[А-Я]\.\d)")
+_TABLE_CAPTION_TEXT_RE = re.compile(r"^Таблица[\s\xa0]+(?:\d|[А-Я]\.\d)")
+
+# Регекс для извлечения числовой части номера подписи.
+# Захватывает: «1», «1.2», «А.1», «Б.2.3». Для multilevel и appendix
+# берётся числовая часть верхнего уровня (как `Figure.number: int`).
+_CAPTION_NUMBER_RE = re.compile(r"^(?:Рис(?:унок)?\.?|Таблица)[\s\xa0]+(?:[А-Я]\.)?(\d+)")
+
+
+def _extract_caption_number(text: str) -> int | None:
+    """Из текста подписи вытащить числовой `number` (int) или None.
+
+    «Рисунок 1 — Foo» → 1, «Рисунок 1.2 — Foo» → 1, «Таблица А.3 — Foo» → 3,
+    «Таблица Б.2.5 — Foo» → 2 (верхний числовой уровень). Если префикс не
+    распознан — None.
+    """
+    match = _CAPTION_NUMBER_RE.match(text.strip())
+    if match is None:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
 
 # Множество имён Word-стилей подписи (нормализуется в lowercase).
 _CAPTION_STYLE_NAMES = {"caption", "image caption", "figure caption", "table caption"}
@@ -1507,6 +1532,7 @@ def _glue_captions(items: list[LogicalSection | Block]) -> None:
                 cap = result.pop()
                 assert isinstance(cap, Paragraph)
                 item.caption = list(cap.content)
+                item.number = _extract_caption_number(_paragraph_plain_text(cap))
             result.append(item)
             i += 1
             continue
@@ -1518,6 +1544,7 @@ def _glue_captions(items: list[LogicalSection | Block]) -> None:
                 nxt = items[j]
                 if isinstance(nxt, Paragraph) and _is_figure_caption(nxt):
                     item.caption = list(nxt.content)
+                    item.number = _extract_caption_number(_paragraph_plain_text(nxt))
                     i = j + 1
                     continue
             i += 1
