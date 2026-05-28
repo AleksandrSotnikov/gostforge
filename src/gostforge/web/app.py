@@ -139,21 +139,54 @@ def _build_pdf_bytes(uploaded_file: Any) -> bytes:
 
 
 def _render_stats_table(name: str, document: Document) -> None:
-    """Вкладка «Статистика» — числовые метрики структуры документа."""
+    """Вкладка «Статистика» — числовые метрики структуры документа.
+
+    Сгруппировано: «Структура», «Содержимое», «Плотность», «Источники».
+    Сверху — крупные `st.metric`-карточки с ключевыми цифрами.
+    """
     st.subheader(name)
     s = compute_stats(document)
-    rows = [
+
+    # Топ-карточки: 4 ключевые цифры крупно.
+    mcols = st.columns(4)
+    mcols[0].metric("Разделов 1 уровня", s.logical_sections_level_1)
+    mcols[1].metric("Параграфов", s.paragraphs_non_empty)
+    mcols[2].metric("Слов", s.words)
+    avg = s.avg_words_per_paragraph
+    mcols[3].metric(
+        "Среднее слов на параграф",
+        avg,
+        help="Помогает понять, заполнена ли работа реальным текстом или это пока каркас.",
+    )
+
+    # Детальная таблица: показатели в категориях.
+    rows: list[tuple[str, object]] = [
+        ("📐 Структура", ""),
         ("Секций вёрстки", s.page_sections),
-        ("Разделов 1 уровня", s.logical_sections_level_1),
         ("Разделов всего", s.logical_sections_total),
+        ("  …уровня 1", s.logical_sections_level_1),
+        ("  …уровня 2", s.logical_sections_level_2),
+        ("  …уровня 3", s.logical_sections_level_3),
+        ("📝 Содержимое", ""),
         ("Параграфов всего", s.paragraphs),
         ("  …непустых", s.paragraphs_non_empty),
         ("Таблиц", s.tables),
         ("Рисунков", s.figures),
-        ("Источников", s.bibliography_entries),
-        ("Слов", s.words),
+        ("Списков", s.lists),
+        ("  …элементов в них", s.list_items),
+        ("Формул (блочных)", s.formulas),
+        ("📏 Плотность", ""),
+        ("Параграфов с inline-формулами", s.paragraphs_with_inline_formula),
+        ("Параграфов с перекр. ссылками", s.paragraphs_with_xref),
+        ("Параграфов с цитатами", s.paragraphs_with_citation),
+        ("Слов всего", s.words),
         ("Символов", s.characters),
+        ("📚 Источники", ""),
+        ("Источников всего", s.bibliography_entries),
     ]
+    # Распределение по типам — каждый тип отдельной строкой.
+    for type_name, count in sorted(s.bibliography_by_type.items()):
+        rows.append((f"  …тип «{type_name}»", count))
     try:
         import pandas as pd  # type: ignore[import-untyped]
 
