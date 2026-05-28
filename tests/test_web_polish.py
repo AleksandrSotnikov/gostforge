@@ -246,3 +246,23 @@ def test_export_page_has_help_block() -> None:
     assert any("Что доступно" in lbl for lbl in expander_labels), (
         f"Help-блок не найден; expanders: {expander_labels}"
     )
+
+
+def test_normocontrol_page_has_help_block() -> None:
+    """На странице «Нормоконтроль» свёрнут help-блок «Что доступно».
+
+    Помогает новичку: до загрузки файла видны только uploader + info,
+    непонятно, что появится после. Help-блок описывает 4 вкладки и
+    отчёты.
+    """
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+    at = AppTest.from_string("from gostforge.web.pages.normocontrol import page\npage()\n")
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    expander_labels = [e.label for e in at.expander]
+    assert any("Что доступно" in lbl for lbl in expander_labels), (
+        f"Help-блок не найден; expanders: {expander_labels}"
+    )
