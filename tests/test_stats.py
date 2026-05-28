@@ -172,3 +172,68 @@ def test_avg_words_per_paragraph_zero_when_no_paragraphs() -> None:
     doc = Document()
     s = compute_stats(doc)
     assert s.avg_words_per_paragraph == 0.0
+
+
+def test_compute_per_section_stats_separates_chapters() -> None:
+    """Stats разбиваются по top-level разделам в порядке появления."""
+    from gostforge.stats import compute_per_section_stats
+
+    ch1 = LogicalSection(
+        id="s1",
+        level=1,
+        heading=[TextRun(text="Глава 1")],
+        children=[
+            Paragraph(id="p1", content=[TextRun(text="один два три")]),
+            Table(id="t1"),
+        ],
+    )
+    ch2 = LogicalSection(
+        id="s2",
+        level=1,
+        heading=[TextRun(text="Глава 2")],
+        children=[
+            Paragraph(id="p2", content=[TextRun(text="четыре пять шесть семь")]),
+            Figure(id="f1"),
+            Figure(id="f2"),
+        ],
+    )
+    doc = _doc_with_content([ch1, ch2])
+    per_sec = compute_per_section_stats(doc)
+    assert len(per_sec) == 2
+    h1, s1 = per_sec[0]
+    h2, s2 = per_sec[1]
+    assert h1 == "Глава 1"
+    assert s1.paragraphs_non_empty == 1
+    assert s1.words == 3
+    assert s1.tables == 1
+    assert s1.figures == 0
+    assert h2 == "Глава 2"
+    assert s2.words == 4
+    assert s2.figures == 2
+
+
+def test_compute_per_section_stats_with_orphan_content() -> None:
+    """Контент до первого LogicalSection попадает в группу «(без раздела)»."""
+    from gostforge.stats import compute_per_section_stats
+
+    p_orphan = Paragraph(id="orph", content=[TextRun(text="до главы")])
+    ch1 = LogicalSection(
+        id="s1",
+        level=1,
+        heading=[TextRun(text="Глава")],
+        children=[Paragraph(id="p", content=[TextRun(text="внутри")])],
+    )
+    doc = _doc_with_content([p_orphan, ch1])
+    per_sec = compute_per_section_stats(doc)
+    assert len(per_sec) == 2
+    # Орфан-блоки идут после всех разделов (раздел добавляется по факту встречи).
+    headings = [h for h, _ in per_sec]
+    assert "Глава" in headings
+    assert "(без раздела)" in headings
+
+
+def test_compute_per_section_stats_handles_empty_document() -> None:
+    """Документ без секций — пустой список без падений."""
+    from gostforge.stats import compute_per_section_stats
+
+    assert compute_per_section_stats(Document()) == []

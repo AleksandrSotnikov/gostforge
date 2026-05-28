@@ -1098,20 +1098,78 @@ def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
     sys.exit(0)
 
 
+def _stats_dict(s: Any) -> dict[str, Any]:
+    """DocumentStats → JSON-friendly dict (включая avg_words_per_paragraph)."""
+    return {
+        "page_sections": s.page_sections,
+        "logical_sections_total": s.logical_sections_total,
+        "logical_sections_level_1": s.logical_sections_level_1,
+        "logical_sections_level_2": s.logical_sections_level_2,
+        "logical_sections_level_3": s.logical_sections_level_3,
+        "paragraphs": s.paragraphs,
+        "paragraphs_non_empty": s.paragraphs_non_empty,
+        "tables": s.tables,
+        "figures": s.figures,
+        "lists": s.lists,
+        "list_items": s.list_items,
+        "formulas": s.formulas,
+        "paragraphs_with_inline_formula": s.paragraphs_with_inline_formula,
+        "paragraphs_with_xref": s.paragraphs_with_xref,
+        "paragraphs_with_citation": s.paragraphs_with_citation,
+        "bibliography_entries": s.bibliography_entries,
+        "bibliography_by_type": dict(s.bibliography_by_type),
+        "words": s.words,
+        "characters": s.characters,
+        "avg_words_per_paragraph": s.avg_words_per_paragraph,
+    }
+
+
 @main.command()
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
-def stats(path: Path) -> None:
+@click.option(
+    "--by-section",
+    is_flag=True,
+    help="Дополнительно показать статистику по каждому разделу 1 уровня.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Вывести JSON (machine-readable). Объединяется с --by-section.",
+)
+def stats(path: Path, by_section: bool, as_json: bool) -> None:
     """Показать структурную статистику документа.
 
     Считает число разделов, параграфов, таблиц, рисунков, источников
-    и слов. Не зависит от профиля и не выполняет проверки.
+    и слов плюс метрики плотности (средняя длина параграфа,
+    распределение источников по типам). Не зависит от профиля и не
+    выполняет проверки.
+
+    Флаги:
+    * ``--by-section`` — разбивка по разделам 1 уровня.
+    * ``--json`` — JSON-вывод (для скриптов / CI).
     """
-    from gostforge.stats import compute_stats
+    from gostforge.stats import compute_per_section_stats, compute_stats
 
     targets = [path] if path.is_file() else sorted(path.glob("*.docx"))
     if not targets:
         click.echo(f"Не найдено .docx файлов в {path}", err=True)
         sys.exit(1)
+
+    if as_json:
+        payload: dict[str, Any] = {}
+        for target in targets:
+            document = parse_docx(target)
+            doc_stats = compute_stats(document)
+            entry: dict[str, Any] = {"total": _stats_dict(doc_stats)}
+            if by_section:
+                entry["by_section"] = [
+                    {"heading": heading, "stats": _stats_dict(s)}
+                    for heading, s in compute_per_section_stats(document)
+                ]
+            payload[target.name] = entry
+        click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
 
     for target in targets:
         document = parse_docx(target)
@@ -1120,17 +1178,41 @@ def stats(path: Path) -> None:
         rows = [
             ("Секций вёрстки (PageSection)", s.page_sections),
             ("Разделов 1 уровня", s.logical_sections_level_1),
+            ("  …уровня 2", s.logical_sections_level_2),
+            ("  …уровня 3", s.logical_sections_level_3),
             ("Разделов всего", s.logical_sections_total),
             ("Параграфов всего", s.paragraphs),
             ("  …непустых", s.paragraphs_non_empty),
+            ("  …средняя длина в словах", s.avg_words_per_paragraph),
             ("Таблиц", s.tables),
             ("Рисунков", s.figures),
+            ("Списков", s.lists),
+            ("  …элементов в них", s.list_items),
+            ("Формул (блочных)", s.formulas),
+            ("Параграфов с inline-формулами", s.paragraphs_with_inline_formula),
+            ("Параграфов с перекр. ссылками", s.paragraphs_with_xref),
+            ("Параграфов с цитатами", s.paragraphs_with_citation),
             ("Источников", s.bibliography_entries),
             ("Слов", s.words),
             ("Символов", s.characters),
         ]
         for label, value in rows:
             click.echo(f"  {label:<32} {value}")
+        if s.bibliography_by_type:
+            click.echo("  Источников по типам:")
+            for type_name, count in sorted(s.bibliography_by_type.items()):
+                click.echo(f"    {type_name:<28} {count}")
+
+        if by_section:
+            click.secho("\nПо разделам:", bold=True)
+            for heading, sec_stats in compute_per_section_stats(document):
+                click.echo(
+                    f"  • {heading:<32} "
+                    f"параграфов {sec_stats.paragraphs_non_empty}, "
+                    f"слов {sec_stats.words}, "
+                    f"таблиц {sec_stats.tables}, "
+                    f"рисунков {sec_stats.figures}"
+                )
 
 
 @main.command()

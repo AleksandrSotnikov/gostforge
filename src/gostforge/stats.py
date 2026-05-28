@@ -150,3 +150,46 @@ def compute_stats(document: Document) -> DocumentStats:
     for ps in document.page_sections:
         _iter_blocks_recursive(ps.content, stats)
     return stats
+
+
+def compute_per_section_stats(document: Document) -> list[tuple[str, DocumentStats]]:
+    """Статистика отдельно по каждому top-level разделу документа.
+
+    Полезно, чтобы увидеть наполненность по главам: какие пустые,
+    какие перегружены таблицами, где мало источников и т. д.
+
+    Возвращает список ``(heading, stats)`` в порядке появления в
+    документе. `stats.bibliography_entries` — 0 для всех (библиография
+    в модели хранится отдельно от секций, не привязана к конкретной
+    главе); `bibliography_by_type` — пустой словарь.
+
+    Top-level раздел — `LogicalSection` уровня 1 внутри любого
+    `PageSection`. Контент верхнего уровня без обёртки в раздел
+    (например, оглавление-как-блок) идёт в группу `"(без раздела)"`.
+    """
+    result: list[tuple[str, DocumentStats]] = []
+    for ps in document.page_sections:
+        # Блоки до первого LogicalSection идут в пред-разделовую группу.
+        orphan = DocumentStats()
+        has_orphan = False
+        for item in ps.content:
+            if isinstance(item, LogicalSection):
+                if item.level != 1:
+                    # Уровень 2+ без обёртки в level-1 — экзотика, считаем
+                    # его как top-level «раздел» с этим heading.
+                    pass
+                section_stats = DocumentStats()
+                # Сам heading-параграф не считается параграфом контента,
+                # его пропускаем — учитываем только children.
+                _iter_blocks_recursive(item.children, section_stats)
+                heading_text = "".join(
+                    r.text for r in item.heading if isinstance(r, TextRun)
+                ).strip()
+                result.append((heading_text or "(без названия)", section_stats))
+            else:
+                # Параграф/таблица/рисунок до первого LogicalSection.
+                _iter_blocks_recursive([item], orphan)
+                has_orphan = True
+        if has_orphan:
+            result.append(("(без раздела)", orphan))
+    return result

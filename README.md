@@ -25,7 +25,7 @@
 ## Статус
 
 **115 проверок** в 16 категориях · **28 автофиксеров** · **31 CLI-команда** ·
-**6 режимов веб-UI** · **REST API на FastAPI** · **1755+ тестов**
+**6 режимов веб-UI** · **REST API на FastAPI** · **1762+ тестов**
 (`ruff check`, `ruff format`, `mypy --strict` чисты).
 
 ### Ядро
@@ -140,7 +140,7 @@
 | `convert` | Конвертация форматов через LibreOffice (DOC→DOCX) |
 | `pdf` | `.docx` → PDF |
 | `diff` / `diff-state` | Сравнение submission-ов или state-файлов |
-| `stats` / `stats-state` | Метрики структуры |
+| `stats [--by-section] [--json]` / `stats-state` | Метрики структуры |
 | `state-versions` | Список и восстановление авто-версий state |
 | `ui` | Streamlit-WebApp |
 | `serve` | REST API на FastAPI |
