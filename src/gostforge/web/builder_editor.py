@@ -2954,12 +2954,18 @@ def _compute_live_validation_summary(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _live_validation_items(state: dict[str, Any]) -> list[dict[str, str]]:
+def _live_validation_items(state: dict[str, Any]) -> list[dict[str, Any]]:
     """Детальный список нарушений live-нормоконтроля для текущего state.
 
-    Возвращает список словарей с полями code/severity/message/suggestion
-    (все строки) — по одному на каждое нарушение. Если документ не
-    собирается или validate падает — пустой список.
+    Возвращает список словарей по одному на каждое нарушение со следующими
+    полями (всё строки кроме section_idx):
+
+    * ``code`` / ``severity`` / ``message`` / ``suggestion`` — данные нарушения;
+    * ``location`` — путь validate-а в модели (для отладки);
+    * ``section_idx`` — индекс top-level раздела в ``state["sections"]``,
+      к которому относится нарушение, или -1 если не удалось определить.
+
+    Если документ не собирается или validate падает — пустой список.
     """
     document = _state_to_validation_document(state)
     if document is None:
@@ -2969,15 +2975,49 @@ def _live_validation_items(state: dict[str, Any]) -> list[dict[str, str]]:
         violations = validate(document, profile)
     except Exception:
         return []
+
+    # Маппинг: builder-овский LogicalSection.id (например «sec-3») →
+    # позиция top-level раздела в state["sections"]. Builder обходит state
+    # по порядку, поэтому top-level секции document соответствуют
+    # state["sections"] один-к-одному по индексу.
+    id_to_state_idx: dict[str, int] = {}
+    state_sections = state.get("sections") or []
+    if document.page_sections:
+        top_secs = [c for c in document.page_sections[0].content if isinstance(c, LogicalSection)]
+        for idx, lsec in enumerate(top_secs):
+            if idx < len(state_sections):
+                id_to_state_idx[lsec.id] = idx
+                # Подразделы и пункты относятся к тому же top-level разделу.
+                for child in _iter_descendant_logical_section_ids(lsec):
+                    id_to_state_idx[child] = idx
+
+    def _section_idx_from_location(loc: str) -> int:
+        match = re.search(r"logical_section\[([^\]]+)\]", loc)
+        if match:
+            return id_to_state_idx.get(match.group(1), -1)
+        return -1
+
     return [
         {
             "code": v.check_code,
             "severity": v.severity,
             "message": v.message,
             "suggestion": v.suggestion or "",
+            "location": v.location or "",
+            "section_idx": _section_idx_from_location(v.location or ""),
         }
         for v in violations
     ]
+
+
+def _iter_descendant_logical_section_ids(section: LogicalSection) -> list[str]:
+    """Все ID логических подразделов любого уровня (рекурсивно)."""
+    ids: list[str] = []
+    for child in section.children:
+        if isinstance(child, LogicalSection):
+            ids.append(child.id)
+            ids.extend(_iter_descendant_logical_section_ids(child))
+    return ids
 
 
 def _render_toc_preview_panel() -> None:
@@ -3080,9 +3120,22 @@ def _render_live_validation_panel() -> None:
                     if shown >= max_rows:
                         truncated = True
                         break
-                    st.markdown(f"- `{it['code']}` {it['message']}")
-                    if it["suggestion"]:
-                        st.caption(f"→ {it['suggestion']}")
+                    # Стопка: код + сообщение, подсказка снизу, опц. кнопка «→ К разделу».
+                    cols = st.columns([10, 2])
+                    with cols[0]:
+                        st.markdown(f"- `{it['code']}` {it['message']}")
+                        if it["suggestion"]:
+                            st.caption(f"→ {it['suggestion']}")
+                    sec_idx = int(it.get("section_idx", -1))
+                    if sec_idx >= 0:
+                        with cols[1]:
+                            if st.button(
+                                "→ К разделу",
+                                key=f"livenav_{severity}_{shown}_{it['code']}",
+                                help="Перейти к разделу, где найдено нарушение",
+                            ):
+                                state["active_section_index"] = sec_idx
+                                st.rerun()
                     shown += 1
                 if truncated:
                     break

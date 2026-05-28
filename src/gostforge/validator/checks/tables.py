@@ -483,8 +483,11 @@ def check_table_cell_font_size(document: Document, profile: Profile) -> list[Vio
 
 
 def _iter_table_cells(table: Table) -> list[list[InlineElement]]:
-    """Все ячейки таблицы (headers + rows) как плоский список."""
+    """Все ячейки таблицы (extra_header_rows + headers + rows) как плоский список."""
     cells: list[list[InlineElement]] = []
+    for extra_row in table.extra_header_rows:
+        for cell in extra_row:
+            cells.append(cell)
     for header_cell in table.headers:
         cells.append(header_cell)
     for row in table.rows:
