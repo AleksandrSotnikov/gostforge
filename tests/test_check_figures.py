@@ -148,7 +148,8 @@ def test_i03_dot_after_number_violation() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
     assert len(found) == 1
-    assert "не соответствует формату" in found[0].message
+    assert "не соответствует" in found[0].message
+    assert "формату" in found[0].message
 
 
 def test_i03_hyphen_instead_of_em_dash_allowed_softly() -> None:
@@ -226,6 +227,78 @@ def test_i03_caption_in_nested_section() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
     assert len(found) == 1
     assert found[0].details["figure_id"] == "fig-deep"
+
+
+def test_i03_profile_format_with_dot_accepts_dot() -> None:
+    """Профиль с форматом «Рисунок {num}. {title}» принимает подпись с точкой."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1. Схема алгоритма")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.figure.caption.format = "Рисунок {num}. {title}"
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert found == []
+
+
+def test_i03_profile_format_with_dot_rejects_dash() -> None:
+    """Если профиль ждёт точку, подпись с тире — нарушение."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема алгоритма")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.figure.caption.format = "Рисунок {num}. {title}"
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert len(found) == 1
+    # В сообщении и details — ожидаемый формат из профиля.
+    assert "Рисунок {num}. {title}" in found[0].message
+    assert found[0].details["expected_format"] == "Рисунок {num}. {title}"
+
+
+def test_i03_appendix_number_accepted() -> None:
+    """Приложенческий номер «А.1» — корректен в дефолтном формате."""
+    figure = Figure(
+        id="fig-app",
+        caption=[TextRun(text="Рисунок А.1 — Структура")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert found == []
+
+
+def test_i03_custom_english_format() -> None:
+    """Полностью произвольный формат «Fig {num}: {title}» — тоже работает."""
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Fig 1: Pipeline")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.figure.caption.format = "Fig {num}: {title}"
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    assert found == []
+
+
+def test_i03_fallback_when_format_lacks_placeholders() -> None:
+    """Если format не содержит {num}/{title}, работает старый хардкод.
+
+    Back-compat: пустой или «странный» формат не должен ломать проверку —
+    она просто откатывается на встроенный regex прежнего поведения.
+    """
+    figure = Figure(
+        id="fig-1",
+        caption=[TextRun(text="Рисунок 1 — Схема алгоритма")],
+    )
+    doc = _doc_with_content([figure])
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.figure.caption.format = ""  # отключаем формат
+    found = [v for v in validate(doc, profile) if v.check_code == "I.03"]
+    # Fallback — старый regex принимает дефолтную «Рисунок 1 — Схема».
+    assert found == []
 
 
 # --- I.04 (подпись выровнена по центру, шрифт 12pt) ---------------------

@@ -134,7 +134,8 @@ def test_b03_dot_after_number_violation() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
     assert len(found) == 1
-    assert "не соответствует формату" in found[0].message
+    assert "не соответствует" in found[0].message
+    assert "формату" in found[0].message
 
 
 def test_b03_hyphen_accepted() -> None:
@@ -210,6 +211,72 @@ def test_b03_caption_in_nested_section() -> None:
     found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
     assert len(found) == 1
     assert found[0].details["table_id"] == "t-deep"
+
+
+def test_b03_profile_format_with_dot_accepts_dot() -> None:
+    """Профиль с форматом «Таблица {num}. {title}» принимает подпись с точкой."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1. Результаты")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.caption.format = "Таблица {num}. {title}"
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert found == []
+
+
+def test_b03_profile_format_with_dot_rejects_dash() -> None:
+    """Если профиль ждёт точку, подпись с тире — нарушение."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — Результаты")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.caption.format = "Таблица {num}. {title}"
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert len(found) == 1
+    assert "Таблица {num}. {title}" in found[0].message
+    assert found[0].details["expected_format"] == "Таблица {num}. {title}"
+
+
+def test_b03_appendix_number_accepted() -> None:
+    """Приложенческий номер «А.1» — корректен в дефолтном формате."""
+    table = Table(
+        id="t-app",
+        caption=[TextRun(text="Таблица А.1 — Сводка")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert found == []
+
+
+def test_b03_custom_english_format() -> None:
+    """Произвольный формат «Tbl. {num} – {title}» — работает."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Tbl. 1 – Summary")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.caption.format = "Tbl. {num} – {title}"
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert found == []
+
+
+def test_b03_fallback_when_format_lacks_placeholders() -> None:
+    """Если format не содержит {num}/{title}, работает старый хардкод."""
+    table = Table(
+        id="t-1",
+        caption=[TextRun(text="Таблица 1 — Результаты")],
+    )
+    doc = _doc_with_content([table])
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.caption.format = ""
+    found = [v for v in validate(doc, profile) if v.check_code == "B.03"]
+    assert found == []
 
 
 # --- B.09 (сквозная нумерация таблиц) ------------------------------------
