@@ -52,6 +52,40 @@ def test_app_renders_navigation_without_exceptions() -> None:
     assert at.title
 
 
+def test_builder_subpages_render_without_exceptions() -> None:
+    """Каждая из 4 подстраниц Конструктора рендерится без исключений.
+
+    Регресс на баг (этап 2A первой итерации), когда `_common_sidebar`
+    дважды вызывал `_render_state_persistence_sidebar` — один раз
+    напрямую, второй — внутри `_render_sidebar_metadata`. Из-за этого
+    Streamlit падал с StreamlitDuplicateElementKey('builder_undo'),
+    и main-area страницы оставалась пустой.
+    """
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    expected_titles = {
+        "structure": "Структура работы",
+        "content": "Содержимое раздела",
+        "validation": "Проверка",
+        "export": "Экспорт",
+    }
+    for name, expected_title in expected_titles.items():
+        at = AppTest.from_string(
+            f"from gostforge.web.pages.builder.{name} import page\npage()\n"
+        )
+        at.run(timeout=60)
+        assert not at.exception, (
+            f"builder/{name}.page() упала с: {[str(e) for e in at.exception]}"
+        )
+        titles = [t.value for t in at.title]
+        assert expected_title in titles, (
+            f"builder/{name} не отрисовала заголовок «{expected_title}»; были: {titles}"
+        )
+
+
 def test_navigation_url_paths_are_unique() -> None:
     """URL pathname-ы уникальны — иначе Streamlit падает с ошибкой коллизии."""
     # Эта проверка — структурная: смотрим прямо в app.py. URL pathname-ы

@@ -42,14 +42,17 @@ def _common_sidebar() -> None:
 
     Виден на всех 4 подстраницах — переключение страницы не теряет
     контекст «над какой работой я работаю».
+
+    ``_render_sidebar_metadata`` сама уже зовёт
+    ``_render_state_persistence_sidebar`` внутри себя
+    (см. ``builder_editor.py:1951``). Прямой повторный вызов отсюда
+    даёт коллизию `key='builder_undo'` (StreamlitDuplicateElementKey)
+    и страница падает. Поэтому вызываем только метаданные.
     """
     from gostforge.web.builder_editor import (
-        _get_state,
         _render_autosave_banner,
         _render_sidebar_metadata,
-        _render_state_persistence_sidebar,
     )
 
     _render_sidebar_metadata()
-    _render_state_persistence_sidebar(_get_state())
     _render_autosave_banner()
