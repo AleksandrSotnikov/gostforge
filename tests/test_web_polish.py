@@ -111,3 +111,79 @@ def test_export_primary_button_present() -> None:
     assert not at.exception, [str(e) for e in at.exception]
     button_labels = [b.label for b in at.button]
     assert "Сгенерировать .docx" in button_labels, f"Нет кнопки экспорта: {button_labels}"
+
+
+def test_content_page_has_help_block() -> None:
+    """На странице «Содержимое» свёрнут help-блок «Что доступно»."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.pages.builder.content import page\npage()\n")
+    at.session_state["builder_state"] = {
+        "title": "Тест",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "sections": [{"id": "s1", "heading": "Глава", "blocks": [], "subsections": []}],
+        "active_section_index": 0,
+    }
+    at.run(timeout=60)
+    assert not at.exception, [str(e) for e in at.exception]
+    expander_labels = [e.label for e in at.expander]
+    help_found = any("Что доступно" in lbl for lbl in expander_labels)
+    assert help_found, f"Help-блок не найден; expanders: {expander_labels}"
+
+
+def test_content_page_exposes_full_block_palette() -> None:
+    """На странице «Содержимое» доступны все 6 типов блоков (+Параграф/+Таблица/…).
+
+    Регресс на случай, если кто-то частично спрячет add_block_buttons.
+    """
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.pages.builder.content import page\npage()\n")
+    at.session_state["builder_state"] = {
+        "title": "Тест",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "sections": [{"id": "s1", "heading": "Глава", "blocks": [], "subsections": []}],
+        "active_section_index": 0,
+    }
+    at.run(timeout=60)
+    button_labels = {b.label for b in at.button}
+    expected = {"+ Параграф", "+ Таблица", "+ Рисунок", "+ Список", "+ Формула", "+ Оглавление"}
+    missing = expected - button_labels
+    assert not missing, f"Не хватает кнопок добавления блока: {missing}"
+
+
+def test_content_page_exposes_inline_element_buttons_inside_paragraph() -> None:
+    """Внутри параграфа доступны inline-элементы: + Текст / + Формула / + Ссылка / + Цитата."""
+    try:
+        from streamlit.testing.v1 import AppTest
+    except ImportError:
+        pytest.skip("AppTest недоступен")
+
+    at = AppTest.from_string("from gostforge.web.pages.builder.content import page\npage()\n")
+    at.session_state["builder_state"] = {
+        "title": "Тест",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава",
+                "blocks": [{"kind": "paragraph", "text": "abc"}],
+                "subsections": [],
+            }
+        ],
+        "active_section_index": 0,
+    }
+    at.run(timeout=60)
+    button_labels = {b.label for b in at.button}
+    expected = {"+ Текст", "+ Формула", "+ Ссылка", "+ Цитата"}
+    missing = expected - button_labels
+    assert not missing, f"Не хватает inline-кнопок: {missing}"
