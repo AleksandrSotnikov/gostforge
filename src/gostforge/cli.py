@@ -1085,7 +1085,13 @@ def _print_violations_brief(violations: list[Violation], indent: str = "  ") -> 
 @click.argument("file_b", type=click.Path(exists=True, path_type=Path))
 @click.option("--profile", "-p", default="gost-7.32-2017", help="ID профиля для проверки")
 @click.option("--quiet", "-q", is_flag=True, help="Не показывать детали по нарушениям")
-def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Машиночитаемый JSON-вывод (для CI/скриптов).",
+)
+def diff(file_a: Path, file_b: Path, profile: str, quiet: bool, json_output: bool) -> None:
     """Сравнить два .docx по списку нарушений.
 
     Выводит:
@@ -1121,6 +1127,41 @@ def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
 
     errors_a = sum(1 for v in violations_a if v.severity == "error")
     errors_b = sum(1 for v in violations_b if v.severity == "error")
+
+    if json_output:
+        import json as _json
+
+        payload = {
+            "profile_id": profile,
+            "file_a": str(file_a),
+            "file_b": str(file_b),
+            "totals": {
+                "a": len(violations_a),
+                "b": len(violations_b),
+                "errors_a": errors_a,
+                "errors_b": errors_b,
+            },
+            "fixed": [
+                {
+                    "code": v.check_code,
+                    "severity": v.severity,
+                    "message": v.message,
+                    "location": v.location,
+                }
+                for v in fixed
+            ],
+            "introduced": [
+                {
+                    "code": v.check_code,
+                    "severity": v.severity,
+                    "message": v.message,
+                    "location": v.location,
+                }
+                for v in introduced
+            ],
+        }
+        click.echo(_json.dumps(payload, ensure_ascii=False, indent=2))
+        sys.exit(1 if errors_b > errors_a else 0)
 
     click.echo(click.style("Профиль: ", bold=True) + profile + f" (v{prof.version})")
     click.echo(

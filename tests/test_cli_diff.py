@@ -144,3 +144,55 @@ def test_diff_nonexistent_file_returns_exit_2(tmp_path: Path) -> None:
     )
 
     assert result.exit_code == 2
+
+
+def test_diff_json_output_returns_machine_readable(tmp_path: Path) -> None:
+    """`--json` даёт структурированный вывод для CI/скриптов.
+
+    Roadmap-улучшение: машиночитаемый формат поверх существующего
+    текстового diff. Полезен для PR-ботов и пайплайнов «до/после».
+    """
+    src_a = _double_space_docx(tmp_path / "a.docx")
+    src_b = _clean_docx(tmp_path / "b.docx")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["diff", str(src_a), str(src_b), "--json"],
+        catch_exceptions=False,
+    )
+
+    assert result.exit_code == 0, result.output
+    import json
+
+    payload = json.loads(result.output)
+    assert "totals" in payload
+    assert {"a", "b", "errors_a", "errors_b"} <= set(payload["totals"])
+    assert isinstance(payload["fixed"], list)
+    assert isinstance(payload["introduced"], list)
+
+
+def test_diff_json_output_records_introduced_and_returns_exit_1(tmp_path: Path) -> None:
+    """`--json` при регрессии: errors_b > errors_a → exit 1."""
+    src_a = _clean_docx(tmp_path / "a.docx")
+    src_b = _double_space_and_quotes_docx(tmp_path / "b.docx")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        main,
+        ["diff", str(src_a), str(src_b), "--json"],
+        catch_exceptions=False,
+    )
+
+    # Если regression (errors_b > errors_a) — exit 1.
+    import json
+
+    payload = json.loads(result.output)
+    if payload["totals"]["errors_b"] > payload["totals"]["errors_a"]:
+        assert result.exit_code == 1
+    else:
+        assert result.exit_code == 0
+    # introduced — список из новых нарушений с code/severity/message/location.
+    if payload["introduced"]:
+        first = payload["introduced"][0]
+        assert {"code", "severity", "message", "location"} <= set(first)
