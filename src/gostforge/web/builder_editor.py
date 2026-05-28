@@ -221,6 +221,84 @@ def _auto_merges_from_extra_header_rows(
     return merges
 
 
+def _build_multi_header_preview_html(
+    *,
+    extra_rows: list[list[str]],
+    headers: list[str],
+    merges: list[dict[str, int]],
+    data_sample: list[str] | None = None,
+) -> str:
+    """Сгенерировать HTML-превью многоуровневой шапки таблицы.
+
+    Когда пользователь редактирует двух/трёх-уровневую шапку через
+    ``|``-разделитель и пустые ячейки для авто-склейки, ему трудно
+    представить итоговый вид. Превью показывает таблицу с реальными
+    ``colspan`` из merges + (опц.) первую строку данных, чтобы было
+    видно, как названия столбцов выровнены относительно данных.
+
+    Если ``extra_rows`` пуст — вернёт пустую строку (превью не нужно
+    для одноуровневой шапки).
+    """
+    import html
+
+    if not extra_rows:
+        return ""
+
+    # Какие ячейки «съедены» colspan/rowspan: набор (row, col),
+    # которые НЕ рисуются.
+    skip: set[tuple[int, int]] = set()
+    merge_map: dict[tuple[int, int], tuple[int, int]] = {}
+    for m in merges:
+        r, c = int(m.get("row", 0)), int(m.get("col", 0))
+        rs, cs = int(m.get("rowspan", 1)), int(m.get("colspan", 1))
+        merge_map[(r, c)] = (rs, cs)
+        for dr in range(rs):
+            for dc in range(cs):
+                if (dr, dc) != (0, 0):
+                    skip.add((r + dr, c + dc))
+
+    # Соберём все строки: extra_rows сверху, потом main header,
+    # потом первая data-row для контекста (если есть).
+    all_rows: list[tuple[list[str], bool]] = [(row, True) for row in extra_rows]
+    all_rows.append((headers, True))
+    if data_sample is not None:
+        all_rows.append((data_sample, False))
+
+    n_cols = max((len(r) for r, _ in all_rows), default=0)
+    if n_cols == 0:
+        return ""
+
+    parts = [
+        '<table style="border-collapse: collapse; margin: 6px 0; '
+        'font-family: monospace; font-size: 0.9em;">'
+    ]
+    for r, (row, is_header) in enumerate(all_rows):
+        tag = "th" if is_header else "td"
+        parts.append("<tr>")
+        for c in range(n_cols):
+            if (r, c) in skip:
+                continue
+            text = row[c] if c < len(row) else ""
+            text_html = html.escape(text) if text else "&nbsp;"
+            attr_list = []
+            if (r, c) in merge_map:
+                rs, cs = merge_map[(r, c)]
+                if rs > 1:
+                    attr_list.append(f'rowspan="{rs}"')
+                if cs > 1:
+                    attr_list.append(f'colspan="{cs}"')
+            style_parts = ["border: 1px solid #888;", "padding: 4px 10px;"]
+            if is_header:
+                style_parts.append("background: #eef;")
+                style_parts.append("font-weight: bold;")
+                style_parts.append("text-align: center;")
+            attr_list.append(f'style="{" ".join(style_parts)}"')
+            parts.append(f"<{tag} {' '.join(attr_list)}>{text_html}</{tag}>")
+        parts.append("</tr>")
+    parts.append("</table>")
+    return "".join(parts)
+
+
 def _purge_section_ids_recursively(section: dict[str, Any]) -> None:
     """Убрать `id` у самой секции и всех вложенных подразделов.
 
@@ -4161,6 +4239,19 @@ def _render_single_block(
         block["extra_header_rows"] = parsed_extra
         # Авто-генерация merges из пустых ячеек: подряд идущие пустые → colspan.
         block["merges"] = _auto_merges_from_extra_header_rows(parsed_extra)
+        # Превью шапки — даёт пользователю увидеть, как auto-склейка
+        # сработает в финальной таблице (без необходимости генерировать .docx).
+        if parsed_extra:
+            data_sample = (block.get("rows") or [[]])[0] if block.get("rows") else None
+            preview_html = _build_multi_header_preview_html(
+                extra_rows=parsed_extra,
+                headers=block.get("headers") or [],
+                merges=block.get("merges") or [],
+                data_sample=data_sample,
+            )
+            if preview_html:
+                st.caption("Превью шапки:")
+                st.markdown(preview_html, unsafe_allow_html=True)
         rows_str = "\n".join("|".join(row) for row in (block.get("rows") or []))
         new_rows = st.text_area(
             "Строки (одна строка таблицы — одна строка ввода; ячейки разделять символом «|»)",
