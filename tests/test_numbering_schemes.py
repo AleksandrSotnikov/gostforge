@@ -229,3 +229,68 @@ def test_numbering_override_restores_previous_mode_on_exit() -> None:
     with b.numbering_override(figure="by_chapter"):
         assert b._figure_numbering_mode == "by_chapter"
     assert b._figure_numbering_mode == "continuous"
+
+
+def test_chapter_label_override_replaces_auto_prefix() -> None:
+    """`chapter_label_override` подменяет автоматический счётчик главы.
+
+    Полезно, когда в работе есть «Содержание» / «Введение» как разделы —
+    они попадают в счётчик глав. Пользователь задаёт префикс вручную:
+    «В.1, В.2» для рисунков во введении или «А.1, А.2» для приложения
+    с произвольной буквой.
+    """
+    b = WorkBuilder("X")
+    b._figure_numbering_mode = "by_chapter"
+    sec1 = b.section("Введение")  # автоматически получит "1"
+    with b.chapter_label_override("В"):
+        sec1.figure(image_path="a.png", caption="A")
+    sec2 = b.section("Глава 1")  # автоматически получит "2"
+    sec2.figure(image_path="b.png", caption="B")
+    doc = b.build()
+    assert _figure_captions(doc) == [
+        "Рисунок В.1 — A",  # override-метка
+        "Рисунок 2.1 — B",  # обратно к авто-счётчику
+    ]
+
+
+def test_chapter_label_override_none_is_noop() -> None:
+    """`chapter_label_override(None)` не меняет метку — удобно для условного применения."""
+    b = WorkBuilder("X")
+    b._figure_numbering_mode = "by_chapter"
+    sec = b.section("Глава 1")
+    with b.chapter_label_override(None):
+        sec.figure(image_path="a.png", caption="A")
+    assert _figure_captions(b.build()) == ["Рисунок 1.1 — A"]
+
+
+def test_chapter_label_override_blank_string_is_noop() -> None:
+    """Пустая строка / whitespace тоже no-op (UI часто отдаёт ' ')."""
+    b = WorkBuilder("X")
+    b._figure_numbering_mode = "by_chapter"
+    sec = b.section("Глава 1")
+    with b.chapter_label_override("   "):
+        sec.figure(image_path="a.png", caption="A")
+    assert _figure_captions(b.build()) == ["Рисунок 1.1 — A"]
+
+
+def test_chapter_label_override_restores_on_exit() -> None:
+    """Метка восстанавливается после выхода из `with`."""
+    b = WorkBuilder("X")
+    b._figure_numbering_mode = "by_chapter"
+    b.section("Глава 1")  # auto "1"
+    saved = b._current_chapter_label
+    with b.chapter_label_override("ABC"):
+        assert b._current_chapter_label == "ABC"
+    assert b._current_chapter_label == saved
+
+
+def test_chapter_label_override_resets_appendix_flag() -> None:
+    """При override метка приложения сбрасывается — иначе by_chapter глюкает."""
+    b = WorkBuilder("X")
+    b._figure_numbering_mode = "by_chapter"
+    b.section("Приложение А")  # автоматически приложение, флаг True
+    assert b._is_current_chapter_appendix is True
+    with b.chapter_label_override("Z"):
+        assert b._is_current_chapter_appendix is False
+    # После выхода флаг возвращается.
+    assert b._is_current_chapter_appendix is True

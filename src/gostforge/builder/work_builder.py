@@ -197,6 +197,35 @@ class WorkBuilder:
             self._figure_numbering_mode = saved_fig
             self._table_numbering_mode = saved_tbl
 
+    @contextlib.contextmanager
+    def chapter_label_override(self, label: str | None) -> Iterator[None]:
+        """Временно переопределить метку текущей главы для by_chapter-нумерации.
+
+        Используется, когда автоматический префикс (1, 2, 3…) не подходит —
+        например, в работе есть «Содержание» и «Введение» как разделы, и
+        они сбивают счётчик глав; либо пользователь хочет в одном разделе
+        нумеровать как «А.1, А.2», не делая весь раздел приложением.
+
+        Применяется ПОСЛЕ ``section(...)`` — поэтому помещайте ``with``-блок
+        внутри section context (после вызова ``builder.section(...)``,
+        пока добавляются figure/table в нужный раздел).
+
+        ``label=None`` — no-op (только сохранение и восстановление, удобно
+        для условного применения в общем коде). При непустом label
+        приложенческий флаг сбрасывается в False, чтобы счётчик
+        by_chapter работал корректно для произвольной метки.
+        """
+        saved_label = self._current_chapter_label
+        saved_appendix = self._is_current_chapter_appendix
+        if label is not None and label.strip():
+            self._current_chapter_label = label.strip()
+            self._is_current_chapter_appendix = False
+        try:
+            yield
+        finally:
+            self._current_chapter_label = saved_label
+            self._is_current_chapter_appendix = saved_appendix
+
     # --- Fluent API ----------------------------------------------------------
 
     def section(self, heading: str) -> SectionBuilder:

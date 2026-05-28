@@ -1310,27 +1310,39 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
                 "Literal['continuous', 'by_chapter'] | None",
                 tbl_override_raw if tbl_override_raw in ("continuous", "by_chapter") else None,
             )
+            # Свой префикс главы для нумерации «X.N» (например, «А», «В», «I.1»).
+            # Применяется ПОСЛЕ section() — потому что section() сам выставляет
+            # автоматический _current_chapter_label.
+            chapter_label_raw = sec.get("chapter_label_override")
+            chapter_label = (
+                chapter_label_raw.strip()
+                if isinstance(chapter_label_raw, str) and chapter_label_raw.strip()
+                else None
+            )
             with builder.numbering_override(figure=fig_override, table=tbl_override):
                 sec_builder = builder.section(sec.get("heading", "Раздел"))
-                _apply_blocks(sec_builder, sec.get("blocks") or [])
-                for sub in sec.get("subsections") or []:
-                    sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))
-                    _apply_blocks(sub_builder, sub.get("blocks") or [])
-                    # Рекурсия для подразделов 3-го уровня и глубже.
-                    for subsub in sub.get("subsections") or []:
-                        subsub_builder = sub_builder.subsection(subsub.get("heading", "Подраздел"))
-                        _apply_blocks(subsub_builder, subsub.get("blocks") or [])
-                if sec.get("is_bibliography"):
-                    for ref in sec.get("references") or []:
-                        if isinstance(ref, str) and ref.strip():
-                            sec_builder.reference(ref)
-                # Отключённые проверки раздела (UI: «Нормоконтроль раздела»).
-                disabled = sec.get("disabled_checks") or []
-                if isinstance(disabled, list) and disabled:
-                    if "*" in disabled:
-                        sec_builder.skip_all_checks()
-                    else:
-                        sec_builder.skip_checks(*[str(c) for c in disabled])
+                with builder.chapter_label_override(chapter_label):
+                    _apply_blocks(sec_builder, sec.get("blocks") or [])
+                    for sub in sec.get("subsections") or []:
+                        sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))
+                        _apply_blocks(sub_builder, sub.get("blocks") or [])
+                        # Рекурсия для подразделов 3-го уровня и глубже.
+                        for subsub in sub.get("subsections") or []:
+                            subsub_builder = sub_builder.subsection(
+                                subsub.get("heading", "Подраздел")
+                            )
+                            _apply_blocks(subsub_builder, subsub.get("blocks") or [])
+                    if sec.get("is_bibliography"):
+                        for ref in sec.get("references") or []:
+                            if isinstance(ref, str) and ref.strip():
+                                sec_builder.reference(ref)
+                    # Отключённые проверки раздела (UI: «Нормоконтроль раздела»).
+                    disabled = sec.get("disabled_checks") or []
+                    if isinstance(disabled, list) and disabled:
+                        if "*" in disabled:
+                            sec_builder.skip_all_checks()
+                        else:
+                            sec_builder.skip_checks(*[str(c) for c in disabled])
 
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         out_path = Path(tmp.name)
@@ -3992,12 +4004,15 @@ def _render_section_numbering_override_panel(section: dict[str, Any], sec_id: st
     """Панель «Нумерация рисунков и таблиц в этом разделе».
 
     Позволяет переопределить схему нумерации (`continuous` /
-    `by_chapter`) только для этого раздела. По умолчанию работает
-    схема из профиля. Полезно, например, когда в одной большой главе
-    хочется по-главе-нумерацию, а в остальном документе — сквозная.
+    `by_chapter`) только для этого раздела. Дополнительно — ручной
+    префикс главы, который перекрывает автоматический счётчик
+    (1, 2, 3…). Полезно, когда в работе есть «Содержание» и
+    «Введение» — они попадают в счётчик глав и сбивают нумерацию;
+    пользователь задаёт префикс вручную («В», «А», «Глава 1»).
     """
     section.setdefault("figure_numbering_override", None)
     section.setdefault("table_numbering_override", None)
+    section.setdefault("chapter_label_override", "")
 
     # Маппинг для UI selectbox: внутреннее значение -> метка.
     options: list[str | None] = [None, "continuous", "by_chapter"]
@@ -4034,6 +4049,20 @@ def _render_section_numbering_override_panel(section: dict[str, Any], sec_id: st
         )
         section["figure_numbering_override"] = new_fig
         section["table_numbering_override"] = new_tbl
+
+        # Ручной префикс главы — применяется только при by_chapter.
+        new_prefix = st.text_input(
+            "Свой префикс главы (например, «А», «В», «1»)",
+            value=str(section.get("chapter_label_override") or ""),
+            key=f"sec_chapter_label_{sec_id}",
+            help=(
+                "Применяется только при нумерации «По главе». Перебивает "
+                "автоматический счётчик (1, 2, 3…), который включает в себя "
+                "разделы вроде «Содержание» / «Введение». Оставьте пустым "
+                "для автоматики."
+            ),
+        )
+        section["chapter_label_override"] = new_prefix.strip()
 
 
 def _render_active_section_editor() -> None:

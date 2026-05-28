@@ -399,6 +399,11 @@ def test_content_page_has_per_section_numbering_override_panel() -> None:
     assert any("Нумерация рисунков и таблиц" in lbl for lbl in expander_labels), (
         f"Expander «Нумерация рисунков и таблиц» не найден; expanders: {expander_labels}"
     )
+    # Поле «Свой префикс главы» — для ручной простановки префикса нумерации.
+    text_input_labels = [ti.label for ti in at.text_input]
+    assert any("префикс главы" in lbl.lower() for lbl in text_input_labels), (
+        f"text_input «Свой префикс главы» не найден; text_inputs: {text_input_labels}"
+    )
 
 
 def test_table_block_raw_mode_keeps_text_area() -> None:

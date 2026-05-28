@@ -427,3 +427,61 @@ def test_build_document_from_state_ignores_invalid_override() -> None:
     }
     data = _build_document_from_state(state)
     assert data[:2] == b"PK"
+
+
+def test_build_document_from_state_applies_chapter_label_override() -> None:
+    """Per-section `chapter_label_override` подменяет автоматический префикс главы.
+
+    Roadmap Q2/2026: ручной префикс главы для разделов с нестандартной
+    позицией (Содержание, Введение в счётчик попадают, но не должны).
+    """
+    state = {
+        "title": "T",
+        "author": "A",
+        "year": 2026,
+        "work_type": "coursework",
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Введение",
+                "figure_numbering_override": "by_chapter",
+                "chapter_label_override": "В",
+                "blocks": [{"kind": "paragraph", "text": "x"}],
+                "subsections": [],
+            },
+            {
+                "id": "s2",
+                "heading": "Глава 1",
+                "figure_numbering_override": "by_chapter",
+                "blocks": [{"kind": "paragraph", "text": "y"}],
+                "subsections": [],
+            },
+        ],
+    }
+    data = _build_document_from_state(state)
+    assert data[:2] == b"PK"
+    # Проверяем, что override не ломает сборку. Подробное поведение метки
+    # тестируется в test_numbering_schemes.py через WorkBuilder напрямую.
+
+
+def test_build_document_from_state_handles_empty_chapter_label_override() -> None:
+    """Пустая/whitespace строка в `chapter_label_override` игнорируется."""
+    state = {
+        "title": "T",
+        "author": "A",
+        "year": 2026,
+        "work_type": "coursework",
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава",
+                "chapter_label_override": "   ",  # whitespace = no-op
+                "blocks": [{"kind": "paragraph", "text": "x"}],
+                "subsections": [],
+            }
+        ],
+    }
+    data = _build_document_from_state(state)
+    assert data[:2] == b"PK"
