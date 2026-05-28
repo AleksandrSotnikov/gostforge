@@ -26,7 +26,7 @@
 
 **115 проверок** в 16 категориях · **28 автофиксеров** · **33 CLI-команды** ·
 **10 страниц веб-UI** (multi-page `st.navigation`) · **REST API на FastAPI** ·
-**1845+ тестов** (`ruff check`, `ruff format`, `mypy --strict` чисты).
+**1847+ тестов** (`ruff check`, `ruff format`, `mypy --strict` чисты).
 
 ### Ядро
 

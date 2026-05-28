@@ -85,9 +85,13 @@ def test_continuation_caption_on_by_default(tmp_path: Path) -> None:
 
 
 def test_continuation_row_uses_full_column_span(tmp_path: Path) -> None:
-    """Строка «Продолжение...» должна занимать все колонки (gridSpan=N)."""
+    """Строка «Продолжение...» должна занимать все колонки (gridSpan=N).
+
+    После перехода на OOXML field code (IF/PAGE/PAGEREF) `.text` ячейки
+    пустой — текст лежит в `<w:instrText>` поля, который Word оценивает
+    при render-е. Поэтому проверяем gridSpan через сырое XML.
+    """
     pytest.importorskip("docx")
-    from docx import Document as DocxDocument
 
     profile = load_profile("gost-7.32-2017")
     profile.styles.table.continuation_caption = True
@@ -98,9 +102,9 @@ def test_continuation_row_uses_full_column_span(tmp_path: Path) -> None:
     )
     out = tmp_path / "span.docx"
     export_docx(b.build(), profile, out)
-    raw = DocxDocument(str(out))
-    t = raw.tables[0]
-    # Первая строка — «Продолжение таблицы N», должна быть объединена по колонкам.
-    first_row = t.rows[0]
-    first_cell = first_row.cells[0]
-    assert "Продолжение таблицы 1" in first_cell.text
+    document_xml = _docx_part(out, "word/document.xml")
+    # Текст «Продолжение таблицы 1» лежит в instrText (field code).
+    assert "Продолжение таблицы 1" in document_xml
+    assert "<w:instrText" in document_xml
+    # gridSpan=3 на первой ячейке таблицы (объединена по 3 колонкам).
+    assert 'w:val="3"' in document_xml, "Ожидался <w:gridSpan w:val=\"3\"/>"

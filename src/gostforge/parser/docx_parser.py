@@ -1341,13 +1341,20 @@ def _build_table(dtable: DocxTable, *, idx: int) -> Table:
         return Table(id=f"t-{idx}", caption=[], headers=[], rows=[], merges=[])
 
     # Идентифицируем «Продолжение таблицы N»-строки (по содержимому
-    # первой ячейки) и пометки `<w:tblHeader/>`.
+    # первой ячейки) и пометки `<w:tblHeader/>`. Поддерживаются два
+    # варианта генерации экспортёром:
+    # * Plain text «Продолжение таблицы N» — legacy-формат до field code.
+    # * OOXML field code IF/PAGE/PAGEREF — новый формат, на первой
+    #   странице визуально пустой, опознаётся по `<w:instrText>` с
+    #   подстрокой «Продолжение таблицы».
     is_continuation: list[bool] = []
     is_header_marked: list[bool] = []
     for row in rows_raw:
         cells = list(row.cells)
         first_text = cells[0].text.strip() if cells else ""
-        is_continuation.append(bool(_RE_CONTINUATION_TABLE.match(first_text)))
+        plain_match = bool(_RE_CONTINUATION_TABLE.match(first_text))
+        field_match = _row_has_continuation_field(row) if cells else False
+        is_continuation.append(plain_match or field_match)
         is_header_marked.append(_row_has_tblheader(row))
 
     # Отфильтруем continuation-строки целиком — они синтезируются на экспорте.
@@ -1429,6 +1436,29 @@ def _row_has_tblheader(docx_row: Any) -> bool:
     if trPr is None:
         return False
     return trPr.find(f"{{{W_NS}}}tblHeader") is not None
+
+
+def _row_has_continuation_field(docx_row: Any) -> bool:
+    """True, если в первой ячейке строки есть OOXML field code с «Продолжение таблицы».
+
+    Наш экспортёр пишет «Продолжение таблицы N» как
+    ``{IF {PAGE} > {PAGEREF bm} "Продолжение таблицы N" ""}`` —
+    визуально на первой странице ячейка пустая. Чтобы при round-trip
+    через парсер не получить пустую шапку в модели, ищем подстроку
+    «Продолжение таблицы» в любом ``<w:instrText>`` ячейки.
+    """
+    tr = getattr(docx_row, "_tr", None)
+    if tr is None:
+        return False
+    tcs = tr.findall(f"{{{W_NS}}}tc")
+    if not tcs:
+        return False
+    first_tc = tcs[0]
+    for instr in first_tc.iter(f"{{{W_NS}}}instrText"):
+        text = (instr.text or "").lower()
+        if "продолжение таблицы" in text:
+            return True
+    return False
 
 
 def _extract_cell_merges(rows_raw: list[Any]) -> list[Any]:
