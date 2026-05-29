@@ -421,3 +421,44 @@ def test_build_document_from_state_title_block_disabled() -> None:
     }
     data = _build_document_from_state(state)
     assert "w:tbl" not in _footer_xml(data)
+
+
+# --- авто-добавление ГОСТ/ФЗ из state ----------------------------------------
+
+
+def test_build_state_autofill_refs_adds_gost() -> None:
+    """state['autofill_refs'] → упомянутый ГОСТ попадает в список литературы."""
+    state = {
+        "title": "Работа",
+        "profile_id": "gost-7.32-2017",
+        "autofill_refs": True,
+        "sections": [
+            {
+                "id": "intro",
+                "heading": "Введение",
+                "blocks": [{"kind": "paragraph", "text": "Выполнено по ГОСТ 7.32-2017."}],
+            },
+            {"id": "bib", "heading": "Список использованных источников", "blocks": []},
+        ],
+    }
+    xml = _docx_xml(_build_document_from_state(state))
+    assert "ГОСТ 7.32-2017" in xml
+    assert "Стандартинформ" in xml
+
+
+def test_build_state_without_autofill_refs() -> None:
+    """Без флага ГОСТ в список литературы не добавляется автоматически."""
+    state = {
+        "title": "Работа",
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "intro",
+                "heading": "Введение",
+                "blocks": [{"kind": "paragraph", "text": "Выполнено по ГОСТ 7.32-2017."}],
+            },
+            {"id": "bib", "heading": "Список использованных источников", "blocks": []},
+        ],
+    }
+    xml = _docx_xml(_build_document_from_state(state))
+    assert "Стандартинформ" not in xml

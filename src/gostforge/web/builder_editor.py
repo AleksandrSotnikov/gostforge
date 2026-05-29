@@ -1246,6 +1246,8 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
                     sec_builder.skip_checks(*[str(c) for c in disabled])
 
     _apply_title_block_from_state(builder, state)
+    if state.get("autofill_refs"):
+        builder.autofill_references()
 
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         out_path = Path(tmp.name)
@@ -2040,6 +2042,16 @@ def _render_sidebar_metadata() -> None:
 
     _render_style_overrides_section(state)
     _render_title_block_section(state)
+
+    state["autofill_refs"] = st.sidebar.checkbox(
+        "Авто-добавление ГОСТ/ФЗ в список литературы",
+        value=bool(state.get("autofill_refs", False)),
+        help=(
+            "При сборке упомянутые в тексте ГОСТ и федеральные законы "
+            "добавляются в список источников. Дубликаты при пересборке "
+            "не создаются."
+        ),
+    )
 
     st.sidebar.divider()
     st.sidebar.subheader("Шаблоны")

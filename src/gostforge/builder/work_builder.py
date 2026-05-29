@@ -77,6 +77,8 @@ class WorkBuilder:
         self._title_block: TitleBlock | None = None
         # Рамка листа (ЕСКД). None — задаётся профилем на экспорте.
         self._border: PageBorder | None = None
+        # Авто-добавление упомянутых ГОСТ/ФЗ в список литературы.
+        self._autofill_refs: bool = False
 
         # Верхнеуровневые логические разделы (level==1). Подразделы кладутся в
         # children этих разделов.
@@ -162,6 +164,18 @@ class WorkBuilder:
         self._active = builder
 
     # --- Fluent API ----------------------------------------------------------
+
+    def autofill_references(self, enabled: bool = True) -> WorkBuilder:
+        """Включить авто-добавление упомянутых ГОСТ/ФЗ в список литературы.
+
+        При `build()` текст работы сканируется на упоминания стандартов
+        и федеральных законов; недостающие добавляются в раздел
+        «Список использованных источников» и в `Document.bibliography`.
+        Дедупликация по обозначению/номеру — повторная сборка не плодит
+        дубликаты. Возвращает self для цепочки вызовов.
+        """
+        self._autofill_refs = enabled
+        return self
 
     def border(
         self,
@@ -345,6 +359,13 @@ class WorkBuilder:
 
         # Пост-обработка: вытаскиваем bibliography из раздела «Список ...».
         _extract_bibliography(document)
+
+        # Авто-добавление упомянутых ГОСТ/ФЗ (после извлечения библиографии,
+        # чтобы дедупликация видела уже существующие записи).
+        if self._autofill_refs:
+            from gostforge.autocite import autofill_references
+
+            autofill_references(document)
 
         return document
 
