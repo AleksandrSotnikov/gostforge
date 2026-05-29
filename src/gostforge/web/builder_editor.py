@@ -1018,6 +1018,20 @@ def document_to_state(document: Any) -> dict[str, Any]:
             }
             break
 
+    # Рамка листа (ЕСКД): парсер читает <w:pgBorders>. Отражаем в state.
+    for ps in document.page_sections:
+        border = getattr(ps.page, "border", None)
+        if border is not None and getattr(border, "enabled", False):
+            state["page_border"] = {
+                "enabled": True,
+                "style": getattr(border, "style", "single"),
+                "size_eighth_pt": getattr(border, "size_eighth_pt", 4),
+                "color": getattr(border, "color", "auto"),
+                "offset_from": getattr(border, "offset_from", "text"),
+                "space_pt": getattr(border, "space_pt", 0),
+            }
+            break
+
     # Парсер кладёт LogicalSection плоско в page_section.content
     # (level 1, 2, 3 — все на верхнем уровне). Восстанавливаем иерархию
     # по level-у: секция level=N захватывает все следующие секции с
@@ -1233,6 +1247,20 @@ def _apply_title_block_from_state(builder: Any, state: dict[str, Any]) -> None:
     )
 
 
+def _apply_page_border_from_state(builder: Any, state: dict[str, Any]) -> None:
+    """Применить рамку листа (ЕСКД) из state к builder-у, если включена."""
+    pb = state.get("page_border")
+    if not isinstance(pb, dict) or not pb.get("enabled"):
+        return
+    builder.border(
+        style=str(pb.get("style", "single")),
+        size_eighth_pt=int(pb.get("size_eighth_pt", 4)),
+        color=str(pb.get("color", "auto")),
+        offset_from=str(pb.get("offset_from", "text")),
+        space_pt=int(pb.get("space_pt", 0)),
+    )
+
+
 def _build_document_from_state(state: dict[str, Any]) -> bytes:
     """Собрать .docx из state и вернуть его байты.
 
@@ -1291,6 +1319,7 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
                     sec_builder.skip_checks(*[str(c) for c in disabled])
 
     _apply_title_block_from_state(builder, state)
+    _apply_page_border_from_state(builder, state)
 
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         out_path = Path(tmp.name)
@@ -1794,6 +1823,63 @@ def _render_title_block_section(state: dict[str, Any]) -> None:
         }
 
 
+def _render_page_border_section(state: dict[str, Any]) -> None:
+    """Sidebar-секция «Рамка листа (ЕСКД)».
+
+    Включает рамку листа (ГОСТ 2.104) для текущей работы. Хранится в
+    ``state['page_border']``; применяется при сборке через
+    :func:`_apply_page_border_from_state`.
+    """
+    pb: dict[str, Any] = state.get("page_border") or {}
+    with st.sidebar.expander("Рамка листа (ЕСКД)", expanded=False):
+        enabled = st.checkbox(
+            "Рисовать рамку листа",
+            value=bool(pb.get("enabled", False)),
+            key="builder_pb_enabled",
+            help=(
+                "Рамка по периметру листа (ГОСТ 2.104). Для рамки по границе "
+                "текста задайте поля 20/5/5/5 мм в профиле и offset_from=text."
+            ),
+        )
+        if not enabled:
+            state["page_border"] = {"enabled": False}
+            return
+        styles = ["single", "double", "thick", "dashed", "dotted"]
+        style = st.selectbox(
+            "Стиль линии",
+            options=styles,
+            index=styles.index(pb.get("style", "single")) if pb.get("style") in styles else 0,
+            key="builder_pb_style",
+        )
+        size = int(
+            st.number_input(
+                "Толщина (1/8 pt: 4 = 0.5 pt, 8 = 1 pt)",
+                value=int(pb.get("size_eighth_pt", 4)),
+                min_value=1,
+                max_value=96,
+                step=1,
+                key="builder_pb_size",
+            )
+        )
+        offsets = ["text", "page"]
+        offset_from = st.selectbox(
+            "Отсчёт отступа",
+            options=offsets,
+            index=offsets.index(pb.get("offset_from", "text"))
+            if pb.get("offset_from") in offsets
+            else 0,
+            key="builder_pb_offset",
+        )
+        state["page_border"] = {
+            "enabled": True,
+            "style": style,
+            "size_eighth_pt": size,
+            "color": pb.get("color", "auto"),
+            "offset_from": offset_from,
+            "space_pt": int(pb.get("space_pt", 0)),
+        }
+
+
 def _render_style_overrides_section(state: dict[str, Any]) -> None:
     """Sidebar-секция «Дополнительные настройки стилей».
 
@@ -2092,6 +2178,7 @@ def _render_sidebar_metadata() -> None:
 
     _render_style_overrides_section(state)
     _render_title_block_section(state)
+    _render_page_border_section(state)
 
     state["autofill_refs"] = st.sidebar.checkbox(
         "Авто-добавление ГОСТ/ФЗ в список литературы",
@@ -3811,6 +3898,36 @@ def _render_active_section_editor() -> None:
         value=section.get("heading", ""),
         key=f"edit_heading_{sec_id}",
     )
+
+    # Per-section override схемы нумерации рисунков/таблиц (поверх профиля).
+    with st.expander("Нумерация рисунков/таблиц в разделе", expanded=False):
+        _num_opts = ["(по профилю)", "continuous", "by_chapter"]
+        _num_labels = {
+            "(по профилю)": "По профилю",
+            "continuous": "Сквозная (1, 2, 3, …)",
+            "by_chapter": "По главам (1.1, 1.2, …)",
+        }
+
+        def _num_index(value: str) -> int:
+            return _num_opts.index(value) if value in _num_opts else 0
+
+        fig_choice = st.selectbox(
+            "Рисунки",
+            options=_num_opts,
+            index=_num_index(section.get("figure_numbering") or "(по профилю)"),
+            format_func=lambda v: _num_labels[v],
+            key=f"sec_fig_num_{sec_id}",
+        )
+        tbl_choice = st.selectbox(
+            "Таблицы",
+            options=_num_opts,
+            index=_num_index(section.get("table_numbering") or "(по профилю)"),
+            format_func=lambda v: _num_labels[v],
+            key=f"sec_tbl_num_{sec_id}",
+        )
+        section["figure_numbering"] = "" if fig_choice == "(по профилю)" else fig_choice
+        section["table_numbering"] = "" if tbl_choice == "(по профилю)" else tbl_choice
+        st.caption("В приложениях нумерация всегда буквенная (А.1, …) независимо от выбора.")
 
     # Быстрое переупорядочивание: select-box с целевой позицией.
     # Альтернатива drag-and-drop, не требующая внешних библиотек.

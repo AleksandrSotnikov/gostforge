@@ -494,3 +494,71 @@ def test_header_preview_empty() -> None:
     from gostforge.web.builder_editor import build_table_header_preview
 
     assert build_table_header_preview([], []) == []
+
+
+# --- UI-паритет: рамка листа и per-section нумерация через state -------------
+
+
+def test_build_state_page_border() -> None:
+    """state['page_border'] (enabled) → <w:pgBorders> в экспортированном .docx."""
+    W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    import docx as python_docx
+
+    state = {
+        "title": "Работа",
+        "profile_id": "gost-7.32-2017",
+        "page_border": {"enabled": True, "style": "single", "size_eighth_pt": 8},
+        "sections": [
+            {"id": "intro", "heading": "Введение", "blocks": [{"kind": "paragraph", "text": "Т."}]},
+        ],
+    }
+    data = _build_document_from_state(state)
+    import io
+
+    docx_doc = python_docx.Document(io.BytesIO(data))
+    sect_pr = docx_doc.sections[0]._sectPr
+    assert sect_pr.find(f"{{{W_NS}}}pgBorders") is not None
+
+
+def test_build_state_page_border_disabled() -> None:
+    state = {
+        "title": "Работа",
+        "profile_id": "gost-7.32-2017",
+        "page_border": {"enabled": False},
+        "sections": [
+            {"id": "intro", "heading": "Введение", "blocks": [{"kind": "paragraph", "text": "Т."}]},
+        ],
+    }
+    W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    import io
+
+    import docx as python_docx
+
+    docx_doc = python_docx.Document(io.BytesIO(_build_document_from_state(state)))
+    assert docx_doc.sections[0]._sectPr.find(f"{{{W_NS}}}pgBorders") is None
+
+
+def test_build_state_per_section_numbering() -> None:
+    """state-раздел с table_numbering='by_chapter' → подпись «Таблица 2.1»."""
+    state = {
+        "title": "Работа",
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {"id": "g1", "heading": "Глава 1", "blocks": []},
+            {
+                "id": "g2",
+                "heading": "Глава 2",
+                "table_numbering": "by_chapter",
+                "blocks": [
+                    {
+                        "kind": "table",
+                        "headers": ["A", "B"],
+                        "rows": [["1", "2"]],
+                        "caption": "Данные",
+                    }
+                ],
+            },
+        ],
+    }
+    xml = _docx_xml(_build_document_from_state(state))
+    assert "Таблица 2.1" in xml
