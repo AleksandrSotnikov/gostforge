@@ -1263,7 +1263,13 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
         builder.section("Введение").paragraph("")
     else:
         for sec in sections:
-            sec_builder = builder.section(sec.get("heading", "Раздел"))
+            fig_num = sec.get("figure_numbering") or None
+            tbl_num = sec.get("table_numbering") or None
+            sec_builder = builder.section(
+                sec.get("heading", "Раздел"),
+                figure_numbering=fig_num if fig_num in ("continuous", "by_chapter") else None,
+                table_numbering=tbl_num if tbl_num in ("continuous", "by_chapter") else None,
+            )
             _apply_blocks(sec_builder, sec.get("blocks") or [])
             for sub in sec.get("subsections") or []:
                 sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))

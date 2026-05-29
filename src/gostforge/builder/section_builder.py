@@ -262,9 +262,23 @@ class SectionBuilder:
         self._root._set_active(new_builder)
         return new_builder
 
-    def section(self, heading: str) -> SectionBuilder:
-        """Закрыть текущий раздел и открыть новый раздел уровня 1."""
-        return self._root.section(heading)
+    def section(
+        self,
+        heading: str,
+        *,
+        figure_numbering: str | None = None,
+        table_numbering: str | None = None,
+    ) -> SectionBuilder:
+        """Закрыть текущий раздел и открыть новый раздел уровня 1.
+
+        ``figure_numbering`` / ``table_numbering`` — per-section override
+        схемы нумерации (см. :meth:`WorkBuilder.section`).
+        """
+        return self._root.section(
+            heading,
+            figure_numbering=figure_numbering,
+            table_numbering=table_numbering,
+        )
 
     # --- Нормоконтроль раздела ----------------------------------------------
 

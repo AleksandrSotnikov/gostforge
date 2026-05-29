@@ -99,6 +99,10 @@ class WorkBuilder:
         # Пустая строка — фигура/таблица добавлены до первого раздела.
         self._current_chapter_label: str = ""
         self._is_current_chapter_appendix: bool = False
+        # Per-section override схемы нумерации рисунков/таблиц (None — брать
+        # глобальный режим профиля). Выставляются при входе в .section(...).
+        self._section_figure_numbering: str | None = None
+        self._section_table_numbering: str | None = None
         # Счётчик обычных (не-приложений) глав — для нумерации «1», «2», ...
         # в режиме by_chapter.
         self._regular_chapter_counter = 0
@@ -138,9 +142,8 @@ class WorkBuilder:
         """
         ordinal = self._next_figure_number()
         chapter = self._current_chapter_label
-        use_chapter = chapter and (
-            self._is_current_chapter_appendix or self._figure_numbering_mode == "by_chapter"
-        )
+        mode = self._section_figure_numbering or self._figure_numbering_mode
+        use_chapter = chapter and (self._is_current_chapter_appendix or mode == "by_chapter")
         if use_chapter:
             n = self._figure_counters_by_chapter.get(chapter, 0) + 1
             self._figure_counters_by_chapter[chapter] = n
@@ -151,9 +154,8 @@ class WorkBuilder:
         """Зеркально к `_next_figure_label_with_ordinal`, но для таблиц."""
         ordinal = self._next_table_number()
         chapter = self._current_chapter_label
-        use_chapter = chapter and (
-            self._is_current_chapter_appendix or self._table_numbering_mode == "by_chapter"
-        )
+        mode = self._section_table_numbering or self._table_numbering_mode
+        use_chapter = chapter and (self._is_current_chapter_appendix or mode == "by_chapter")
         if use_chapter:
             n = self._table_counters_by_chapter.get(chapter, 0) + 1
             self._table_counters_by_chapter[chapter] = n
@@ -253,13 +255,33 @@ class WorkBuilder:
         )
         return self
 
-    def section(self, heading: str) -> SectionBuilder:
+    def section(
+        self,
+        heading: str,
+        *,
+        figure_numbering: str | None = None,
+        table_numbering: str | None = None,
+    ) -> SectionBuilder:
         """Добавить раздел 1 уровня и вернуть его SectionBuilder.
 
         Заголовок создаётся с атрибутами, удовлетворяющими H.01 для
         базового профиля ГОСТ 7.32: текст в верхнем регистре, bold,
         шрифт Times New Roman, кегль 14.
+
+        ``figure_numbering`` / ``table_numbering`` (``"continuous"`` |
+        ``"by_chapter"`` | ``None``) — per-section override схемы
+        нумерации рисунков/таблиц для этого раздела. ``None`` — брать
+        глобальный режим профиля. В приложениях нумерация всегда
+        буквенная (А.1, ...) независимо от override.
         """
+        for value, name in (
+            (figure_numbering, "figure_numbering"),
+            (table_numbering, "table_numbering"),
+        ):
+            if value is not None and value not in ("continuous", "by_chapter"):
+                raise ValueError(
+                    f"{name} должно быть 'continuous', 'by_chapter' или None, получено {value!r}"
+                )
         sec = LogicalSection(
             id=self._next_id("sec"),
             heading=[
@@ -282,6 +304,8 @@ class WorkBuilder:
             self._regular_chapter_counter += 1
             self._current_chapter_label = str(self._regular_chapter_counter)
             self._is_current_chapter_appendix = False
+        self._section_figure_numbering = figure_numbering
+        self._section_table_numbering = table_numbering
         builder = SectionBuilder(self, sec)
         self._active = builder
         return builder

@@ -422,3 +422,53 @@ def test_builder_border_renders_in_export(tmp_path: Path) -> None:
     export_docx(doc, load_profile("gost-7.32-2017"), out)
     sect_pr = python_docx.Document(str(out)).sections[0]._sectPr
     assert sect_pr.find(f"{{{W_NS}}}pgBorders") is not None
+
+
+# --- per-section override схемы нумерации рисунков/таблиц --------------------
+
+
+def _figure_caption_texts(doc: Document) -> list[str]:
+    out: list[str] = []
+
+    def walk(items: object) -> None:
+        for it in items:  # type: ignore[attr-defined]
+            if isinstance(it, Figure):
+                out.append("".join(el.text for el in it.caption if isinstance(el, TextRun)))
+            elif isinstance(it, LogicalSection):
+                walk(it.children)
+
+    for ps in doc.page_sections:
+        walk(ps.content)
+    return out
+
+
+def test_section_figure_numbering_override_by_chapter() -> None:
+    """figure_numbering='by_chapter' даёт «2.1» в разделе, по умолчанию — «1»."""
+    doc = (
+        work("Работа")
+        .section("Глава 1")
+        .figure("", "Схема один")
+        .section("Глава 2", figure_numbering="by_chapter")
+        .figure("", "Схема два")
+        .build()
+    )
+    caps = _figure_caption_texts(doc)
+    assert any(c.startswith("Рисунок 1 ") for c in caps)  # глобально continuous
+    assert any("2.1" in c for c in caps)  # override by_chapter в главе 2
+
+
+def test_section_numbering_override_validation() -> None:
+    import pytest as _pytest
+
+    with _pytest.raises(ValueError):
+        work("Работа").section("Глава", figure_numbering="bogus")
+
+
+def test_section_without_override_uses_global_continuous() -> None:
+    """Без override обе главы используют глобальную сквозную нумерацию."""
+    doc = (
+        work("Работа").section("Глава 1").figure("", "A").section("Глава 2").figure("", "B").build()
+    )
+    caps = _figure_caption_texts(doc)
+    assert any(c.startswith("Рисунок 1 ") for c in caps)
+    assert any(c.startswith("Рисунок 2 ") for c in caps)
