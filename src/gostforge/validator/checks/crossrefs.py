@@ -15,6 +15,8 @@ from collections.abc import Sequence
 
 from gostforge.model import (
     Block,
+    Citation,
+    CrossRef,
     Document,
     Figure,
     Formula,
@@ -596,10 +598,112 @@ def check_appendix_references_resolve(
     return violations
 
 
+def _all_target_ids(document: Document) -> set[str]:
+    """Все id, на которые может ссылаться CrossRef (рисунки/таблицы/формулы/разделы)."""
+    ids: set[str] = set()
+    for ps in document.page_sections:
+        for fig in _iter_figures(ps.content):
+            ids.add(fig.id)
+        for table in _iter_tables(ps.content):
+            ids.add(table.id)
+        for formula in _iter_formulas(ps.content):
+            if formula.id:
+                ids.add(formula.id)
+        for section in _iter_logical_sections(ps.content):
+            ids.add(section.id)
+    return ids
+
+
+@register("C.06")
+def check_inline_refs_filled(document: Document, profile: Profile) -> list[Violation]:
+    """Inline-перекрёстные ссылки и цитаты должны быть заполнены и разрешаться.
+
+    В отличие от C.01–C.05 (направление «текст → объект» по шаблону),
+    C.06 проверяет inline-объекты модели:
+
+    * `CrossRef` с пустым `target_id` → ссылка вставлена, но не заполнена
+      (error «заполните ссылку»); с непустым, но несуществующим id →
+      warning (ссылка ведёт в никуда);
+    * `Citation` с пустым `source_id` → не заполнена (error); с
+      несуществующим source_id → warning.
+
+    Это типичная ситуация конструктора: пользователь вставил ссылку и
+    забыл выбрать цель — её нужно заполнить.
+    """
+    _ = profile
+    target_ids = _all_target_ids(document)
+    bib_ids = {entry.id for entry in document.bibliography}
+    violations: list[Violation] = []
+
+    for paragraph in _all_paragraphs(document):
+        preview = _preview(_paragraph_text(paragraph))
+        for el in paragraph.content:
+            if isinstance(el, CrossRef):
+                if not el.target_id.strip():
+                    violations.append(
+                        Violation(
+                            check_code="C.06",
+                            severity="error",
+                            message=(
+                                f"В абзаце «{preview}» есть перекрёстная ссылка без цели — "
+                                f"заполните, на какой элемент она указывает"
+                            ),
+                            location=f"paragraph[{paragraph.id}].crossref",
+                            suggestion="Указать целевой элемент (рисунок/таблицу/формулу/раздел)",
+                            details={"paragraph_id": paragraph.id},
+                        )
+                    )
+                elif el.target_id not in target_ids:
+                    violations.append(
+                        Violation(
+                            check_code="C.06",
+                            severity="warning",
+                            message=(
+                                f"Перекрёстная ссылка в абзаце «{preview}» указывает на "
+                                f"несуществующий элемент «{el.target_id}»"
+                            ),
+                            location=f"paragraph[{paragraph.id}].crossref",
+                            suggestion="Выбрать существующий целевой элемент или удалить ссылку",
+                            details={"paragraph_id": paragraph.id, "target_id": el.target_id},
+                        )
+                    )
+            elif isinstance(el, Citation):
+                if not el.source_id.strip():
+                    violations.append(
+                        Violation(
+                            check_code="C.06",
+                            severity="error",
+                            message=(
+                                f"В абзаце «{preview}» есть цитата без источника — "
+                                f"заполните, на какой источник она ссылается"
+                            ),
+                            location=f"paragraph[{paragraph.id}].citation",
+                            suggestion="Указать источник из списка литературы",
+                            details={"paragraph_id": paragraph.id},
+                        )
+                    )
+                elif el.source_id not in bib_ids:
+                    violations.append(
+                        Violation(
+                            check_code="C.06",
+                            severity="warning",
+                            message=(
+                                f"Цитата в абзаце «{preview}» ссылается на отсутствующий "
+                                f"источник «{el.source_id}»"
+                            ),
+                            location=f"paragraph[{paragraph.id}].citation",
+                            suggestion="Выбрать источник из списка литературы или добавить его",
+                            details={"paragraph_id": paragraph.id, "source_id": el.source_id},
+                        )
+                    )
+    return violations
+
+
 __all__ = [
     "check_appendix_references_resolve",
     "check_bibliography_references_resolve",
     "check_figure_references_resolve",
     "check_formula_references_resolve",
+    "check_inline_refs_filled",
     "check_table_references_resolve",
 ]

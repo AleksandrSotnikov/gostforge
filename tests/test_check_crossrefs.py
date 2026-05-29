@@ -419,3 +419,57 @@ def test_c05_abbreviated_form_resolves() -> None:
     profile = load_profile("gost-7.32-2017")
     found = [v for v in validate(doc, profile) if v.check_code == "C.05"]
     assert found == []
+
+
+# --- C.06 — заполненность inline-ссылок и цитат ------------------------------
+
+
+def test_c06_registered() -> None:
+    assert "C.06" in registered_checks()
+
+
+def test_c06_empty_crossref_is_error() -> None:
+    """CrossRef с пустым target_id → error «заполните ссылку»."""
+    from gostforge.model import CrossRef
+
+    para = Paragraph(
+        id="p1",
+        content=[TextRun(text="См. "), CrossRef(target_id="", prefix="см. ")],
+    )
+    doc = _doc_with_content([para])
+    found = [v for v in validate(doc, load_profile("gost-7.32-2017")) if v.check_code == "C.06"]
+    assert len(found) == 1
+    assert found[0].severity == "error"
+
+
+def test_c06_filled_crossref_resolves() -> None:
+    """CrossRef на существующий рисунок — нет нарушения C.06."""
+    from gostforge.model import CrossRef
+
+    figure = Figure(id="f-1", caption=[TextRun(text="Рисунок 1 — Схема")])
+    para = Paragraph(id="p1", content=[TextRun(text="См. "), CrossRef(target_id="f-1")])
+    doc = _doc_with_content([figure, para])
+    found = [v for v in validate(doc, load_profile("gost-7.32-2017")) if v.check_code == "C.06"]
+    assert found == []
+
+
+def test_c06_dangling_crossref_is_warning() -> None:
+    """CrossRef на несуществующий id → warning."""
+    from gostforge.model import CrossRef
+
+    para = Paragraph(id="p1", content=[CrossRef(target_id="f-404")])
+    doc = _doc_with_content([para])
+    found = [v for v in validate(doc, load_profile("gost-7.32-2017")) if v.check_code == "C.06"]
+    assert len(found) == 1
+    assert found[0].severity == "warning"
+
+
+def test_c06_empty_citation_is_error() -> None:
+    """Citation с пустым source_id → error."""
+    from gostforge.model import Citation
+
+    para = Paragraph(id="p1", content=[TextRun(text="Текст "), Citation(source_id="")])
+    doc = _doc_with_content([para])
+    found = [v for v in validate(doc, load_profile("gost-7.32-2017")) if v.check_code == "C.06"]
+    assert len(found) == 1
+    assert found[0].severity == "error"

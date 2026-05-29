@@ -218,6 +218,7 @@ checks:
   C.03: {enabled: true}
   C.04: {enabled: true}
   C.05: {enabled: true}
+  C.06: {enabled: true}   # inline-ссылки/цитаты заполнены и разрешаются
   P.01:
     enabled: true
     params:
