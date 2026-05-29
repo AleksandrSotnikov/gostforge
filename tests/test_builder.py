@@ -327,3 +327,67 @@ def test_section_list_bulleted() -> None:
     lists = [c for c in section.children if isinstance(c, ListBlock)]
     assert len(lists) == 1
     assert lists[0].ordered is False
+
+
+# --- основная надпись (штамп ЕСКД) в конструкторе ---------------------------
+
+
+def test_builder_title_block_sets_fields() -> None:
+    """`.title_block(...)` проставляет штамп на PageSection с нужными графами."""
+    from gostforge.model import TitleBlock
+
+    doc = (
+        work("Пояснительная записка", author="Иванов И. И.")
+        .title_block(
+            designation="АБВГ.123456.001 ПЗ",
+            organization="Кафедра ИВТ",
+            sheets_total="42",
+            roles=[("Разраб.", "Иванов", "01.06.26"), ("Пров.", "Петров", "")],
+        )
+        .section("Введение")
+        .paragraph("Текст введения по теме исследования и его актуальности.")
+        .build()
+    )
+    tb = doc.page_sections[0].title_block
+    assert isinstance(tb, TitleBlock)
+    assert tb.enabled is True
+    assert tb.designation == "АБВГ.123456.001 ПЗ"
+    assert tb.organization == "Кафедра ИВТ"
+    assert tb.sheets_total == "42"
+    assert [r.role for r in tb.roles] == ["Разраб.", "Пров."]
+    assert tb.roles[0].name == "Иванов"
+
+
+def test_builder_title_block_default_roles() -> None:
+    """Без roles берётся стандартный набор ролей ГОСТ 2.104."""
+    doc = work("Работа").title_block(designation="X.001").section("Глава").build()
+    tb = doc.page_sections[0].title_block
+    assert tb is not None
+    assert [r.role for r in tb.roles] == ["Разраб.", "Пров.", "Т.контр.", "Н.контр.", "Утв."]
+
+
+def test_builder_without_title_block_is_none() -> None:
+    """Без вызова .title_block() штамп не задаётся (None)."""
+    doc = work("Работа").section("Глава").build()
+    assert doc.page_sections[0].title_block is None
+
+
+def test_builder_title_block_renders_in_export(tmp_path: Path) -> None:
+    """Штамп из конструктора попадает в footer экспортированного .docx."""
+    import docx as python_docx
+
+    from gostforge.exporter import export_docx
+
+    doc = (
+        work("Пояснительная записка")
+        .title_block(designation="X.001", organization="Каф.")
+        .section("Введение")
+        .paragraph("Текст.")
+        .build()
+    )
+    out = tmp_path / "with-stamp.docx"
+    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    tables = python_docx.Document(str(out)).sections[0].footer.tables
+    assert len(tables) == 1
+    text = "\n".join(c.text for r in tables[0].rows for c in r.cells)
+    assert "X.001" in text

@@ -26,6 +26,8 @@ from gostforge.model import (
     PageSection,
     Paragraph,
     TextRun,
+    TitleBlock,
+    TitleBlockRole,
 )
 
 from .section_builder import SectionBuilder, _heading_text
@@ -70,6 +72,8 @@ class WorkBuilder:
         self._profile_id = profile_id
         self._supervisor = supervisor
         self._organization = organization
+        # Основная надпись (штамп ЕСКД). None — задаётся профилем на экспорте.
+        self._title_block: TitleBlock | None = None
 
         # Верхнеуровневые логические разделы (level==1). Подразделы кладутся в
         # children этих разделов.
@@ -155,6 +159,56 @@ class WorkBuilder:
         self._active = builder
 
     # --- Fluent API ----------------------------------------------------------
+
+    def title_block(
+        self,
+        *,
+        designation: str = "",
+        title: str = "",
+        organization: str = "",
+        form: str = "form1",
+        stage: str = "",
+        mass: str = "",
+        scale: str = "",
+        sheet: str = "",
+        sheets_total: str = "",
+        roles: list[tuple[str, str, str]] | None = None,
+    ) -> WorkBuilder:
+        """Задать основную надпись (штамп ЕСКД, ГОСТ 2.104).
+
+        Параметры соответствуют графам: ``designation`` — обозначение
+        (2), ``title`` — наименование (1; по умолчанию = заголовок
+        работы на экспорте), ``organization`` — графа 9, ``form`` —
+        «form1»/«form2a», ``stage`` — литера (4), ``mass`` (5),
+        ``scale`` (6), ``sheet`` (7), ``sheets_total`` (8).
+
+        ``roles`` — список кортежей ``(роль, фамилия, дата)``; если не
+        задан, используется стандартный набор Разраб./Пров./Т.контр./
+        Н.контр./Утв. с пустыми фамилиями.
+
+        Возвращает self для цепочки вызовов.
+        """
+        if roles is None:
+            role_objs = [
+                TitleBlockRole(role=r) for r in ("Разраб.", "Пров.", "Т.контр.", "Н.контр.", "Утв.")
+            ]
+        else:
+            role_objs = [TitleBlockRole(role=r, name=n, date=d) for (r, n, d) in roles]
+        form_value = form if form in ("form1", "form2a") else "form1"
+        self._title_block = TitleBlock(
+            enabled=True,
+            form=form_value,  # type: ignore[arg-type]
+            designation=designation,
+            title=title,
+            organization=organization or self._organization,
+            stage=stage,
+            mass=mass,
+            scale=scale,
+            sheet=sheet,
+            sheets_total=sheets_total,
+            roles=role_objs,
+        )
+        return self
 
     def section(self, heading: str) -> SectionBuilder:
         """Добавить раздел 1 уровня и вернуть его SectionBuilder.
@@ -255,6 +309,7 @@ class WorkBuilder:
             footer=footer,
             page_numbering=numbering,
             content=content,
+            title_block=self._title_block,
         )
         document.page_sections.append(page_section)
 
