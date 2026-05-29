@@ -49,6 +49,7 @@ from gostforge.model import (
     Table,
     TextRun,
     TitleBlock,
+    TitleBlockRole,
 )
 
 # Relationship-namespace для <w:hyperlink r:id="...">.
@@ -505,16 +506,24 @@ def _extract_page_section(docx_doc: DocxDocument) -> PageSection:
     return page_section
 
 
+def _strip_label(text: str, *prefixes: str) -> str:
+    """Убрать известную метку-префикс («Листов », «Лит. », …) из текста ячейки."""
+    t = text.strip()
+    for prefix in prefixes:
+        if t.startswith(prefix):
+            return t[len(prefix) :].strip()
+    return t
+
+
 def _extract_title_block(sect: DocxSection) -> TitleBlock | None:
-    """Определить наличие основной надписи (штампа) по таблице в footer-е.
+    """Прочитать основную надпись (штамп) из таблицы в нижнем колонтитуле.
 
-    Эвристика: основная надпись ЕСКД рендерится таблицей в нижнем
-    колонтитуле. Если в footer-е есть хотя бы одна таблица — считаем,
-    что штамп присутствует, и возвращаем ``TitleBlock(enabled=True)``.
-
-    Поля штампа (обозначение, организация и т.д.) обратно из .docx не
-    восстанавливаются — это только детекция наличия для нормоконтроля
-    (проверка F.08). Возвращает None, если таблиц в footer нет.
+    Основная надпись ЕСКД рендерится таблицей в footer-е. Если таблиц
+    нет — возвращает None. Иначе восстанавливает поля по компоновке,
+    которую пишет экспортёр (`exporter/title_block.py`): форма 1 — 8
+    колонок, форма 2а — 2 колонки. Извлечение best-effort и зеркально
+    writer-у; при нестандартной таблице возвращается хотя бы
+    `TitleBlock(enabled=True)` (детекция наличия для проверки F.08).
     """
     footer = sect.footer
     if footer is None:
@@ -525,6 +534,50 @@ def _extract_title_block(sect: DocxSection) -> TitleBlock | None:
         return None
     if not tables:
         return None
+
+    table = tables[0]
+    try:
+        ncols = len(table.columns)
+    except (ValueError, AttributeError):
+        return TitleBlock(enabled=True)
+
+    def cell_text(r: int, c: int) -> str:
+        try:
+            return str(table.cell(r, c).text).strip()
+        except (IndexError, ValueError):
+            return ""
+
+    if ncols == 2:
+        # Форма 2а: [обозначение | «Лист N»].
+        return TitleBlock(
+            enabled=True,
+            form="form2a",
+            designation=cell_text(0, 0),
+            sheet=_strip_label(cell_text(0, 1), "Лист "),
+        )
+
+    if ncols >= 8:
+        # Форма 1 — зеркало _write_form1.
+        roles: list[TitleBlockRole] = []
+        for r in range(2, 7):
+            label = cell_text(r, 0)
+            if label:
+                roles.append(TitleBlockRole(role=label, name=cell_text(r, 2), date=cell_text(r, 4)))
+        return TitleBlock(
+            enabled=True,
+            form="form1",
+            designation=cell_text(0, 0),
+            title=cell_text(1, 5),
+            organization=cell_text(6, 5),
+            stage=_strip_label(cell_text(4, 5), "Лит. ", "Лит."),
+            mass=_strip_label(cell_text(4, 6), "Масса ", "Масса"),
+            scale=_strip_label(cell_text(4, 7), "М ", "М"),
+            sheet=_strip_label(cell_text(5, 5), "Лист ", "Лист"),
+            sheets_total=_strip_label(cell_text(5, 6), "Листов ", "Листов"),
+            roles=roles,
+        )
+
+    # Нестандартная таблица — только факт наличия штампа.
     return TitleBlock(enabled=True)
 
 

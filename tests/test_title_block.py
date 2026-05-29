@@ -182,6 +182,43 @@ def test_parser_detects_title_block_presence(tmp_path: Path) -> None:
     assert parsed_tb.enabled is True
 
 
+def test_parser_extracts_form1_fields(tmp_path: Path) -> None:
+    """Поля формы 1 переживают round-trip export → parse (best-effort)."""
+    tb = TitleBlock(
+        enabled=True,
+        form="form1",
+        designation="АБВГ.123456.001 ПЗ",
+        title="Анализ алгоритмов",
+        organization="Кафедра ИВТ",
+        sheets_total="42",
+        roles=[TitleBlockRole(role="Разраб.", name="Иванов", date="01.06.26")],
+    )
+    doc = _doc_with_title_block(tb)
+    out = tmp_path / "rt-fields.docx"
+    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    parsed = parse_docx(out).page_sections[0].title_block
+    assert parsed is not None
+    assert parsed.form == "form1"
+    assert parsed.designation == "АБВГ.123456.001 ПЗ"
+    assert parsed.title == "Анализ алгоритмов"
+    assert parsed.organization == "Кафедра ИВТ"
+    assert parsed.sheets_total == "42"
+    assert any(r.role == "Разраб." and r.name == "Иванов" for r in parsed.roles)
+
+
+def test_parser_extracts_form2a_fields(tmp_path: Path) -> None:
+    """Форма 2а: обозначение и номер листа восстанавливаются."""
+    tb = TitleBlock(enabled=True, form="form2a", designation="X.001", sheet="3")
+    doc = _doc_with_title_block(tb)
+    out = tmp_path / "rt-2a.docx"
+    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    parsed = parse_docx(out).page_sections[0].title_block
+    assert parsed is not None
+    assert parsed.form == "form2a"
+    assert parsed.designation == "X.001"
+    assert parsed.sheet == "3"
+
+
 def test_parser_no_title_block_when_absent(tmp_path: Path) -> None:
     """Без штампа парсер возвращает title_block=None."""
     doc = _doc_with_title_block(None)
