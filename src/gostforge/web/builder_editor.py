@@ -960,6 +960,25 @@ def document_to_state(document: Any) -> dict[str, Any]:
         "sections": [],
     }
 
+    # Основная надпись (штамп): парсер детектирует её наличие по таблице
+    # в footer-е. Отражаем в state, чтобы чекбокс в UI был включён.
+    for ps in document.page_sections:
+        tb = getattr(ps, "title_block", None)
+        if tb is not None and getattr(tb, "enabled", False):
+            state["title_block"] = {
+                "enabled": True,
+                "form": getattr(tb, "form", "form1"),
+                "designation": getattr(tb, "designation", ""),
+                "organization": getattr(tb, "organization", ""),
+                "stage": getattr(tb, "stage", ""),
+                "sheet": getattr(tb, "sheet", ""),
+                "sheets_total": getattr(tb, "sheets_total", ""),
+                "roles": [
+                    {"role": r.role, "name": r.name, "date": r.date} for r in (tb.roles or [])
+                ],
+            }
+            break
+
     # Парсер кладёт LogicalSection плоско в page_section.content
     # (level 1, 2, 3 — все на верхнем уровне). Восстанавливаем иерархию
     # по level-у: секция level=N захватывает все следующие секции с
@@ -1148,6 +1167,33 @@ def document_to_state(document: Any) -> dict[str, Any]:
 # --- state → Document → bytes -----------------------------------------------
 
 
+def _apply_title_block_from_state(builder: Any, state: dict[str, Any]) -> None:
+    """Применить основную надпись (штамп) из state к builder-у, если включена."""
+    tb = state.get("title_block")
+    if not isinstance(tb, dict) or not tb.get("enabled"):
+        return
+    raw_roles = tb.get("roles") or []
+    role_tuples: list[tuple[str, str, str]] | None = None
+    if isinstance(raw_roles, list) and raw_roles:
+        role_tuples = [
+            (str(r.get("role", "")), str(r.get("name", "")), str(r.get("date", "")))
+            for r in raw_roles
+            if isinstance(r, dict) and r.get("role")
+        ]
+    builder.title_block(
+        designation=str(tb.get("designation", "")),
+        title=str(tb.get("title", "")),
+        organization=str(tb.get("organization", "")),
+        form=str(tb.get("form", "form1")),
+        stage=str(tb.get("stage", "")),
+        mass=str(tb.get("mass", "")),
+        scale=str(tb.get("scale", "")),
+        sheet=str(tb.get("sheet", "")),
+        sheets_total=str(tb.get("sheets_total", "")),
+        roles=role_tuples,
+    )
+
+
 def _build_document_from_state(state: dict[str, Any]) -> bytes:
     """Собрать .docx из state и вернуть его байты.
 
@@ -1198,6 +1244,8 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
                     sec_builder.skip_all_checks()
                 else:
                     sec_builder.skip_checks(*[str(c) for c in disabled])
+
+    _apply_title_block_from_state(builder, state)
 
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         out_path = Path(tmp.name)
@@ -1622,6 +1670,78 @@ def _validate_state_bytes(data: bytes, profile_id: str) -> dict[str, int]:
 # --- UI: sidebar -------------------------------------------------------------
 
 
+_TB_DEFAULT_ROLES = "Разраб.\nПров.\nТ.контр.\nН.контр.\nУтв."
+
+
+def _render_title_block_section(state: dict[str, Any]) -> None:
+    """Sidebar-секция «Основная надпись (штамп ЕСКД)».
+
+    Позволяет включить и заполнить штамп (ГОСТ 2.104) для текущей работы.
+    Хранится в ``state['title_block']``; применяется при сборке через
+    :func:`_apply_title_block_from_state`.
+    """
+    tb: dict[str, Any] = state.get("title_block") or {}
+    with st.sidebar.expander("Основная надпись (штамп ЕСКД)", expanded=False):
+        enabled = st.checkbox(
+            "Печатать штамп",
+            value=bool(tb.get("enabled", False)),
+            key="builder_tb_enabled",
+            help="Таблица в нижнем колонтитуле для технической документации (ГОСТ 2.104).",
+        )
+        if not enabled:
+            state["title_block"] = {"enabled": False}
+            return
+        forms = ["form1", "form2a"]
+        form = st.selectbox(
+            "Форма",
+            options=forms,
+            index=forms.index(tb.get("form", "form1")) if tb.get("form") in forms else 0,
+            format_func=lambda v: {
+                "form1": "Форма 1 (заглавный лист)",
+                "form2a": "Форма 2а (последующие)",
+            }[v],
+            key="builder_tb_form",
+        )
+        designation = st.text_input(
+            "Обозначение (графа 2)", value=tb.get("designation", ""), key="builder_tb_desig"
+        )
+        organization = st.text_input(
+            "Организация (графа 9)", value=tb.get("organization", ""), key="builder_tb_org"
+        )
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            stage = st.text_input("Литера", value=tb.get("stage", ""), key="builder_tb_stage")
+        with c2:
+            sheet = st.text_input("Лист", value=tb.get("sheet", ""), key="builder_tb_sheet")
+        with c3:
+            sheets_total = st.text_input(
+                "Листов", value=tb.get("sheets_total", ""), key="builder_tb_sheets"
+            )
+        existing_roles = tb.get("roles") or []
+        roles_text = (
+            "\n".join(str(r.get("role", "")) for r in existing_roles if r.get("role"))
+            if existing_roles
+            else _TB_DEFAULT_ROLES
+        )
+        edited_roles = st.text_area(
+            "Роли (по одной в строке)", value=roles_text, key="builder_tb_roles"
+        )
+        state["title_block"] = {
+            "enabled": True,
+            "form": form,
+            "designation": designation,
+            "organization": organization,
+            "stage": stage,
+            "sheet": sheet,
+            "sheets_total": sheets_total,
+            "roles": [
+                {"role": line.strip(), "name": "", "date": ""}
+                for line in edited_roles.splitlines()
+                if line.strip()
+            ],
+        }
+
+
 def _render_style_overrides_section(state: dict[str, Any]) -> None:
     """Sidebar-секция «Дополнительные настройки стилей».
 
@@ -1919,6 +2039,7 @@ def _render_sidebar_metadata() -> None:
     )
 
     _render_style_overrides_section(state)
+    _render_title_block_section(state)
 
     st.sidebar.divider()
     st.sidebar.subheader("Шаблоны")

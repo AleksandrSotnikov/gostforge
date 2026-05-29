@@ -364,3 +364,60 @@ def test_document_to_state_extracts_bibliography_references() -> None:
     ]
     assert bibs_with_refs, "Должна быть хотя бы одна bibliography-секция с references"
     assert "Иванов" in bibs_with_refs[0]["references"][0]
+
+
+# --- основная надпись (штамп ЕСКД) из state ----------------------------------
+
+
+def _footer_xml(data: bytes) -> str:
+    """Склеить все footerN.xml документа (штамп живёт в одном из них)."""
+    import re
+
+    parts: list[str] = []
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        for name in zf.namelist():
+            if re.match(r"word/footer\d+\.xml$", name):
+                parts.append(zf.read(name).decode("utf-8"))
+    return "\n".join(parts)
+
+
+def test_build_document_from_state_with_title_block() -> None:
+    """state['title_block'] (enabled) → штамп-таблица в footer с обозначением."""
+    state = {
+        "title": "Пояснительная записка",
+        "author": "Иванов",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "title_block": {
+            "enabled": True,
+            "form": "form1",
+            "designation": "АБВГ.001 ПЗ",
+            "organization": "Кафедра ИВТ",
+            "roles": [{"role": "Разраб.", "name": "Иванов", "date": ""}],
+        },
+        "sections": [
+            {
+                "id": "intro",
+                "heading": "Введение",
+                "blocks": [{"kind": "paragraph", "text": "Текст."}],
+            },
+        ],
+    }
+    data = _build_document_from_state(state)
+    footer = _footer_xml(data)
+    assert "АБВГ.001 ПЗ" in footer
+    assert "Кафедра ИВТ" in footer
+
+
+def test_build_document_from_state_title_block_disabled() -> None:
+    """Выключенный штамп не добавляет таблиц в footer."""
+    state = {
+        "title": "T",
+        "profile_id": "gost-7.32-2017",
+        "title_block": {"enabled": False},
+        "sections": [
+            {"id": "intro", "heading": "Введение", "blocks": [{"kind": "paragraph", "text": "X."}]},
+        ],
+    }
+    data = _build_document_from_state(state)
+    assert "w:tbl" not in _footer_xml(data)
