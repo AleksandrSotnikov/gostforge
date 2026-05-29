@@ -41,6 +41,7 @@ from gostforge.model import (
     InlineFormula,
     ListBlock,
     LogicalSection,
+    PageBorder,
     PageGeometry,
     PageSection,
     Paragraph,
@@ -460,12 +461,18 @@ def _extract_page_section(docx_doc: DocxDocument) -> PageSection:
 
     paper = _detect_paper_size(sect)
     orientation = _detect_orientation(sect)
+    border = _extract_pg_borders(sect)
 
     page_section = PageSection(
         id="main",
         name="Основная часть",
         type="main",
-        page=PageGeometry(margins_mm=margins_mm, paper=paper, orientation=orientation),
+        page=PageGeometry(
+            margins_mm=margins_mm,
+            paper=paper,
+            orientation=orientation,
+            border=border,
+        ),
     )
 
     # Стартовая страница нумерации: <w:pgNumType w:start="N"/> в sectPr.
@@ -559,6 +566,44 @@ def _extract_page_number_format(
     if fmt_attr is None:
         return None
     return _PAGE_FMT_MAP.get(fmt_attr)
+
+
+def _extract_pg_borders(sect: DocxSection) -> PageBorder | None:
+    """Прочитать <w:pgBorders> из sectPr → PageBorder (рамка листа, ЕСКД).
+
+    Возвращает None, если рамки нет. Параметры берутся из первой
+    найденной стороны (top/left/...) — экспортёр пишет все стороны
+    одинаково. Зеркально writer-у ``_apply_pg_borders``.
+    """
+    sect_pr = getattr(sect, "_sectPr", None)
+    if sect_pr is None:
+        return None
+    pg_borders = sect_pr.find(f"{{{W_NS}}}pgBorders")
+    if pg_borders is None:
+        return None
+    offset_from = pg_borders.get(f"{{{W_NS}}}offsetFrom") or "text"
+    if offset_from not in ("text", "page"):
+        offset_from = "text"
+    # Берём первую доступную сторону как репрезентативную.
+    side_el = None
+    for side in ("top", "left", "bottom", "right"):
+        side_el = pg_borders.find(f"{{{W_NS}}}{side}")
+        if side_el is not None:
+            break
+    if side_el is None:
+        return None
+    style = side_el.get(f"{{{W_NS}}}val") or "single"
+    sz = side_el.get(f"{{{W_NS}}}sz")
+    space = side_el.get(f"{{{W_NS}}}space")
+    color = side_el.get(f"{{{W_NS}}}color") or "auto"
+    return PageBorder(
+        enabled=True,
+        style=style,
+        size_eighth_pt=int(sz) if sz and sz.isdigit() else 4,
+        color=color,
+        offset_from=offset_from,  # type: ignore[arg-type]
+        space_pt=int(space) if space and space.isdigit() else 0,
+    )
 
 
 def _length_to_mm(length: object | None) -> float:

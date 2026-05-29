@@ -15,11 +15,24 @@ import yaml
 from pydantic import BaseModel, Field
 
 
+class PageBorderProfile(BaseModel):
+    """Рамка листа (ЕСКД, ГОСТ 2.104). Управляет OOXML ``<w:pgBorders>``."""
+
+    enabled: bool = False
+    style: str = "single"
+    size_eighth_pt: int = 4  # 1/8 pt; 4 = 0.5 pt
+    color: str = "auto"
+    offset_from: Literal["text", "page"] = "text"
+    space_pt: int = 0  # w:space, 0..31
+
+
 class PageGeometryProfile(BaseModel):
     size: str = "A4"
     margins_mm: dict[str, float] = Field(
         default_factory=lambda: {"top": 20.0, "right": 15.0, "bottom": 20.0, "left": 30.0}
     )
+    # Рамка листа. None — рамка не задаётся профилем (back-compat).
+    border: PageBorderProfile | None = None
 
 
 class BodyTextProfile(BaseModel):

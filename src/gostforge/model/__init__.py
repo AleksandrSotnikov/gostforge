@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
-SCHEMA_VERSION = "0.4.0"
+SCHEMA_VERSION = "0.5.0"
 
 
 # --- Inline content -----------------------------------------------------------
@@ -284,12 +284,43 @@ PageSectionType = Literal["title", "frontmatter", "main", "appendix", "custom"]
 
 
 @dataclass
+class PageBorder:
+    """Рамка листа (OOXML ``<w:pgBorders>``).
+
+    По ГОСТ 2.104 (ЕСКД) лист текстовой/конструкторской документации
+    обрамляется рамкой: 20 мм слева (поле подшивки) и 5 мм с остальных
+    сторон. В OOXML рамка рисуется относительно текста
+    (``offset_from = "text"``) при соответствующих полях страницы, либо
+    относительно края листа (``offset_from = "page"``, но ``w:space``
+    ограничен 31 pt и большой отступ так не задать).
+
+    Для отчётов по ГОСТ 7.32-2017 рамка не используется — поле по
+    умолчанию ``enabled = False`` (и сам ``PageGeometry.border`` обычно
+    ``None``), поэтому добавление поля обратно совместимо.
+    """
+
+    enabled: bool = False
+    # Стиль линии (w:val): single, thick, double, dotted, dashed.
+    style: str = "single"
+    # Толщина линии в 1/8 pt (w:sz). 4 = 0.5 pt.
+    size_eighth_pt: int = 4
+    # Цвет: "auto" (чёрный) или hex без «#».
+    color: str = "auto"
+    # Откуда отмеряется отступ рамки: от текста или от края листа.
+    offset_from: Literal["text", "page"] = "text"
+    # Отступ рамки на каждую сторону в pt (w:space, 0..31).
+    space_pt: int = 0
+
+
+@dataclass
 class PageGeometry:
     paper: str = "A4"
     margins_mm: dict[str, float] = field(
         default_factory=lambda: {"top": 20, "right": 15, "bottom": 20, "left": 30}
     )
     orientation: Literal["portrait", "landscape"] = "portrait"
+    # Рамка листа (ЕСКД). None — рамки нет (back-compat default).
+    border: PageBorder | None = None
 
 
 @dataclass

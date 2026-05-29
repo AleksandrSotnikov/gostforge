@@ -50,6 +50,7 @@ from gostforge.model import (
     InlineFormula,
     ListBlock,
     LogicalSection,
+    PageBorder,
     PageSection,
     Paragraph,
     Table,
@@ -1432,6 +1433,17 @@ def _sync_page_section_with_profile(page_section: PageSection, profile: Profile)
         merged = dict(page_section.page.margins_mm)
         merged.update({k: float(v) for k, v in margins.items()})
         page_section.page.margins_mm = merged
+    # Рамка листа (ЕСКД). Профиль задаёт рамку, если в модели её ещё нет.
+    border_cfg = profile.styles.page.border
+    if border_cfg is not None and border_cfg.enabled and page_section.page.border is None:
+        page_section.page.border = PageBorder(
+            enabled=True,
+            style=border_cfg.style,
+            size_eighth_pt=int(border_cfg.size_eighth_pt),
+            color=border_cfg.color,
+            offset_from=border_cfg.offset_from,
+            space_pt=int(border_cfg.space_pt),
+        )
     # F.06 start_value.
     f06 = profile.checks.get("F.06")
     if (
@@ -1469,6 +1481,35 @@ def _apply_pgnumtype(doc: DocxDocument, page_section: PageSection) -> None:
         pg.set(f"{{{W_NS}}}start", str(numbering.start_value))
     if needs_fmt:
         pg.set(f"{{{W_NS}}}fmt", _PAGE_FMT_OOXML.get(numbering.format, "decimal"))
+
+
+def _apply_pg_borders(doc: DocxDocument, page_section: PageSection) -> None:
+    """Прописать <w:pgBorders> (рамка листа, ЕСКД) в sectPr.
+
+    Пишется, только если ``page_section.page.border`` задан и
+    ``enabled``. Все четыре стороны рамки получают одинаковые
+    стиль/толщину/отступ/цвет. Зеркально парсеру ``_extract_pg_borders``.
+    """
+    border = page_section.page.border
+    if border is None or not border.enabled:
+        return
+    sect = doc.sections[0]
+    sect_pr = getattr(sect, "_sectPr", None)
+    if sect_pr is None:
+        return
+    # Удаляем существующий pgBorders, чтобы не было дублей.
+    for existing in sect_pr.findall(f"{{{W_NS}}}pgBorders"):
+        sect_pr.remove(existing)
+    pg_borders = etree.SubElement(sect_pr, f"{{{W_NS}}}pgBorders")
+    pg_borders.set(f"{{{W_NS}}}offsetFrom", border.offset_from)
+    color = "auto" if border.color == "auto" else border.color.lstrip("#")
+    space = str(max(0, min(31, int(border.space_pt))))
+    for side in ("top", "left", "bottom", "right"):
+        el = etree.SubElement(pg_borders, f"{{{W_NS}}}{side}")
+        el.set(f"{{{W_NS}}}val", border.style)
+        el.set(f"{{{W_NS}}}sz", str(int(border.size_eighth_pt)))
+        el.set(f"{{{W_NS}}}space", space)
+        el.set(f"{{{W_NS}}}color", color)
 
 
 def _write_items(doc: DocxDocument, items: Sequence[LogicalSection | Block]) -> None:
@@ -1593,6 +1634,7 @@ def export_docx(
             _sync_page_section_with_profile(first, profile)
             _apply_page_size(doc, first)
             _apply_pgnumtype(doc, first)
+            _apply_pg_borders(doc, first)
             if first.footer is not None:
                 _write_footer(doc, first.footer.default)
             if first.header is not None:
