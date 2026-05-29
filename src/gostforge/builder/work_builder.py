@@ -21,6 +21,7 @@ from gostforge.model import (
     DocumentMetadata,
     HeaderConfig,
     LogicalSection,
+    PageBorder,
     PageGeometry,
     PageNumberingConfig,
     PageSection,
@@ -74,6 +75,8 @@ class WorkBuilder:
         self._organization = organization
         # Основная надпись (штамп ЕСКД). None — задаётся профилем на экспорте.
         self._title_block: TitleBlock | None = None
+        # Рамка листа (ЕСКД). None — задаётся профилем на экспорте.
+        self._border: PageBorder | None = None
 
         # Верхнеуровневые логические разделы (level==1). Подразделы кладутся в
         # children этих разделов.
@@ -159,6 +162,32 @@ class WorkBuilder:
         self._active = builder
 
     # --- Fluent API ----------------------------------------------------------
+
+    def border(
+        self,
+        *,
+        style: str = "single",
+        size_eighth_pt: int = 4,
+        color: str = "auto",
+        offset_from: str = "text",
+        space_pt: int = 0,
+    ) -> WorkBuilder:
+        """Включить рамку листа (ЕСКД, ГОСТ 2.104) для работы.
+
+        ``size_eighth_pt`` — толщина линии в 1/8 pt (4 = 0.5 pt). Для
+        рамки по границе текста держите поля 20/5/5/5 мм и
+        ``offset_from="text"``. Возвращает self для цепочки вызовов.
+        """
+        off = offset_from if offset_from in ("text", "page") else "text"
+        self._border = PageBorder(
+            enabled=True,
+            style=style,
+            size_eighth_pt=int(size_eighth_pt),
+            color=color,
+            offset_from=off,  # type: ignore[arg-type]
+            space_pt=int(space_pt),
+        )
+        return self
 
     def title_block(
         self,
@@ -290,6 +319,7 @@ class WorkBuilder:
             paper="A4",
             margins_mm=page_margins,
             orientation="portrait",
+            border=self._border,
         )
         footer = HeaderConfig(
             default=ContentTemplate(center=[TextRun(text="{page}")]),

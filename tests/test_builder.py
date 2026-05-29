@@ -391,3 +391,34 @@ def test_builder_title_block_renders_in_export(tmp_path: Path) -> None:
     assert len(tables) == 1
     text = "\n".join(c.text for r in tables[0].rows for c in r.cells)
     assert "X.001" in text
+
+
+def test_builder_border_sets_page_border() -> None:
+    """`.border(...)` включает рамку листа на PageGeometry."""
+    from gostforge.model import PageBorder
+
+    doc = work("Работа").border(size_eighth_pt=8).section("Глава").build()
+    border = doc.page_sections[0].page.border
+    assert isinstance(border, PageBorder)
+    assert border.enabled is True
+    assert border.size_eighth_pt == 8
+
+
+def test_builder_without_border_is_none() -> None:
+    """Без .border() рамка не задаётся (None) — приземлится профилем."""
+    doc = work("Работа").section("Глава").build()
+    assert doc.page_sections[0].page.border is None
+
+
+def test_builder_border_renders_in_export(tmp_path: Path) -> None:
+    """Рамка из конструктора попадает в sectPr экспортированного .docx."""
+    import docx as python_docx
+
+    from gostforge.exporter import export_docx
+
+    W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+    doc = work("Работа").border().section("Глава").paragraph("Текст.").build()
+    out = tmp_path / "framed.docx"
+    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    sect_pr = python_docx.Document(str(out)).sections[0]._sectPr
+    assert sect_pr.find(f"{{{W_NS}}}pgBorders") is not None

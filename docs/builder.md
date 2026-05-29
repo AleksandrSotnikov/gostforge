@@ -192,6 +192,15 @@ document = builder.build()   # gostforge.model.Document
 тогда он применится без вызова `.title_block()`. Подробнее о формах
 и графах — [docs/page-sections.md](page-sections.md#основная-надпись-штамп-гост-2104).
 
+Рамку листа (ЕСКД) включает `.border(...)`:
+
+```python
+work("Пояснительная записка").border(size_eighth_pt=4).section("...")  # 0.5 pt
+```
+
+Как и штамп, рамку можно задать профилем (`styles.page.border`) — тогда
+вызывать `.border()` не нужно.
+
 ## 2. Шаблоны
 
 В `gostforge.builder.templates` лежат скелеты с уже добавленными
