@@ -82,3 +82,32 @@ def load_plugins(directory: Path | None = None) -> list[str]:
             # повторная загрузка не схватила полу-импортированный объект.
             sys.modules.pop(module_name, None)
     return loaded
+
+
+def plugin_info(directory: Path | None = None) -> dict[str, object]:
+    """Сводка о плагинах для UI/диагностики (без побочных эффектов сверх загрузки).
+
+    Возвращает словарь:
+
+    * ``directory`` (str) — путь к каталогу плагинов;
+    * ``exists`` (bool) — существует ли каталог;
+    * ``files`` (list[str]) — имена найденных ``.py``-плагинов;
+    * ``added_codes`` (list[str]) — коды проверок, добавленные плагинами
+      (разница реестра до/после ``load_plugins``).
+
+    Используется панелью «Плагины проверок» в Streamlit-UI и удобна для
+    тестирования (принимает явный ``directory``).
+    """
+    from gostforge.validator.engine import _registry
+
+    directory = directory or plugins_dir()
+    files = [p.name for p in discover_plugin_files(directory)]
+    before = set(_registry)
+    load_plugins(directory)
+    added_codes = sorted(set(_registry) - before)
+    return {
+        "directory": str(directory),
+        "exists": directory.is_dir(),
+        "files": files,
+        "added_codes": added_codes,
+    }

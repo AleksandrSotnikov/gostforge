@@ -17,7 +17,7 @@ import json
 import tempfile
 from collections import Counter
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 try:
     import streamlit as st
@@ -249,7 +249,29 @@ def _render_sidebar(profiles: list[str]) -> str:
     with st.sidebar.expander("Показать параметры профиля"):
         st.json(json.loads(prof.model_dump_json()))
 
+    _render_plugins_panel()
+
     return profile_id
+
+
+def _render_plugins_panel() -> None:
+    """Sidebar-панель «Плагины проверок» — каталог, файлы, добавленные коды."""
+    from gostforge.plugins import plugin_info
+
+    info = plugin_info()
+    files = cast("list[str]", info.get("files") or [])
+    added = cast("list[str]", info.get("added_codes") or [])
+    with st.sidebar.expander(f"Плагины проверок ({len(files)})", expanded=False):
+        st.caption(f"Каталог: `{info['directory']}`")
+        if not info.get("exists"):
+            st.info("Каталог не существует — создайте его и положите .py-плагины с @register.")
+            return
+        if files:
+            st.markdown("**Файлы:** " + ", ".join(f"`{f}`" for f in files))
+        else:
+            st.info("Плагинов не найдено.")
+        if added:
+            st.markdown("**Добавленные проверки:** " + ", ".join(f"`{c}`" for c in added))
 
 
 def _render_file_result(name: str, violations: list[Violation]) -> None:

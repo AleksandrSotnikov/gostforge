@@ -127,3 +127,40 @@ def test_load_plugins_empty_directory_returns_empty(tmp_path: Path) -> None:
     """``load_plugins`` на пустой/несуществующей директории не падает."""
     assert load_plugins(tmp_path) == []
     assert load_plugins(tmp_path / "missing") == []
+
+
+def test_plugin_info_empty_directory(tmp_path: Path) -> None:
+    """plugin_info на пустом каталоге: файлов нет, кодов нет, exists=True."""
+    from gostforge.plugins import plugin_info
+
+    info = plugin_info(tmp_path)
+    assert info["directory"] == str(tmp_path)
+    assert info["exists"] is True
+    assert info["files"] == []
+    assert info["added_codes"] == []
+
+
+def test_plugin_info_reports_files_and_added_codes(tmp_path: Path) -> None:
+    """plugin_info перечисляет .py-файлы и коды, добавленные плагином."""
+    from gostforge.plugins import plugin_info
+    from gostforge.validator.engine import _registry
+
+    code = "Z.98"
+    _registry.pop(code, None)
+    sys.modules.pop("gostforge_plugin_dept2", None)
+    plugin = tmp_path / "dept2.py"
+    plugin.write_text(
+        "from gostforge.validator.engine import register\n"
+        "\n"
+        "@register('Z.98')\n"
+        "def check_z98(document, profile):\n"
+        "    return []\n",
+        encoding="utf-8",
+    )
+    try:
+        info = plugin_info(tmp_path)
+        assert "dept2.py" in info["files"]  # type: ignore[operator]
+        assert "Z.98" in info["added_codes"]  # type: ignore[operator]
+    finally:
+        _registry.pop(code, None)
+        sys.modules.pop("gostforge_plugin_dept2", None)
