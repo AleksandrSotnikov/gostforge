@@ -164,6 +164,7 @@ checks:
   I.08: {enabled: true, params: {min_dpi: 150}}
   I.09: {enabled: true, params: {alignment: center}}
   I.10: {enabled: true}
+  I.11: {enabled: true}   # мягко: разделитель подписи = тире из caption.format
   B.01: {enabled: true}
   B.02: {enabled: true}
   B.03: {enabled: true, params: {allow_dot_after_number: false}}
@@ -175,6 +176,7 @@ checks:
   B.09: {enabled: true}
   B.10: {enabled: true}   # таблица не должна быть пустой
   B.11: {enabled: true}   # таблица — после первого упоминания в тексте
+  B.12: {enabled: true}   # мягко: разделитель подписи = тире из caption.format
   R.01: {enabled: true}
   R.02: {enabled: true, params: {order: alphabetical}}
   R.03:

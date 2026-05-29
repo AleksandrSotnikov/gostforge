@@ -553,9 +553,73 @@ def check_figure_centered(document: Document, profile: Profile) -> list[Violatio
     return violations
 
 
+# I.11 — разделитель подписи совпадает с тире из caption.format профиля.
+# Захватываем фактический разделитель (—/–/-), чтобы сравнить с профилем.
+_FIGURE_CAPTION_DASH_RE = re.compile(r"^Рис(?:унок)?\s+\d+(?:\.\d+)?\s*([—–-])\s*\S")
+# Человекочитаемые названия разделителей для сообщений.
+_DASH_NAMES = {"—": "длинное тире (—)", "–": "среднее тире (–)", "-": "дефис (-)"}
+
+
+def expected_caption_dash(fmt: str) -> str | None:
+    """Извлечь предписанный профилем символ тире из шаблона подписи.
+
+    Шаблон вида «Рисунок {num} — {title}» → «—». Возвращает None, если
+    между {num} и {title} нет тире (например, точечный формат).
+    """
+    match = re.search(r"\{num\}(.*?)\{title\}", fmt)
+    if not match:
+        return None
+    for ch in match.group(1):
+        if ch in "—–-":
+            return ch
+    return None
+
+
+@register("I.11")
+def check_figure_caption_dash(document: Document, profile: Profile) -> list[Violation]:
+    """Разделитель подписи рисунка соответствует тире из профиля (мягко).
+
+    I.03 принимает любой из «—/–/-» как структурно валидный. I.11 —
+    мягкое (info) предупреждение: если профиль (`styles.figure.caption.
+    format`) предписывает, например, длинное тире «—», а подпись
+    использует дефис «-», это сигнализируется как несоответствие
+    оформления (но не ошибка ГОСТа).
+    """
+    expected = expected_caption_dash(profile.styles.figure.caption.format)
+    if expected is None:
+        return []
+
+    violations: list[Violation] = []
+    for page_section, figure in _all_figures(document):
+        text = _caption_text(figure.caption)
+        if not text:
+            continue
+        match = _FIGURE_CAPTION_DASH_RE.match(text)
+        if not match:
+            continue
+        actual = match.group(1)
+        if actual == expected:
+            continue
+        violations.append(
+            Violation(
+                check_code="I.11",
+                severity="info",
+                message=(
+                    f"В подписи «{text}» разделитель — {_DASH_NAMES.get(actual, actual)}, "
+                    f"а профиль предписывает {_DASH_NAMES.get(expected, expected)}"
+                ),
+                location=f"page_sections.{page_section.id}.figure[{figure.id}]",
+                suggestion=f"Использовать «{expected}» как разделитель в подписи рисунка",
+                details={"figure_id": figure.id, "expected": expected, "actual": actual},
+            )
+        )
+    return violations
+
+
 __all__ = [
     "check_figure_blank_line_after_caption",
     "check_figure_caption_below",
+    "check_figure_caption_dash",
     "check_figure_caption_format",
     "check_figure_caption_style",
     "check_figure_centered",

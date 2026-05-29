@@ -622,8 +622,55 @@ def _table_caption_text(table: Table) -> str:
     return txt if txt else table.id
 
 
+# B.12 — разделитель подписи таблицы совпадает с тире из caption.format.
+_TABLE_CAPTION_DASH_RE = re.compile(r"^Таблица\s+\d+(?:\.\d+)?\s*([—–-])\s*\S")
+_DASH_NAMES = {"—": "длинное тире (—)", "–": "среднее тире (–)", "-": "дефис (-)"}
+
+
+@register("B.12")
+def check_table_caption_dash(document: Document, profile: Profile) -> list[Violation]:
+    """Разделитель подписи таблицы соответствует тире из профиля (мягко).
+
+    Аналог I.11 для таблиц. B.03 принимает любой из «—/–/-»; B.12 —
+    мягкое (info) предупреждение, если фактический разделитель не
+    совпадает с предписанным `styles.table.caption.format`.
+    """
+    from .figures import expected_caption_dash
+
+    expected = expected_caption_dash(profile.styles.table.caption.format)
+    if expected is None:
+        return []
+
+    violations: list[Violation] = []
+    for page_section, table in _all_tables(document):
+        text = _caption_text(table.caption)
+        if not text:
+            continue
+        match = _TABLE_CAPTION_DASH_RE.match(text)
+        if not match:
+            continue
+        actual = match.group(1)
+        if actual == expected:
+            continue
+        violations.append(
+            Violation(
+                check_code="B.12",
+                severity="info",
+                message=(
+                    f"В подписи «{text}» разделитель — {_DASH_NAMES.get(actual, actual)}, "
+                    f"а профиль предписывает {_DASH_NAMES.get(expected, expected)}"
+                ),
+                location=f"page_sections.{page_section.id}.table[{table.id}]",
+                suggestion=f"Использовать «{expected}» как разделитель в подписи таблицы",
+                details={"table_id": table.id, "expected": expected, "actual": actual},
+            )
+        )
+    return violations
+
+
 __all__ = [
     "check_table_caption_above",
+    "check_table_caption_dash",
     "check_table_caption_format",
     "check_table_cell_font_size",
     "check_table_continuation_header",
