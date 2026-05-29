@@ -321,6 +321,92 @@ def fix_si_unit_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
     return applied
 
 
+@register("U.02")
+def fix_no_punct_before_unit(document: Document, profile: Profile) -> list[FixApplied]:
+    """Убрать знак препинания между числом и единицей СИ (U.02).
+
+    «10.кг», «50,%» → «10 кг», «50 %» (с неразрывным пробелом). Использует
+    тот же паттерн, что и проверка U.02, поэтому исправляет ровно то, что
+    она находит. Работает в пределах одного TextRun.
+
+    Это правка формата, а не контента: между числом и обозначением единицы
+    точка/запятая по ГОСТ Р 8.000-2015 недопустимы — заменяем на положенный
+    неразрывный пробел.
+    """
+    from gostforge.validator.checks.units import _RE_PUNCT_BEFORE_UNIT
+
+    applied: list[FixApplied] = []
+    for paragraph in _all_paragraphs(document):
+        paragraph_changed = False
+        for run in _text_runs(paragraph):
+            if not run.text:
+                continue
+            new_text = _RE_PUNCT_BEFORE_UNIT.sub(rf"\1{_NBSP}\3", run.text)
+            if new_text != run.text:
+                run.text = new_text
+                paragraph_changed = True
+        if paragraph_changed:
+            applied.append(
+                FixApplied(
+                    fixer_code="U.02",
+                    location=_paragraph_location(paragraph),
+                    description=(
+                        "Знак препинания между числом и единицей измерения "
+                        "заменён на неразрывный пробел"
+                    ),
+                )
+            )
+    return applied
+
+
+@register("U.03")
+def fix_unit_no_trailing_dot(document: Document, profile: Profile) -> list[FixApplied]:
+    """Убрать точку после единицы измерения СИ (U.03).
+
+    «10 кг.» → «10 кг». Использует тот же паттерн и ту же защиту от ложных
+    срабатываний, что и проверка U.03, поэтому правит ровно то, что она
+    находит: «г.» при числе-годе (≥1500) и «с.» (страница) пропускаются.
+    Работает в пределах одного TextRun.
+    """
+    from gostforge.validator.checks.units import _RE_UNIT_WITH_TRAILING_DOT
+
+    def _replace(match: re.Match[str]) -> str:
+        num_space = match.group(1)
+        unit = match.group(2)
+        # Зеркало контекстной эвристики проверки U.03: «г.» при году и
+        # «с.» (страница) — не единицы измерения, оставляем как есть.
+        if unit in {"г", "с"}:
+            if unit == "с":
+                return match.group(0)
+            try:
+                if int(num_space.strip()) >= 1500:
+                    return match.group(0)
+            except ValueError:
+                pass
+        # Убираем хвостовую точку (group(3)), сохраняя число, пробел и единицу.
+        return num_space + unit
+
+    applied: list[FixApplied] = []
+    for paragraph in _all_paragraphs(document):
+        paragraph_changed = False
+        for run in _text_runs(paragraph):
+            if not run.text:
+                continue
+            new_text = _RE_UNIT_WITH_TRAILING_DOT.sub(_replace, run.text)
+            if new_text != run.text:
+                run.text = new_text
+                paragraph_changed = True
+        if paragraph_changed:
+            applied.append(
+                FixApplied(
+                    fixer_code="U.03",
+                    location=_paragraph_location(paragraph),
+                    description="Убрана точка после единицы измерения",
+                )
+            )
+    return applied
+
+
 @register("T.01")
 def fix_body_font(document: Document, profile: Profile) -> list[FixApplied]:
     """Привести шрифт явно-заданных text-run-ов к ожидаемому (T.01).
@@ -649,9 +735,11 @@ __all__ = [
     "fix_hyphen_to_dash",
     "fix_initials_nbsp",
     "fix_line_spacing",
+    "fix_no_punct_before_unit",
     "fix_paragraph_alignment",
     "fix_paragraph_spacing",
     "fix_straight_quotes",
     "fix_trailing_whitespace",
     "fix_unit_nbsp",
+    "fix_unit_no_trailing_dot",
 ]

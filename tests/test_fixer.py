@@ -848,6 +848,125 @@ def test_u01_fixer_no_change_when_already_nbsp() -> None:
     assert applied == []
 
 
+# --- U.02: знак препинания между числом и единицей ---------------------------
+
+
+def test_u02_fixer_registered() -> None:
+    """Фиксер U.02 присутствует в реестре."""
+    assert "U.02" in registered_fixers()
+
+
+def test_u02_replaces_punct_with_nbsp() -> None:
+    """U.02-фиксер: «10.кг» → «10 кг» (с неразрывным пробелом)."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="масса 10.кг и 50,%")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.02"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "U.02"
+    run = next(el for el in paragraph.content if isinstance(el, TextRun))
+    assert "10 кг" in run.text
+    assert "50 %" in run.text
+    assert "10.кг" not in run.text
+    assert "50,%" not in run.text
+
+
+def test_u02_resolves_validator_violation() -> None:
+    """После U.02-фикса проверка U.02 не находит нарушений."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="ускорение 9.м составило")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    fix(doc, profile, codes=["U.02"])
+    assert not [v for v in validate(doc, profile) if v.check_code == "U.02"]
+
+
+def test_u02_no_change_when_correct() -> None:
+    """Корректная запись «10 кг» (с пробелом) фиксер не трогает."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="масса 10 кг")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.02"])
+    assert applied == []
+
+
+# --- U.03: точка после единицы измерения -------------------------------------
+
+
+def test_u03_fixer_registered() -> None:
+    """Фиксер U.03 присутствует в реестре."""
+    assert "U.03" in registered_fixers()
+
+
+def test_u03_drops_trailing_dot() -> None:
+    """U.03-фиксер: «10 кг.» → «10 кг»."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="масса 10 кг. в сумме")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.03"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "U.03"
+    run = next(el for el in paragraph.content if isinstance(el, TextRun))
+    assert "10 кг в сумме" in run.text
+    assert "кг." not in run.text
+
+
+def test_u03_resolves_validator_violation() -> None:
+    """После U.03-фикса проверка U.03 не находит нарушений."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="ток 5 А.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    fix(doc, profile, codes=["U.03"])
+    assert not [v for v in validate(doc, profile) if v.check_code == "U.03"]
+
+
+def test_u03_keeps_year_abbreviation() -> None:
+    """«1990 г.» — это год, а не граммы; фиксер его не трогает (зеркало U.03)."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="издано в 1990 г. в Москве")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.03"])
+    assert applied == []
+    run = next(el for el in paragraph.content if isinstance(el, TextRun))
+    assert "1990 г." in run.text
+
+
+def test_u03_keeps_page_abbreviation() -> None:
+    """«с.» (страница) всегда пропускается — слишком много ложных срабатываний."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="см. 12 с. источника")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.03"])
+    assert applied == []
+
+
 # --- T.01 / T.02: шрифт и кегль основного текста -----------------------------
 
 
