@@ -82,6 +82,33 @@ def _filter_violations(
     ]
 
 
+def _ensure_docx_bytes(uploaded_file: Any) -> Any:
+    """Привести загрузку к .docx-байтам (конвертируя .doc/.odt/.rtf).
+
+    Возвращает file-like объект с методами ``getvalue()``/``name`` —
+    либо исходный (если уже .docx), либо ``io.BytesIO`` с
+    конвертированными байтами. Конвертация — через LibreOffice
+    (``convert_document``); может поднять LibreOfficeNotFoundError.
+    """
+    import io
+
+    name = getattr(uploaded_file, "name", "document.docx")
+    suffix = Path(name).suffix.lower()
+    if suffix == ".docx":
+        return uploaded_file
+
+    from gostforge.pdf_exporter import convert_document
+
+    with tempfile.NamedTemporaryFile(suffix=suffix or ".doc", delete=False) as tmp_in:
+        tmp_in.write(uploaded_file.getvalue())
+        in_path = Path(tmp_in.name)
+    out_path = in_path.with_suffix(".docx")
+    convert_document(in_path, out_path, target_format="docx")
+    buf = io.BytesIO(out_path.read_bytes())
+    buf.name = f"{Path(name).stem}.docx"
+    return buf
+
+
 def _process_file(uploaded_file: Any, profile: Profile) -> tuple[Document, list[Violation]]:
     """Сохранить загруженный файл во временный путь, распарсить и проверить.
 
@@ -338,15 +365,17 @@ def _render_main(profile_id: str) -> None:
     )
 
     uploaded = st.file_uploader(
-        "Перетащите .docx или нажмите для выбора",
-        type=["docx"],
+        "Перетащите .docx / .doc / .odt / .rtf или нажмите для выбора",
+        type=["docx", "doc", "odt", "rtf"],
         accept_multiple_files=True,
     )
 
     if not uploaded:
         st.info(
-            "Загрузите один или несколько .docx-файлов выше. Поддерживаются "
-            "курсовые, дипломные работы и отчёты НИР, оформленные по ГОСТ 7.32-2017."
+            "Загрузите один или несколько файлов выше. Основной формат — "
+            ".docx; .doc/.odt/.rtf автоматически конвертируются через "
+            "LibreOffice. Поддерживаются курсовые, дипломные работы и "
+            "отчёты НИР по ГОСТ 7.32-2017."
         )
         return
 
@@ -357,13 +386,15 @@ def _render_main(profile_id: str) -> None:
 
     for uf in uploaded:
         try:
-            document, violations = _process_file(uf, prof)
+            # .doc/.odt/.rtf → .docx (один раз), чтобы все вкладки работали.
+            norm = _ensure_docx_bytes(uf)
+            document, violations = _process_file(norm, prof)
         except Exception as e:
             st.error(f"Не удалось обработать «{uf.name}»: {e}")
             continue
         documents[uf.name] = document
         results[uf.name] = violations
-        uploads[uf.name] = uf
+        uploads[uf.name] = norm
 
     if not results:
         return

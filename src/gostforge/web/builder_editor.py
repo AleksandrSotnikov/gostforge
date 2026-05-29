@@ -427,6 +427,23 @@ def _state_versions_dir() -> Path:
     return path
 
 
+def _list_state_versions() -> list[Path]:
+    """Список сохранённых версий state (новые — первыми, по mtime)."""
+    target_dir = _state_versions_dir()
+    return sorted(target_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+
+def _load_state_version(path: Path) -> dict[str, Any] | None:
+    """Прочитать версию state из файла; None при ошибке/неверном формате."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    if isinstance(data, dict) and "sections" in data:
+        return data
+    return None
+
+
 def _save_state_version(state: dict[str, Any]) -> Path:
     """Сохранить snapshot state в каталог версий.
 
@@ -3011,6 +3028,26 @@ def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
                 st.rerun()
             else:
                 st.sidebar.error("В JSON отсутствует ключ 'sections'")
+
+    # Версии state (автосохранения раз в 5 мин) — список + восстановление.
+    versions = _list_state_versions()
+    if versions:
+        with st.sidebar.expander(f"Версии работы ({len(versions)})", expanded=False):
+            labels = {p.name: p for p in versions}
+            chosen = st.selectbox(
+                "Сохранённые версии (новые сверху)",
+                options=list(labels.keys()),
+                key="builder_version_select",
+            )
+            if st.button("Восстановить версию", key="builder_version_restore"):
+                restored = _load_state_version(labels[chosen])
+                if restored is None:
+                    st.error("Не удалось прочитать версию (повреждена или старый формат).")
+                else:
+                    _normalize_state_paragraphs(restored)
+                    st.session_state["builder_state"] = restored
+                    st.success(f"Восстановлено: {chosen}")
+                    st.rerun()
 
     # Загрузить готовую работу (.docx / .md / .pdf) и разложить в конструктор.
     st.sidebar.markdown("---")

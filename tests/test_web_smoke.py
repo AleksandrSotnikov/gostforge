@@ -120,3 +120,31 @@ def test_build_annotated_docx_bytes(tmp_path: Any) -> None:
     data, n = _build_annotated_docx_bytes(uploaded, profile, "comments")
     assert data[:2] == b"PK"  # zip-сигнатура .docx
     assert isinstance(n, int)
+
+
+def test_ensure_docx_bytes_passthrough(tmp_path: Any) -> None:
+    """`_ensure_docx_bytes` для .docx возвращает исходный объект без конвертации."""
+    pytest.importorskip("streamlit")
+    import io
+
+    from gostforge.web.app import _ensure_docx_bytes
+
+    uf = io.BytesIO(b"PKfake")
+    uf.name = "work.docx"
+    assert _ensure_docx_bytes(uf) is uf
+
+
+def test_state_versions_list_and_load(tmp_path: Any, monkeypatch: Any) -> None:
+    """_save/_list/_load версий state делают round-trip."""
+    pytest.importorskip("streamlit")
+    from gostforge.web import builder_editor as be
+
+    monkeypatch.setattr(be.Path, "home", staticmethod(lambda: tmp_path))
+    state = {"title": "Тест-версия", "profile_id": "gost-7.32-2017", "sections": [{"heading": "X"}]}
+    saved = be._save_state_version(state)
+    assert saved.exists()
+    versions = be._list_state_versions()
+    assert saved in versions
+    loaded = be._load_state_version(saved)
+    assert loaded is not None
+    assert loaded["title"] == "Тест-версия"
