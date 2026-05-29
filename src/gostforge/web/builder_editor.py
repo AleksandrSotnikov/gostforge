@@ -221,6 +221,45 @@ def _auto_merges_from_extra_header_rows(
     return merges
 
 
+def build_table_header_preview(
+    extra_header_rows: list[list[str]], headers: list[str]
+) -> list[list[str]]:
+    """Построить 2D-сетку для превью многоуровневой шапки таблицы.
+
+    Каждый верхний ряд раскрывается: непустая метка-группа повторяется по
+    всем своим колонкам (пустые ячейки склеиваются с левой соседней — как
+    в :func:`_auto_merges_from_extra_header_rows`). Снизу добавляется ряд
+    `headers`. Все ряды дополняются до одинаковой ширины.
+
+    Возвращает list[list[str]] (ряды сверху вниз) — готов для `st.table`.
+    Чистая функция: тестируется без Streamlit.
+    """
+    ncols = max([len(headers), *(len(r) for r in extra_header_rows)], default=0)
+    if ncols == 0:
+        return []
+    grid: list[list[str]] = []
+    for row in extra_header_rows:
+        display = [""] * ncols
+        c = 0
+        while c < ncols:
+            if c >= len(row) or row[c].strip() == "":
+                c += 1
+                continue
+            label = row[c].strip()
+            # Склеиваем только с пустыми ячейками В ПРЕДЕЛАХ ряда — как и
+            # _auto_merges_from_extra_header_rows (колонки за len(row) — пустые).
+            j = c + 1
+            while j < len(row) and row[j].strip() == "":
+                j += 1
+            for k in range(c, min(j, ncols)):
+                display[k] = label
+            c = j
+        grid.append(display)
+    bottom = [(headers[i] if i < len(headers) else "") for i in range(ncols)]
+    grid.append(bottom)
+    return grid
+
+
 def _purge_section_ids_recursively(section: dict[str, Any]) -> None:
     """Убрать `id` у самой секции и всех вложенных подразделов.
 
@@ -4276,6 +4315,11 @@ def _render_single_block(
         block["extra_header_rows"] = parsed_extra
         # Авто-генерация merges из пустых ячеек: подряд идущие пустые → colspan.
         block["merges"] = _auto_merges_from_extra_header_rows(parsed_extra)
+        # Превью многоуровневой шапки: метки групп раскрыты по своим колонкам.
+        if parsed_extra:
+            preview_grid = build_table_header_preview(parsed_extra, block["headers"])
+            st.caption("Превью шапки (группы раскрыты по колонкам):")
+            st.table(preview_grid)
         rows_str = "\n".join("|".join(row) for row in (block.get("rows") or []))
         new_rows = st.text_area(
             "Строки (одна строка таблицы — одна строка ввода; ячейки разделять символом «|»)",

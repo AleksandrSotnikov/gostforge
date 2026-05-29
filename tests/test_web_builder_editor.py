@@ -462,3 +462,35 @@ def test_build_state_without_autofill_refs() -> None:
     }
     xml = _docx_xml(_build_document_from_state(state))
     assert "Стандартинформ" not in xml
+
+
+# --- превью многоуровневой шапки таблицы -------------------------------------
+
+
+def test_header_preview_expands_groups() -> None:
+    """Группы раскрываются по колонкам; снизу добавляется ряд headers."""
+    from gostforge.web.builder_editor import build_table_header_preview
+
+    grid = build_table_header_preview(
+        [["Группа 1", "", "Группа 2", ""]],
+        ["A", "B", "C", "D"],
+    )
+    assert grid == [
+        ["Группа 1", "Группа 1", "Группа 2", "Группа 2"],
+        ["A", "B", "C", "D"],
+    ]
+
+
+def test_header_preview_pads_to_ncols() -> None:
+    """Ряды дополняются до максимальной ширины (headers шире доп. шапки)."""
+    from gostforge.web.builder_editor import build_table_header_preview
+
+    grid = build_table_header_preview([["Группа", ""]], ["A", "B", "C"])
+    assert grid[0] == ["Группа", "Группа", ""]
+    assert grid[1] == ["A", "B", "C"]
+
+
+def test_header_preview_empty() -> None:
+    from gostforge.web.builder_editor import build_table_header_preview
+
+    assert build_table_header_preview([], []) == []
