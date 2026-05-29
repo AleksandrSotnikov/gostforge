@@ -221,6 +221,87 @@ def _build_report_bytes(results: dict[str, list[Violation]], profile_id: str, fm
     return tmp_path.read_bytes()
 
 
+def _compare_violations(
+    violations_a: list[Violation], violations_b: list[Violation]
+) -> dict[str, Any]:
+    """Сравнить два списка нарушений (A=было, B=стало).
+
+    Возвращает словарь: ``fixed`` (исчезли в B), ``introduced`` (новые в B),
+    счётчики total/errors для A и B. Отпечаток нарушения — как в CLI
+    ``diff`` (``_violation_fingerprint``), чтобы поведение совпадало.
+    """
+    from gostforge.cli import _violation_fingerprint
+
+    fp_a = {_violation_fingerprint(v): v for v in violations_a}
+    fp_b = {_violation_fingerprint(v): v for v in violations_b}
+    fixed = [fp_a[k] for k in (set(fp_a) - set(fp_b))]
+    introduced = [fp_b[k] for k in (set(fp_b) - set(fp_a))]
+    return {
+        "fixed": fixed,
+        "introduced": introduced,
+        "total_a": len(violations_a),
+        "total_b": len(violations_b),
+        "errors_a": sum(1 for v in violations_a if v.severity == "error"),
+        "errors_b": sum(1 for v in violations_b if v.severity == "error"),
+    }
+
+
+def _render_compare_mode(profile_id: str) -> None:
+    """Режим «Сравнение»: два документа → что исправлено / что появилось."""
+    st.title("Сравнение двух документов")
+    st.caption(
+        "Загрузите две версии работы (например, черновик и финал, или "
+        "до/после правок) — увидите, какие нарушения исчезли, а какие появились."
+    )
+    prof = load_profile(profile_id)
+    col_a, col_b = st.columns(2)
+    with col_a:
+        file_a = st.file_uploader(
+            "Версия A (было)", type=["docx", "doc", "odt", "rtf"], key="cmp_a"
+        )
+    with col_b:
+        file_b = st.file_uploader(
+            "Версия B (стало)", type=["docx", "doc", "odt", "rtf"], key="cmp_b"
+        )
+    if file_a is None or file_b is None:
+        st.info("Загрузите оба файла для сравнения.")
+        return
+
+    try:
+        _, va = _process_file(_ensure_docx_bytes(file_a), prof)
+        _, vb = _process_file(_ensure_docx_bytes(file_b), prof)
+    except Exception as e:
+        st.error(f"Не удалось обработать файлы: {e}")
+        return
+
+    cmp = _compare_violations(va, vb)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("A — нарушений", cmp["total_a"], help=f"ошибок: {cmp['errors_a']}")
+    c2.metric("B — нарушений", cmp["total_b"], help=f"ошибок: {cmp['errors_b']}")
+    c3.metric(
+        "Δ ошибок (B−A)",
+        cmp["errors_b"] - cmp["errors_a"],
+        delta=cmp["errors_b"] - cmp["errors_a"],
+        delta_color="inverse",
+    )
+
+    fixed = cmp["fixed"]
+    introduced = cmp["introduced"]
+    if not fixed and not introduced:
+        st.success("Различий в нарушениях нет — списки совпадают.")
+        return
+    with st.expander(f"✅ Исчезли в B ({len(fixed)})", expanded=bool(fixed)):
+        if fixed:
+            st.dataframe(_violations_to_rows(fixed), use_container_width=True, hide_index=True)
+        else:
+            st.caption("—")
+    with st.expander(f"⚠️ Появились в B ({len(introduced)})", expanded=bool(introduced)):
+        if introduced:
+            st.dataframe(_violations_to_rows(introduced), use_container_width=True, hide_index=True)
+        else:
+            st.caption("—")
+
+
 def _render_sidebar(profiles: list[str]) -> str:
     """Боковая панель — выбор профиля и сводка по проверкам."""
     st.sidebar.title("Настройки")
@@ -690,6 +771,7 @@ def render() -> None:
         options=[
             "Главная",
             "Нормоконтроль",
+            "Сравнение",
             "Конструктор",
             "Редактор профиля",
             "История",
@@ -699,6 +781,7 @@ def render() -> None:
         help=(
             "Главная — обзор возможностей и быстрый старт. "
             "Нормоконтроль — проверка существующего .docx по ГОСТ. "
+            "Сравнение — diff нарушений между двумя версиями документа. "
             "Конструктор — сборка работы по ГОСТу с нуля или из .docx. "
             "Редактор профиля — настройка всех параметров оформления и "
             "сохранение своего профиля. "
@@ -740,6 +823,9 @@ def render() -> None:
         from gostforge.web.builder_editor import render_interactive_builder
 
         render_interactive_builder()
+    elif mode == "Сравнение":
+        profile_id = _render_sidebar(profiles)
+        _render_compare_mode(profile_id)
     else:
         profile_id = _render_sidebar(profiles)
         _render_main(profile_id)

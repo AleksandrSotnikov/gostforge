@@ -148,3 +148,34 @@ def test_state_versions_list_and_load(tmp_path: Any, monkeypatch: Any) -> None:
     loaded = be._load_state_version(saved)
     assert loaded is not None
     assert loaded["title"] == "Тест-версия"
+
+
+def test_compare_violations_fixed_and_introduced() -> None:
+    """_compare_violations разбивает на исчезнувшие/появившиеся по отпечатку."""
+    pytest.importorskip("streamlit")
+    from gostforge.validator import Violation
+    from gostforge.web.app import _compare_violations
+
+    common = Violation(check_code="T.01", severity="error", message="m", location="loc")
+    only_a = Violation(check_code="F.01", severity="error", message="a", location="la")
+    only_b = Violation(check_code="H.01", severity="warning", message="b", location="lb")
+    cmp = _compare_violations([common, only_a], [common, only_b])
+    fixed_codes = {v.check_code for v in cmp["fixed"]}
+    intro_codes = {v.check_code for v in cmp["introduced"]}
+    assert fixed_codes == {"F.01"}
+    assert intro_codes == {"H.01"}
+    assert cmp["total_a"] == 2
+    assert cmp["total_b"] == 2
+    assert cmp["errors_a"] == 2
+    assert cmp["errors_b"] == 1
+
+
+def test_compare_violations_identical_no_diff() -> None:
+    pytest.importorskip("streamlit")
+    from gostforge.validator import Violation
+    from gostforge.web.app import _compare_violations
+
+    v = Violation(check_code="T.01", severity="error", message="m", location="loc")
+    cmp = _compare_violations([v], [v])
+    assert cmp["fixed"] == []
+    assert cmp["introduced"] == []
