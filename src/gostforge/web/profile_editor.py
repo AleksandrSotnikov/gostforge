@@ -249,6 +249,7 @@ def _edit_page(data: dict[str, Any]) -> None:
     del cols  # колонки не используем для layout, оставляем вертикально
 
     _edit_page_border(page)
+    _edit_page_title_block(page)
 
 
 def _edit_page_border(page: dict[str, Any]) -> None:
@@ -304,6 +305,57 @@ def _edit_page_border(page: dict[str, Any]) -> None:
         )
     )
     page["border"] = border
+
+
+_DEFAULT_TB_ROLES = ["Разраб.", "Пров.", "Т.контр.", "Н.контр.", "Утв."]
+
+
+def _edit_page_title_block(page: dict[str, Any]) -> None:
+    """Основная надпись (штамп ЕСКД, ГОСТ 2.104) — раздел редактора профиля.
+
+    Штамп опционален и различается у специальностей: чекбокс включает его
+    и раскрывает форму/организацию/роли; снятие пишет ``title_block = None``.
+    """
+    st.caption("Основная надпись (штамп, ГОСТ 2.104)")
+    tb = dict(page.get("title_block") or {})
+    enabled = st.checkbox(
+        "Печатать основную надпись (штамп)",
+        value=bool(tb.get("enabled", False)),
+        key="pe_page_tb_en",
+        help="Таблица в нижнем колонтитуле для конструкторской/технической документации (ЕСКД).",
+    )
+    if not enabled:
+        page["title_block"] = None
+        return
+    tb["enabled"] = True
+    tb["form"] = _select(
+        "Форма",
+        ["form1", "form2a"],
+        tb.get("form", "form1"),
+        "pe_page_tb_form",
+        format_func=lambda v: {
+            "form1": "Форма 1 (заглавный лист)",
+            "form2a": "Форма 2а (последующие)",
+        }[v],
+    )
+    tb["organization"] = st.text_input(
+        "Организация (графа 9)", value=str(tb.get("organization", "")), key="pe_page_tb_org"
+    )
+    # Роли (графы 11/13) — редактируем список меток, по одной в строке.
+    existing_roles = tb.get("roles") or [{"role": r} for r in _DEFAULT_TB_ROLES]
+    labels = "\n".join(str(r.get("role", "")).strip() for r in existing_roles if r.get("role"))
+    edited = st.text_area(
+        "Роли (по одной в строке)",
+        value=labels,
+        key="pe_page_tb_roles",
+        help="Например: Разраб., Пров., Т.контр., Н.контр., Утв.",
+    )
+    tb["roles"] = [
+        {"role": line.strip(), "name": "", "date": ""}
+        for line in edited.splitlines()
+        if line.strip()
+    ]
+    page["title_block"] = tb
 
 
 def _edit_body(data: dict[str, Any]) -> None:

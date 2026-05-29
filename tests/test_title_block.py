@@ -116,6 +116,29 @@ def test_form2a_renders_compact(tmp_path: Path) -> None:
     assert "Лист 3" in text
 
 
+def test_profile_editor_title_block_roundtrip() -> None:
+    """Штамп переживает save-путь редактора профиля (data dict → YAML → Profile)."""
+    from gostforge.profile.schema import Profile
+    from gostforge.web.profile_editor import build_profile_yaml, profile_to_data
+
+    data = profile_to_data(load_profile("gost-7.32-2017"))
+    data["styles"]["page"]["title_block"] = {
+        "enabled": True,
+        "form": "form1",
+        "organization": "Кафедра ИВТ",
+        "roles": [{"role": "Разраб.", "name": "", "date": ""}],
+    }
+    yaml_text = build_profile_yaml(data)  # валидирует через Pydantic
+    assert "title_block" in yaml_text
+
+    import yaml as _yaml
+
+    restored = Profile(**_yaml.safe_load(yaml_text))
+    assert restored.styles.page.title_block is not None
+    assert restored.styles.page.title_block.enabled is True
+    assert restored.styles.page.title_block.roles[0].role == "Разраб."
+
+
 def test_title_block_applied_from_profile(tmp_path: Path) -> None:
     """Штамп из профиля проставляется при title_block=None в модели."""
     profile = load_profile("gost-7.32-2017")
