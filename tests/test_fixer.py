@@ -601,6 +601,152 @@ def test_f05_skips_invisible_numbering() -> None:
     assert doc.page_sections[0].page_numbering.format == "roman"
 
 
+# --- K.02 / K.03 / K.04: нумерация и колонтитулы секций ----------------------
+
+
+def _doc_with_sections(*sections: PageSection) -> Document:
+    """Документ из произвольного набора PageSection-ов."""
+    doc = Document()
+    doc.page_sections.extend(sections)
+    return doc
+
+
+def test_k_fixers_registered() -> None:
+    """Фиксеры K.02/K.03/K.04 присутствуют в реестре."""
+    assert {"K.02", "K.03", "K.04"}.issubset(registered_fixers())
+
+
+def test_k02_disables_title_page_number() -> None:
+    """K.02: на титульном листе номер страницы отключается."""
+    title = PageSection(
+        id="title",
+        name="Титульный лист",
+        type="title",
+        page=PageGeometry(),
+        page_numbering=PageNumberingConfig(visible=True),
+        content=[],
+    )
+    doc = _doc_with_sections(title)
+    profile = load_profile("gost-7.32-2017")
+
+    pre = [v for v in validate(doc, profile) if v.check_code == "K.02"]
+    assert pre, "тест должен начинаться с нарушением K.02"
+
+    applied = fix(doc, profile, codes=["K.02"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "K.02"
+    assert doc.page_sections[0].page_numbering.visible is False
+    assert [v for v in validate(doc, profile) if v.check_code == "K.02"] == []
+
+
+def test_k02_skips_non_title() -> None:
+    """K.02 не трогает нумерацию обычных секций."""
+    main = PageSection(
+        id="main",
+        name="Основная часть",
+        type="main",
+        page=PageGeometry(),
+        page_numbering=PageNumberingConfig(visible=True),
+        content=[],
+    )
+    doc = _doc_with_sections(main)
+    profile = load_profile("gost-7.32-2017")
+    assert fix(doc, profile, codes=["K.02"]) == []
+    assert doc.page_sections[0].page_numbering.visible is True
+
+
+def test_k03_sets_start_at_and_value() -> None:
+    """K.03: основная часть получает start_mode=start_at и start_value=3."""
+    title = PageSection(
+        id="title",
+        name="Титул",
+        type="title",
+        page=PageGeometry(),
+        page_numbering=PageNumberingConfig(visible=False),
+        content=[],
+    )
+    main = PageSection(
+        id="main",
+        name="Основная часть",
+        type="main",
+        page=PageGeometry(),
+        page_numbering=PageNumberingConfig(visible=True, start_mode="continue"),
+        content=[],
+    )
+    doc = _doc_with_sections(title, main)
+    profile = load_profile("gost-7.32-2017")
+
+    pre = [v for v in validate(doc, profile) if v.check_code == "K.03"]
+    assert pre, "тест должен начинаться с нарушением K.03"
+
+    applied = fix(doc, profile, codes=["K.03"])
+    assert len(applied) == 1
+    assert main.page_numbering.start_mode == "start_at"
+    assert main.page_numbering.start_value == 3
+    assert [v for v in validate(doc, profile) if v.check_code == "K.03"] == []
+
+
+def test_k03_no_change_when_already_correct() -> None:
+    """K.03 молчит, если стартовая страница уже задана верно."""
+    main = PageSection(
+        id="main",
+        name="Основная часть",
+        type="main",
+        page=PageGeometry(),
+        page_numbering=PageNumberingConfig(visible=True, start_mode="start_at", start_value=3),
+        content=[],
+    )
+    doc = _doc_with_sections(main)
+    profile = load_profile("gost-7.32-2017")
+    assert fix(doc, profile, codes=["K.03"]) == []
+
+
+def test_k04_converts_restart_to_continue() -> None:
+    """K.04: сброс нумерации во второй секции → continue."""
+    first = PageSection(
+        id="main",
+        name="Основная часть",
+        type="main",
+        page=PageGeometry(),
+        page_numbering=PageNumberingConfig(start_mode="start_at", start_value=3),
+        content=[],
+    )
+    second = PageSection(
+        id="ch2",
+        name="Глава 2",
+        type="main",
+        page=PageGeometry(),
+        page_numbering=PageNumberingConfig(start_mode="restart"),
+        content=[],
+    )
+    doc = _doc_with_sections(first, second)
+    profile = load_profile("gost-7.32-2017")
+
+    pre = [v for v in validate(doc, profile) if v.check_code == "K.04"]
+    assert pre, "тест должен начинаться с нарушением K.04"
+
+    applied = fix(doc, profile, codes=["K.04"])
+    assert len(applied) == 1
+    assert second.page_numbering.start_mode == "continue"
+    assert [v for v in validate(doc, profile) if v.check_code == "K.04"] == []
+
+
+def test_k04_skips_first_section() -> None:
+    """K.04 не трогает первую секцию — она задаёт начало нумерации."""
+    first = PageSection(
+        id="main",
+        name="Основная часть",
+        type="main",
+        page=PageGeometry(),
+        page_numbering=PageNumberingConfig(start_mode="restart"),
+        content=[],
+    )
+    doc = _doc_with_sections(first)
+    profile = load_profile("gost-7.32-2017")
+    assert fix(doc, profile, codes=["K.04"]) == []
+    assert first.page_numbering.start_mode == "restart"
+
+
 # --- end-to-end: export → parse → fix → export → parse → validate -----------
 
 
