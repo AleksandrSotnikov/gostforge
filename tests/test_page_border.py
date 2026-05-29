@@ -180,3 +180,30 @@ def test_f07_fixer_noop_when_profile_requires_no_border() -> None:
     doc = _doc_with_border(None)
     assert fix(doc, profile, codes=["F.07"]) == []
     assert doc.page_sections[0].page.border is None
+
+
+# --- редактор профиля: round-trip border через model_dump → Profile ----------
+
+
+def test_profile_border_dict_roundtrip() -> None:
+    """Рамка переживает save-путь редактора профиля (model_dump → Profile)."""
+    from gostforge.profile import Profile
+
+    profile = _profile_requiring_border()
+    data = profile.model_dump()  # как _profile_to_dict в profile_editor
+    assert data["styles"]["page"]["border"]["enabled"] is True
+
+    restored = Profile(**data)  # как сохранение в редакторе профиля
+    assert restored.styles.page.border is not None
+    assert restored.styles.page.border.enabled is True
+
+
+def test_profile_border_none_dict_roundtrip() -> None:
+    """border=None (рамка отсутствует) тоже корректно сериализуется/валидируется."""
+    from gostforge.profile import Profile
+
+    profile = load_profile("gost-7.32-2017")
+    data = profile.model_dump()
+    assert data["styles"]["page"].get("border") is None
+    restored = Profile(**data)
+    assert restored.styles.page.border is None

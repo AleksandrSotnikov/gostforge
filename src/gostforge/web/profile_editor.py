@@ -36,6 +36,9 @@ _NUMBERING_LABELS = {
     "by_chapter": "По главам (1.1, 1.2, 2.1, ...)",
 }
 _BORDER = ["single", "double", "dashed", "dotted", "none"]
+# Стили линии рамки листа (без "none" — выключение рамки делается чекбоксом).
+_BORDER_LINE = ["single", "double", "thick", "dashed", "dotted"]
+_OFFSET_FROM = ["text", "page"]
 _POSITION = ["above", "below"]
 _SEVERITY_DISPLAY = ["(по профилю)", "error", "warning", "info"]
 
@@ -244,6 +247,63 @@ def _edit_page(data: dict[str, Any]) -> None:
     # Прокидываем значения в нужные колонки (number_input уже отрисован выше
     # последовательно — Streamlit разложит по колонкам через with-контекст).
     del cols  # колонки не используем для layout, оставляем вертикально
+
+    _edit_page_border(page)
+
+
+def _edit_page_border(page: dict[str, Any]) -> None:
+    """Рамка листа (ЕСКД, ГОСТ 2.104) — раздел редактора профиля «Страница».
+
+    Рамка опциональна и различается у специальностей: чекбокс включает её
+    и раскрывает параметры, снятие чекбокса записывает ``border = None``.
+    """
+    st.caption("Рамка листа (ЕСКД, ГОСТ 2.104)")
+    border = dict(page.get("border") or {})
+    enabled = st.checkbox(
+        "Рисовать рамку листа",
+        value=bool(border.get("enabled", False)),
+        key="pe_page_border_en",
+        help=(
+            "Для технической/конструкторской документации (ЕСКД). Для рамки "
+            "по границе текста задайте поля 20/5/5/5 мм и «Отсчёт отступа: text»."
+        ),
+    )
+    if not enabled:
+        page["border"] = None
+        return
+    border["enabled"] = True
+    border["style"] = _select(
+        "Стиль линии", _BORDER_LINE, border.get("style", "single"), "pe_page_border_style"
+    )
+    border["size_eighth_pt"] = int(
+        st.number_input(
+            "Толщина линии (1/8 pt: 4 = 0.5 pt, 8 = 1 pt)",
+            value=int(border.get("size_eighth_pt", 4)),
+            min_value=1,
+            max_value=96,
+            step=1,
+            key="pe_page_border_sz",
+        )
+    )
+    border["color"] = st.text_input(
+        "Цвет (auto или hex без #)",
+        value=str(border.get("color", "auto")),
+        key="pe_page_border_color",
+    )
+    border["offset_from"] = _select(
+        "Отсчёт отступа", _OFFSET_FROM, border.get("offset_from", "text"), "pe_page_border_off"
+    )
+    border["space_pt"] = int(
+        st.number_input(
+            "Отступ рамки на сторону (pt, 0..31)",
+            value=int(border.get("space_pt", 0)),
+            min_value=0,
+            max_value=31,
+            step=1,
+            key="pe_page_border_space",
+        )
+    )
+    page["border"] = border
 
 
 def _edit_body(data: dict[str, Any]) -> None:
