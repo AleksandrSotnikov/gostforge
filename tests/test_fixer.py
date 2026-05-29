@@ -10,6 +10,7 @@ from gostforge.model import (
     Document,
     LogicalSection,
     PageGeometry,
+    PageNumberingConfig,
     PageSection,
     Paragraph,
     TextRun,
@@ -555,6 +556,49 @@ def test_f03_skips_appendix() -> None:
     applied = fix(doc, profile, codes=["F.03"])
     assert applied == []
     assert doc.page_sections[0].page.orientation == "landscape"
+
+
+# --- F.05: формат нумерации страниц ------------------------------------------
+
+
+def test_f05_fixer_registered() -> None:
+    """Фиксер F.05 присутствует в реестре."""
+    assert "F.05" in registered_fixers()
+
+
+def test_f05_fixes_roman_to_arabic() -> None:
+    """Римская нумерация видимой секции → арабская (профиль ГОСТ)."""
+    doc = _doc_with_page(PageGeometry())
+    doc.page_sections[0].page_numbering = PageNumberingConfig(visible=True, format="roman")
+    profile = load_profile("gost-7.32-2017")
+
+    pre = [v for v in validate(doc, profile) if v.check_code == "F.05"]
+    assert pre, "тест должен начинаться с нарушением F.05"
+
+    applied = fix(doc, profile, codes=["F.05"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "F.05"
+    assert doc.page_sections[0].page_numbering.format == "arabic"
+    post = [v for v in validate(doc, profile) if v.check_code == "F.05"]
+    assert post == []
+
+
+def test_f05_no_change_when_already_arabic() -> None:
+    """Арабская нумерация — фиксер молчит."""
+    doc = _doc_with_page(PageGeometry())
+    doc.page_sections[0].page_numbering = PageNumberingConfig(visible=True, format="arabic")
+    profile = load_profile("gost-7.32-2017")
+    assert fix(doc, profile, codes=["F.05"]) == []
+
+
+def test_f05_skips_invisible_numbering() -> None:
+    """Если нумерация не отображается — формат не важен, фиксер не трогает."""
+    doc = _doc_with_page(PageGeometry())
+    doc.page_sections[0].page_numbering = PageNumberingConfig(visible=False, format="roman")
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["F.05"])
+    assert applied == []
+    assert doc.page_sections[0].page_numbering.format == "roman"
 
 
 # --- end-to-end: export → parse → fix → export → parse → validate -----------

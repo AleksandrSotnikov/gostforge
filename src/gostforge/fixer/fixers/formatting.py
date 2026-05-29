@@ -154,6 +154,47 @@ def fix_page_numbering_start(
     return applied
 
 
+@register("F.05")
+def fix_page_number_format(
+    document: Document,
+    profile: Profile,
+) -> list[FixApplied]:
+    """Привести формат нумерации страниц к профилю (по умолчанию arabic).
+
+    Зеркально проверке F.05: применяется только к ``PageSection``, где
+    ``page_numbering.visible``. Параметр ``checks.F.05.params.format``
+    перекрывает ожидание (``arabic`` | ``roman`` | ``uppercase_letter``).
+    Безопасная правка: меняется только стиль глифа номера, не сам текст.
+    """
+    config = profile.checks.get("F.05")
+    expected = "arabic"
+    if config and config.params.get("format"):
+        expected = str(config.params["format"])
+    if expected not in {"arabic", "roman", "uppercase_letter"}:
+        return []
+
+    applied: list[FixApplied] = []
+    for section in document.page_sections:
+        numbering = section.page_numbering
+        if not numbering.visible:
+            continue
+        old = numbering.format
+        if old == expected:
+            continue
+        numbering.format = cast(
+            Literal["arabic", "roman", "uppercase_letter"],
+            expected,
+        )
+        applied.append(
+            FixApplied(
+                fixer_code="F.05",
+                location=f"page_sections.{section.id}.page_numbering.format",
+                description=f"Формат нумерации страниц «{old}» → «{expected}»",
+            )
+        )
+    return applied
+
+
 @register("F.04")
 def fix_page_number_position(
     document: Document,
@@ -234,6 +275,7 @@ def _strip_page_placeholder(
 __all__ = [
     "fix_margins",
     "fix_orientation",
+    "fix_page_number_format",
     "fix_page_number_position",
     "fix_page_numbering_start",
     "fix_paper_size",
