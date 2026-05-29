@@ -7,6 +7,7 @@
 * K.02 — отключить номер на титульном листе.
 * K.03 — задать стартовую страницу основной части (start_at + value).
 * K.04 — убрать сбросы сквозной нумерации (restart → continue).
+* K.06 — отвязать колонтитул секции от предыдущей (link_to_previous).
 """
 
 from __future__ import annotations
@@ -129,7 +130,43 @@ def fix_no_numbering_restarts(document: Document, profile: Profile) -> list[FixA
     return applied
 
 
+@register("K.06")
+def fix_headers_not_linked_to_previous(document: Document, profile: Profile) -> list[FixApplied]:
+    """Отвязать колонтитулы секций от предыдущей (K.06).
+
+    Зеркально проверке K.06: всем секциям, кроме первой, с
+    ``link_to_previous == True`` выставляем ``False`` (в Word — снять
+    флаг «Как в предыдущем разделе»). Типы из ``exclude_types``
+    профиля пропускаются. Правка метаданных секции, не текста.
+    """
+    config = profile.checks.get("K.06")
+    exclude_types: set[str] = set()
+    if config is not None:
+        raw_exclude = config.params.get("exclude_types") or []
+        if isinstance(raw_exclude, (list, tuple)):
+            exclude_types = {str(t) for t in raw_exclude}
+
+    applied: list[FixApplied] = []
+    for index, section in enumerate(document.page_sections):
+        if index == 0:
+            continue  # у первой секции нет «предыдущей»
+        if section.type in exclude_types:
+            continue
+        if not section.link_to_previous:
+            continue
+        section.link_to_previous = False
+        applied.append(
+            FixApplied(
+                fixer_code="K.06",
+                location=f"page_sections.{section.id}.link_to_previous",
+                description="Колонтитул отвязан от предыдущей секции (link_to_previous → False)",
+            )
+        )
+    return applied
+
+
 __all__ = [
+    "fix_headers_not_linked_to_previous",
     "fix_main_section_start_value",
     "fix_no_numbering_restarts",
     "fix_title_page_number",

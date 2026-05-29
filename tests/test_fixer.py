@@ -612,8 +612,8 @@ def _doc_with_sections(*sections: PageSection) -> Document:
 
 
 def test_k_fixers_registered() -> None:
-    """Фиксеры K.02/K.03/K.04 присутствуют в реестре."""
-    assert {"K.02", "K.03", "K.04"}.issubset(registered_fixers())
+    """Фиксеры K.02/K.03/K.04/K.06 присутствуют в реестре."""
+    assert {"K.02", "K.03", "K.04", "K.06"}.issubset(registered_fixers())
 
 
 def test_k02_disables_title_page_number() -> None:
@@ -745,6 +745,46 @@ def test_k04_skips_first_section() -> None:
     profile = load_profile("gost-7.32-2017")
     assert fix(doc, profile, codes=["K.04"]) == []
     assert first.page_numbering.start_mode == "restart"
+
+
+def test_k06_unlinks_header_from_previous() -> None:
+    """K.06: вторая секция со связанным колонтитулом отвязывается."""
+    first = PageSection(id="title", name="Титул", type="title", page=PageGeometry(), content=[])
+    second = PageSection(
+        id="main",
+        name="Основная часть",
+        type="main",
+        page=PageGeometry(),
+        link_to_previous=True,
+        content=[],
+    )
+    doc = _doc_with_sections(first, second)
+    profile = load_profile("gost-7.32-2017")
+
+    pre = [v for v in validate(doc, profile) if v.check_code == "K.06"]
+    assert pre, "тест должен начинаться с нарушением K.06"
+
+    applied = fix(doc, profile, codes=["K.06"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "K.06"
+    assert second.link_to_previous is False
+    assert [v for v in validate(doc, profile) if v.check_code == "K.06"] == []
+
+
+def test_k06_skips_first_section() -> None:
+    """K.06 не трогает первую секцию — у неё нет «предыдущей»."""
+    first = PageSection(
+        id="title",
+        name="Титул",
+        type="title",
+        page=PageGeometry(),
+        link_to_previous=True,
+        content=[],
+    )
+    doc = _doc_with_sections(first)
+    profile = load_profile("gost-7.32-2017")
+    assert fix(doc, profile, codes=["K.06"]) == []
+    assert first.link_to_previous is True
 
 
 # --- end-to-end: export → parse → fix → export → parse → validate -----------
