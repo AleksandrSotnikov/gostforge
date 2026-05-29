@@ -562,3 +562,20 @@ def test_build_state_per_section_numbering() -> None:
     }
     xml = _docx_xml(_build_document_from_state(state))
     assert "Таблица 2.1" in xml
+
+
+# --- импорт Markdown в конструктор -------------------------------------------
+
+
+def test_markdown_to_state_produces_sections() -> None:
+    """Импорт Markdown даёт state с разделами (используется _handle_markdown_import)."""
+    from gostforge.cli import _markdown_to_state
+
+    md = "# Работа\n\n## Введение\n\nАктуальность темы.\n\n## Заключение\n\nИтоги работы.\n"
+    state = _markdown_to_state(md, profile_id="gost-7.32-2017", title="Работа")
+    headings = [s.get("heading") for s in state.get("sections", [])]
+    assert "Введение" in headings
+    assert "Заключение" in headings
+    # собранный из импортированного MD state строится в .docx без ошибок
+    data = _build_document_from_state(state)
+    assert data[:2] == b"PK"

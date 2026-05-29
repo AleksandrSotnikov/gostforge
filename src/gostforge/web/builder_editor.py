@@ -3012,32 +3012,91 @@ def _render_state_persistence_sidebar(state: dict[str, Any]) -> None:
             else:
                 st.sidebar.error("В JSON отсутствует ключ 'sections'")
 
-    # Загрузить готовую работу .docx и разложить в конструктор.
+    # Загрузить готовую работу (.docx / .md / .pdf) и разложить в конструктор.
     st.sidebar.markdown("---")
     st.sidebar.caption(
-        "Загрузить готовую работу (.docx) и разложить её в конструктор "
-        "для дальнейшего редактирования"
+        "Загрузить готовую работу (.docx, .md или .pdf) и разложить её в "
+        "конструктор для дальнейшего редактирования"
     )
-    docx_uploaded = st.sidebar.file_uploader(
-        "Загрузить .docx в конструктор",
-        type=["docx"],
-        key="builder_docx_import",
+    doc_uploaded = st.sidebar.file_uploader(
+        "Загрузить .docx / .md / .pdf в конструктор",
+        type=["docx", "md", "pdf"],
+        key="builder_doc_import",
     )
-    if docx_uploaded is not None:
+    if doc_uploaded is not None:
         # ВАЖНО: file_uploader Streamlit-а сохраняет UploadedFile в
         # session_state и при КАЖДОМ rerun возвращает не-None. Без
         # защиты мы бы импортировали файл повторно при каждом
         # взаимодействии (нажатие кнопки, изменение input) и перезатёрли
         # бы все правки пользователя. Отслеживаем file_id (стабилен
         # для одного загруженного файла) и пропускаем повтор.
-        file_id = getattr(docx_uploaded, "file_id", None) or docx_uploaded.name
+        file_id = getattr(doc_uploaded, "file_id", None) or doc_uploaded.name
         if st.session_state.get("docx_import_processed") != file_id:
             st.session_state["docx_import_processed"] = file_id
-            _handle_docx_import(docx_uploaded.getvalue(), docx_uploaded.name)
+            suffix = Path(doc_uploaded.name).suffix.lower()
+            data = doc_uploaded.getvalue()
+            if suffix == ".md":
+                _handle_markdown_import(data, doc_uploaded.name)
+            elif suffix == ".pdf":
+                _handle_pdf_import(data, doc_uploaded.name)
+            else:
+                _handle_docx_import(data, doc_uploaded.name)
     else:
         # Пользователь убрал файл — сбрасываем флаг, чтобы повторная
         # загрузка того же файла снова сработала.
         st.session_state.pop("docx_import_processed", None)
+
+
+def _install_imported_state(new_state: dict[str, Any], filename: str) -> None:
+    """Установить импортированный state, сохранив выбранный профиль.
+
+    Общий хвост для MD/PDF-импорта: проверяет наличие разделов,
+    переносит выбранный пользователем profile_id, нормализует параграфы
+    и кладёт в session_state.
+    """
+    current_state = st.session_state.get("builder_state") or {}
+    user_selected_profile = current_state.get("profile_id")
+    if not new_state.get("sections"):
+        st.sidebar.warning(f"В «{filename}» не нашлось ни одного раздела.")
+        return
+    if user_selected_profile:
+        new_state["profile_id"] = user_selected_profile
+    _normalize_state_paragraphs(new_state)
+    st.session_state["builder_state"] = new_state
+    st.sidebar.success(f"Загружено: «{filename}» — разделов: {len(new_state['sections'])}.")
+
+
+def _handle_markdown_import(data: bytes, filename: str) -> None:
+    """Импорт Markdown → builder-state (через _markdown_to_state)."""
+    from gostforge.cli import _markdown_to_state
+
+    profile_id = (st.session_state.get("builder_state") or {}).get("profile_id", "gost-7.32-2017")
+    try:
+        text = data.decode("utf-8", errors="replace")
+        new_state = _markdown_to_state(text, profile_id=profile_id, title=Path(filename).stem)
+    except Exception as exc:  # pragma: no cover - UI feedback
+        st.sidebar.error(f"Не удалось разобрать Markdown «{filename}»: {exc}")
+        return
+    _install_imported_state(new_state, filename)
+
+
+def _handle_pdf_import(data: bytes, filename: str) -> None:
+    """Импорт PDF → builder-state (требует extra import-formats)."""
+    profile_id = (st.session_state.get("builder_state") or {}).get("profile_id", "gost-7.32-2017")
+    try:
+        from gostforge.pdf_importer import import_pdf_to_state
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(data)
+            pdf_path = Path(tmp.name)
+        new_state = import_pdf_to_state(pdf_path, profile_id=profile_id, title=Path(filename).stem)
+    except Exception as exc:  # pragma: no cover - UI feedback
+        st.sidebar.error(
+            f"Не удалось импортировать PDF «{filename}»: {exc}. "
+            "Для импорта PDF нужен extra: pip install 'gostforge[import-formats]'."
+        )
+        return
+    _install_imported_state(new_state, filename)
 
 
 def _handle_docx_import(data: bytes, filename: str) -> None:

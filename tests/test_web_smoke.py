@@ -99,3 +99,24 @@ def test_ui_command_invokes_streamlit_run(monkeypatch: pytest.MonkeyPatch) -> No
     assert cmd[cmd.index("--theme.primaryColor") + 1] == "#2F5496"
     assert "--theme.font" in cmd
     assert cmd[cmd.index("--theme.font") + 1] == "serif"
+
+
+def test_build_annotated_docx_bytes(tmp_path: Any) -> None:
+    """Хелпер аннотации возвращает валидный .docx (комментарии Word)."""
+    pytest.importorskip("streamlit")
+    import io
+
+    from gostforge.builder import work
+    from gostforge.exporter import export_docx
+    from gostforge.profile import load_profile
+    from gostforge.web.app import _build_annotated_docx_bytes
+
+    profile = load_profile("gost-7.32-2017")
+    doc = work("Тест").section("Введение").paragraph("Короткий текст.").build()
+    src = tmp_path / "src.docx"
+    export_docx(doc, profile, src)
+
+    uploaded = io.BytesIO(src.read_bytes())  # getvalue() как у Streamlit UploadedFile
+    data, n = _build_annotated_docx_bytes(uploaded, profile, "comments")
+    assert data[:2] == b"PK"  # zip-сигнатура .docx
+    assert isinstance(n, int)

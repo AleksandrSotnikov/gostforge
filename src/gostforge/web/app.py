@@ -95,6 +95,25 @@ def _process_file(uploaded_file: Any, profile: Profile) -> tuple[Document, list[
     return document, validate(document, profile)
 
 
+def _build_annotated_docx_bytes(
+    uploaded_file: Any, profile: Profile, style: str
+) -> tuple[bytes, int]:
+    """Сохранить загрузку во временный файл и вернуть аннотированный .docx.
+
+    ``style``: «comments» — настоящие OOXML-комментарии Word; «inline» —
+    inline-маркеры `[CODE: message]`. Возвращает (bytes, число пометок).
+    """
+    from gostforge.annotator import annotate_docx
+
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp_in:
+        tmp_in.write(uploaded_file.getvalue())
+        in_path = Path(tmp_in.name)
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp_out:
+        out_path = Path(tmp_out.name)
+    n = annotate_docx(in_path, out_path, profile, style=style)  # type: ignore[arg-type]
+    return out_path.read_bytes(), n
+
+
 def _build_fixed_docx_bytes(document: Document, profile: Profile) -> tuple[bytes, list[FixApplied]]:
     """Применить автофиксы к документу и вернуть байты исправленного .docx.
 
@@ -349,8 +368,8 @@ def _render_main(profile_id: str) -> None:
     if not results:
         return
 
-    tab_check, tab_stats, tab_fix, tab_pdf = st.tabs(
-        ["Проверка", "Статистика", "Автоисправление", "PDF"]
+    tab_check, tab_stats, tab_fix, tab_annot, tab_pdf = st.tabs(
+        ["Проверка", "Статистика", "Автоисправление", "Аннотация", "PDF"]
     )
 
     with tab_check:
@@ -396,6 +415,42 @@ def _render_main(profile_id: str) -> None:
                 file_name=f"{stem}_fixed.docx",
                 mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 key=f"download_fixed_{name}",
+            )
+            st.divider()
+
+    with tab_annot:
+        st.markdown(
+            "Аннотированный `.docx` — копия документа с пометками нарушений "
+            "прямо в проблемных местах. Откройте в Word/LibreOffice."
+        )
+        style_label = st.radio(
+            "Вид пометок",
+            options=["comments", "inline"],
+            format_func=lambda v: {
+                "comments": "Комментарии Word (боковые выноски)",
+                "inline": "Inline-маркеры [CODE: …] в тексте",
+            }[v],
+            horizontal=True,
+            key="annot_style",
+        )
+        for name, uf in uploads.items():
+            st.subheader(name)
+            try:
+                annotated_bytes, n = _build_annotated_docx_bytes(uf, prof, style_label)
+            except Exception as e:
+                st.error(f"Не удалось создать аннотированный .docx: {e}")
+                continue
+            if n:
+                st.success(f"Вставлено пометок: {n}")
+            else:
+                st.info("Нарушений не найдено — пометок нет.")
+            stem = Path(name).stem or "document"
+            st.download_button(
+                f"Скачать аннотированный «{name}»",
+                data=annotated_bytes,
+                file_name=f"{stem}_annotated.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                key=f"download_annotated_{name}",
             )
             st.divider()
 
