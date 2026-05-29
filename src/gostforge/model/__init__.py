@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
-SCHEMA_VERSION = "0.5.0"
+SCHEMA_VERSION = "0.6.0"
 
 
 # --- Inline content -----------------------------------------------------------
@@ -348,6 +348,45 @@ class PageNumberingConfig:
 
 
 @dataclass
+class TitleBlockRole:
+    """Строка-роль основной надписи (графы 11/13 ГОСТ 2.104).
+
+    Например: роль «Разраб.», фамилия (графа 11) и дата (графа 13).
+    Подпись (графа 14) в электронном документе не заполняется.
+    """
+
+    role: str
+    name: str = ""  # графа 11 — фамилия
+    date: str = ""  # графа 13 — дата
+
+
+@dataclass
+class TitleBlock:
+    """Основная надпись (штамп) по ГОСТ 2.104.
+
+    Форма 1 — для заглавного (первого) листа документа; форма 2а —
+    сокращённая для последующих листов. Размещается в нижнем
+    колонтитуле и повторяется на каждой странице секции.
+
+    Штамп опционален и различается у специальностей (как и рамка):
+    задаётся профилем (`styles.page.title_block`) либо моделью. Если
+    профиль штамп не требует — поля нет (`None`) и ничего не пишется.
+    """
+
+    enabled: bool = True
+    form: Literal["form1", "form2a"] = "form1"
+    designation: str = ""  # графа 2 — обозначение документа
+    title: str = ""  # графа 1 — наименование изделия/документа
+    organization: str = ""  # графа 9 — наименование организации
+    stage: str = ""  # графа 4 — литера
+    mass: str = ""  # графа 5 — масса
+    scale: str = ""  # графа 6 — масштаб
+    sheet: str = ""  # графа 7 — порядковый номер листа
+    sheets_total: str = ""  # графа 8 — общее число листов
+    roles: list[TitleBlockRole] = field(default_factory=list)
+
+
+@dataclass
 class PageSection:
     """Секция вёрстки с собственными колонтитулами и геометрией."""
 
@@ -362,6 +401,8 @@ class PageSection:
     different_first_page: bool = False
     different_odd_even: bool = False
     content: list[LogicalSection | Block] = field(default_factory=list)
+    # Основная надпись (штамп ЕСКД). None — штампа нет (back-compat).
+    title_block: TitleBlock | None = None
 
 
 # --- Список литературы --------------------------------------------------------

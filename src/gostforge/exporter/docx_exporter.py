@@ -56,6 +56,8 @@ from gostforge.model import (
     Table,
     TableOfContents,
     TextRun,
+    TitleBlock,
+    TitleBlockRole,
 )
 from gostforge.profile import Profile
 
@@ -1444,6 +1446,15 @@ def _sync_page_section_with_profile(page_section: PageSection, profile: Profile)
             offset_from=border_cfg.offset_from,
             space_pt=int(border_cfg.space_pt),
         )
+    # Основная надпись (штамп ЕСКД). Профиль задаёт штамп, если в модели нет.
+    tb_cfg = profile.styles.page.title_block
+    if tb_cfg is not None and tb_cfg.enabled and page_section.title_block is None:
+        page_section.title_block = TitleBlock(
+            enabled=True,
+            form=tb_cfg.form,
+            organization=tb_cfg.organization,
+            roles=[TitleBlockRole(role=r.role, name=r.name, date=r.date) for r in tb_cfg.roles],
+        )
     # F.06 start_value.
     f06 = profile.checks.get("F.06")
     if (
@@ -1639,6 +1650,14 @@ def export_docx(
                 _write_footer(doc, first.footer.default)
             if first.header is not None:
                 _write_header(doc, first.header.default)
+            if first.title_block is not None and first.title_block.enabled:
+                from .title_block import write_title_block
+
+                tb = first.title_block
+                # Наименование (графа 1) по умолчанию = заголовок работы.
+                if not tb.title and document.metadata.title:
+                    tb.title = document.metadata.title
+                write_title_block(doc.sections[0].footer, tb)
 
         for page_section in document.page_sections:
             _write_items(doc, page_section.content)

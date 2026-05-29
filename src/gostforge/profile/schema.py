@@ -26,6 +26,34 @@ class PageBorderProfile(BaseModel):
     space_pt: int = 0  # w:space, 0..31
 
 
+class TitleBlockRoleProfile(BaseModel):
+    """Роль в основной надписи (графа 11/13): «Разраб.», «Пров.» и т.п."""
+
+    role: str
+    name: str = ""
+    date: str = ""
+
+
+def _default_title_block_roles() -> list[TitleBlockRoleProfile]:
+    """Стандартный набор ролей основной надписи ГОСТ 2.104."""
+    return [
+        TitleBlockRoleProfile(role="Разраб."),
+        TitleBlockRoleProfile(role="Пров."),
+        TitleBlockRoleProfile(role="Т.контр."),
+        TitleBlockRoleProfile(role="Н.контр."),
+        TitleBlockRoleProfile(role="Утв."),
+    ]
+
+
+class TitleBlockProfile(BaseModel):
+    """Основная надпись (штамп ЕСКД, ГОСТ 2.104). Управляет таблицей в колонтитуле."""
+
+    enabled: bool = False
+    form: Literal["form1", "form2a"] = "form1"
+    organization: str = ""
+    roles: list[TitleBlockRoleProfile] = Field(default_factory=_default_title_block_roles)
+
+
 class PageGeometryProfile(BaseModel):
     size: str = "A4"
     margins_mm: dict[str, float] = Field(
@@ -33,6 +61,8 @@ class PageGeometryProfile(BaseModel):
     )
     # Рамка листа. None — рамка не задаётся профилем (back-compat).
     border: PageBorderProfile | None = None
+    # Основная надпись (штамп). None — штамп профилем не задаётся.
+    title_block: TitleBlockProfile | None = None
 
 
 class BodyTextProfile(BaseModel):
