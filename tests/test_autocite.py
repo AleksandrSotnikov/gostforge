@@ -130,3 +130,31 @@ def test_builder_without_toggle_no_autofill() -> None:
         .build()
     )
     assert all(e.fields.get("designation") != "ГОСТ 7.32-2017" for e in doc.bibliography)
+
+
+def test_known_gost_full_title_format() -> None:
+    """Известный ГОСТ описывается с официальным названием и видом носителя."""
+    doc = _doc_with_body_and_bib("Оформление по ГОСТ 7.32-2017.")
+    added = autofill_references(doc)
+    raw = added[0].fields["raw"]
+    assert "Отчёт о научно-исследовательской работе" in raw
+    assert "Москва : Стандартинформ, 2017" in raw
+    assert raw.endswith("Текст : непосредственный.")
+
+
+def test_unknown_gost_minimal_format() -> None:
+    """Неизвестный ГОСТ — корректный минимальный скелет без выдуманного названия."""
+    doc = _doc_with_body_and_bib("По ГОСТ 9999-2000.")
+    added = autofill_references(doc)
+    raw = added[0].fields["raw"]
+    assert raw == "ГОСТ 9999-2000. — Москва : Стандартинформ, 2000. — Текст : непосредственный."
+
+
+def test_known_fz_title_and_catalog_date() -> None:
+    """Известный ФЗ (без даты в тексте) описывается с названием и датой из каталога."""
+    doc = _doc_with_body_and_bib("Регулируется № 273-ФЗ.")
+    added = autofill_references(doc)
+    law = next(e for e in added if e.fields["designation"] == "№273-ФЗ")
+    assert "Об образовании в Российской Федерации" in law.fields["raw"]
+    assert "29.12.2012" in law.fields["raw"]
+    assert law.fields["year"] == "2012"
