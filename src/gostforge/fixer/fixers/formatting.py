@@ -9,6 +9,7 @@ from gostforge.model import (
     Document,
     HeaderConfig,
     InlineElement,
+    PageBorder,
     TextRun,
 )
 from gostforge.profile import Profile
@@ -195,6 +196,52 @@ def fix_page_number_format(
     return applied
 
 
+@register("F.07")
+def fix_page_border(document: Document, profile: Profile) -> list[FixApplied]:
+    """Привести рамку листа к профилю (F.07).
+
+    Зеркально проверке F.07. Если профиль рамку не требует
+    (`border is None` / `enabled = False`) — фиксер ничего не делает.
+    Иначе каждой секции, где рамка отсутствует или отличается по
+    стилю/толщине, выставляется рамка из профиля. Безопасная правка
+    метаданных вёрстки, не текста.
+    """
+    expected = profile.styles.page.border
+    if expected is None or not expected.enabled:
+        return []
+
+    def _make_border() -> PageBorder:
+        return PageBorder(
+            enabled=True,
+            style=expected.style,
+            size_eighth_pt=int(expected.size_eighth_pt),
+            color=expected.color,
+            offset_from=expected.offset_from,
+            space_pt=int(expected.space_pt),
+        )
+
+    applied: list[FixApplied] = []
+    for section in document.page_sections:
+        border = section.page.border
+        needs_fix = (
+            border is None
+            or not border.enabled
+            or border.style != expected.style
+            or int(border.size_eighth_pt) != int(expected.size_eighth_pt)
+        )
+        if not needs_fix:
+            continue
+        section.page.border = _make_border()
+        applied.append(
+            FixApplied(
+                fixer_code="F.07",
+                location=f"page_sections.{section.id}.page.border",
+                description="Рамка листа приведена к профилю (ЕСКД)",
+            )
+        )
+    return applied
+
+
 @register("F.04")
 def fix_page_number_position(
     document: Document,
@@ -275,6 +322,7 @@ def _strip_page_placeholder(
 __all__ = [
     "fix_margins",
     "fix_orientation",
+    "fix_page_border",
     "fix_page_number_format",
     "fix_page_number_position",
     "fix_page_numbering_start",

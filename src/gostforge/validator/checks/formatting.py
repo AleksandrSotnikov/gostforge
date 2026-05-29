@@ -264,6 +264,70 @@ def check_paper_size(document: Document, profile: Profile) -> list[Violation]:
     return violations
 
 
+@register("F.07")
+def check_page_border(document: Document, profile: Profile) -> list[Violation]:
+    """Рамка листа (ЕСКД, ГОСТ 2.104) соответствует профилю.
+
+    Ожидание берётся из `profile.styles.page.border`:
+
+    * если профиль рамку не требует (`border is None` или
+      `border.enabled = False`) — проверка молчит. Это намеренно: у
+      разных специальностей рамка либо своя, либо вовсе отсутствует, и
+      отсутствие рамки в таком профиле — норма;
+    * если профиль требует рамку — у каждой секции вёрстки должна быть
+      включённая рамка (иначе `error`); расхождение по стилю/толщине —
+      `warning`.
+    """
+    expected = profile.styles.page.border
+    if expected is None or not expected.enabled:
+        return []
+
+    violations: list[Violation] = []
+    for section in document.page_sections:
+        border = section.page.border
+        if border is None or not border.enabled:
+            violations.append(
+                Violation(
+                    check_code="F.07",
+                    severity="error",
+                    message=(
+                        f"В секции «{section.name}» отсутствует рамка листа, "
+                        f"хотя профиль её требует (ЕСКД, ГОСТ 2.104)"
+                    ),
+                    location=f"page_sections.{section.id}.page.border",
+                    suggestion="Добавить рамку листа (<w:pgBorders>) согласно профилю",
+                    details={"expected": "enabled", "actual": "none"},
+                )
+            )
+            continue
+        # Рамка есть — мягко сверяем стиль и толщину линии.
+        mismatches: list[str] = []
+        if border.style != expected.style:
+            mismatches.append(f"стиль «{border.style}» вместо «{expected.style}»")
+        if int(border.size_eighth_pt) != int(expected.size_eighth_pt):
+            mismatches.append(
+                f"толщина {border.size_eighth_pt}/8 pt вместо {expected.size_eighth_pt}/8 pt"
+            )
+        if mismatches:
+            violations.append(
+                Violation(
+                    check_code="F.07",
+                    severity="warning",
+                    message=(
+                        f"Рамка листа в секции «{section.name}» не совпадает с профилем: "
+                        + ", ".join(mismatches)
+                    ),
+                    location=f"page_sections.{section.id}.page.border",
+                    suggestion="Привести параметры рамки к профилю",
+                    details={
+                        "expected_style": expected.style,
+                        "actual_style": border.style,
+                    },
+                )
+            )
+    return violations
+
+
 @register("F.03")
 def check_orientation(document: Document, profile: Profile) -> list[Violation]:
     """Проверка ориентации страницы (по умолчанию portrait).

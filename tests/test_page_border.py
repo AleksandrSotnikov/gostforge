@@ -11,6 +11,7 @@ from pathlib import Path
 import docx as python_docx
 
 from gostforge.exporter import export_docx
+from gostforge.fixer import fix, registered_fixers
 from gostforge.model import (
     Document,
     PageBorder,
@@ -21,8 +22,17 @@ from gostforge.model import (
 )
 from gostforge.parser import parse_docx
 from gostforge.profile import load_profile
+from gostforge.validator import validate
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
+
+
+def _profile_requiring_border():  # type: ignore[no-untyped-def]
+    """Профиль ЕСКД с включённой рамкой (для проверки/фиксера F.07)."""
+    profile = load_profile("gost-r-2.105-2019")
+    assert profile.styles.page.border is not None
+    profile.styles.page.border.enabled = True
+    return profile
 
 
 def _doc_with_border(border: PageBorder | None) -> Document:
@@ -113,3 +123,60 @@ def test_border_disabled_in_profile_writes_nothing(tmp_path: Path) -> None:
 
     reparsed = parse_docx(out)
     assert reparsed.page_sections[0].page.border is None
+
+
+# --- F.07: проверка соответствия рамки профилю -------------------------------
+
+
+def test_f07_silent_when_profile_requires_no_border() -> None:
+    """Профиль без рамки (gost-7.32) → F.07 не срабатывает (отсутствие = норма)."""
+    profile = load_profile("gost-7.32-2017")
+    assert profile.styles.page.border is None
+    doc = _doc_with_border(None)
+    assert [v for v in validate(doc, profile) if v.check_code == "F.07"] == []
+
+
+def test_f07_errors_when_border_missing() -> None:
+    """Профиль требует рамку, а её нет → ошибка F.07."""
+    profile = _profile_requiring_border()
+    doc = _doc_with_border(None)
+    f07 = [v for v in validate(doc, profile) if v.check_code == "F.07"]
+    assert len(f07) == 1
+    assert f07[0].severity == "error"
+
+
+def test_f07_warns_on_style_mismatch() -> None:
+    """Рамка есть, но стиль не тот → warning F.07."""
+    profile = _profile_requiring_border()
+    doc = _doc_with_border(PageBorder(enabled=True, style="double", size_eighth_pt=4))
+    f07 = [v for v in validate(doc, profile) if v.check_code == "F.07"]
+    assert len(f07) == 1
+    assert f07[0].severity == "warning"
+
+
+# --- F.07: автофиксер --------------------------------------------------------
+
+
+def test_f07_fixer_registered() -> None:
+    assert "F.07" in registered_fixers()
+
+
+def test_f07_fixer_adds_border_from_profile() -> None:
+    """F.07-фиксер добавляет рамку из профиля; после фикса проверка молчит."""
+    profile = _profile_requiring_border()
+    doc = _doc_with_border(None)
+
+    applied = fix(doc, profile, codes=["F.07"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "F.07"
+    border = doc.page_sections[0].page.border
+    assert border is not None and border.enabled is True
+    assert [v for v in validate(doc, profile) if v.check_code == "F.07"] == []
+
+
+def test_f07_fixer_noop_when_profile_requires_no_border() -> None:
+    """Если профиль рамку не требует — фиксер ничего не делает."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_border(None)
+    assert fix(doc, profile, codes=["F.07"]) == []
+    assert doc.page_sections[0].page.border is None
