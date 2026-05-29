@@ -23,11 +23,77 @@ from ..engine import Violation, register
 # Между номером и тире — один пробел; тире длинное (—), допускаем также
 # среднее (–) и обычный дефис (-) как «не строго» — но в правильном
 # случае всё равно сообщаем suggestion с длинным тире.
+#
+# Этот regex используется как back-compat fallback, если профильный
+# `styles.figure.caption.format` не содержит плейсхолдеров `{num}`/`{title}`
+# (либо пуст). По умолчанию же regex собирается из формата профиля
+# через `_build_caption_regex`.
 _FIGURE_CAPTION_RE = re.compile(r"^Рис(?:унок)?\s+\d+(?:\.\d+)?\s+[—–-]\s+\S")
 
 # Альтернативный вариант, когда параметр allow_dot_after_number=True:
 # «Рисунок 1. Название» — без длинного тире, с точкой после номера.
 _FIGURE_CAPTION_DOT_RE = re.compile(r"^Рис(?:унок)?\s+\d+(?:\.\d+)?\.\s+\S")
+
+# Регекс для номера в подписи: «1», «1.2», «А.1», «Б.2.3» и т. п.
+# Допускает как сквозную/по-главную нумерацию, так и приложенческий
+# префикс (одна заглавная кириллическая буква + точка + число).
+_NUM_PATTERN = r"(?:\d+(?:\.\d+)*|[А-Я]\.\d+(?:\.\d+)*)"
+
+# Регекс для заголовка («Название»). Жадно ловит любой непустой текст до
+# конца строки — после format-строки в подписи больше ничего не идёт.
+_TITLE_PATTERN = r".+?"
+
+# Символы тире, которые мы считаем взаимозаменяемыми в статических частях
+# формата (em-dash, en-dash, hyphen-minus). В реальных подписях часто
+# подменяют длинное тире коротким или дефисом — это «soft»-нарушение,
+# которое отдельно покрывается другой проверкой.
+# В regex-форме: после `re.escape` em-dash остаётся как «—», en-dash как
+# «–», а hyphen-minus — как «\\-». Этот регекс матчит ИМЕННО эскейпленную
+# форму, чтобы один проход подмены не задевал уже подставленные `[…]`.
+_ESCAPED_DASH_RE = re.compile(r"—|–|\\-")
+_DASH_ALT = "[—–-]"
+
+
+def _build_caption_regex(format_str: str) -> re.Pattern[str] | None:
+    """Построить регекс по format-строке профиля.
+
+    Подставляет вместо плейсхолдеров `{num}` и `{title}` соответствующие
+    подвыражения, а статические участки экранирует через `re.escape` и
+    дополнительно делает тире-символы взаимозаменяемыми (em/en/hyphen).
+    Анкорится якорем `^` от начала строки; конец строки специально не
+    фиксируем — допустим хвостовой пробел или точка.
+
+    Возвращает None, если в `format_str` нет хотя бы одного из
+    плейсхолдеров `{num}`/`{title}` (или строка пуста) — это сигнал
+    вызывающему коду перейти на fallback-поведение.
+    """
+    if not format_str:
+        return None
+    if "{num}" not in format_str or "{title}" not in format_str:
+        return None
+
+    # Разбиваем формат на статические и динамические сегменты, сохраняя
+    # порядок. Поддерживаются только два плейсхолдера; всё остальное —
+    # литералы.
+    parts = re.split(r"(\{num\}|\{title\})", format_str)
+    pieces: list[str] = []
+    for part in parts:
+        if part == "{num}":
+            pieces.append(_NUM_PATTERN)
+        elif part == "{title}":
+            pieces.append(_TITLE_PATTERN)
+        elif part == "":
+            continue
+        else:
+            escaped = re.escape(part)
+            # Делаем все варианты тире/дефиса взаимозаменяемыми — один
+            # проход, чтобы уже подставленный `[—–-]` не попадал под
+            # повторную подмену.
+            escaped = _ESCAPED_DASH_RE.sub(_DASH_ALT, escaped)
+            pieces.append(escaped)
+
+    pattern = "^" + "".join(pieces) + r"\s*$"
+    return re.compile(pattern)
 
 
 def _iter_figures(items: Sequence[LogicalSection | Block]) -> list[Figure]:
@@ -102,12 +168,21 @@ def check_figure_caption_below(
 
 @register("I.03")
 def check_figure_caption_format(document: Document, profile: Profile) -> list[Violation]:
-    """Подпись рисунка должна быть в формате «Рисунок N — Название».
+    """Подпись рисунка должна соответствовать формату из профиля.
+
+    Ожидаемый формат берётся из `profile.styles.figure.caption.format`
+    (по умолчанию `"Рисунок {num} — {title}"`). Из format-строки
+    собирается регекс: плейсхолдер `{num}` → номер вида «1», «1.2»,
+    «А.1»; `{title}` → любой непустой текст; статические участки
+    экранируются и дополнительно делают тире/дефис взаимозаменяемыми.
 
     Параметры:
     - `allow_dot_after_number` (bool, default False): если True, также
-      принимается «Рисунок 1. Название» (с точкой после номера).
+      принимается «Рисунок 1. Название» (с точкой после номера) — это
+      back-compat для существующих профилей-наследников.
 
+    Back-compat: если в `caption.format` нет плейсхолдеров `{num}`/`{title}`
+    (или строка пуста), используется зашитый regex прежнего поведения.
     Пустые подписи не проверяются — это случай I.01.
     """
     violations: list[Violation] = []
@@ -116,12 +191,21 @@ def check_figure_caption_format(document: Document, profile: Profile) -> list[Vi
     if config and config.params.get("allow_dot_after_number") is not None:
         allow_dot = bool(config.params["allow_dot_after_number"])
 
+    expected_format = profile.styles.figure.caption.format or ""
+    format_regex = _build_caption_regex(expected_format)
+    # Если формат «дружелюбный к парсингу» — используем его; иначе
+    # fallback на хардкод (старое поведение).
+    primary_regex = format_regex if format_regex is not None else _FIGURE_CAPTION_RE
+    # Для сообщения об ошибке: если регекс собран по формату профиля —
+    # показываем сам формат; иначе — старый хардкод.
+    expected_msg = expected_format if format_regex is not None else "Рисунок N — Название"
+
     for page_section, figure in _all_figures(document):
         text = _caption_text(figure.caption)
         if not text:
             # Пустая подпись — это I.01, не дублируем.
             continue
-        if _FIGURE_CAPTION_RE.match(text):
+        if primary_regex.match(text):
             continue
         if allow_dot and _FIGURE_CAPTION_DOT_RE.match(text):
             continue
@@ -130,13 +214,18 @@ def check_figure_caption_format(document: Document, profile: Profile) -> list[Vi
                 check_code="I.03",
                 severity="error",
                 message=(
-                    f"Подпись рисунка «{text}» не соответствует формату «Рисунок N — Название»"
+                    f"Подпись рисунка «{text}» не соответствует ожидаемому формату «{expected_msg}»"
                 ),
                 location=f"page_sections.{page_section.id}.figure[{figure.id}]",
                 suggestion=(
-                    "Использовать формат «Рисунок 1 — Название» (длинное тире —, не дефис)"
+                    "Привести подпись к формату из профиля "
+                    "или изменить `styles.figure.caption.format`"
                 ),
-                details={"figure_id": figure.id, "caption": text},
+                details={
+                    "figure_id": figure.id,
+                    "caption": text,
+                    "expected_format": expected_msg,
+                },
             )
         )
     return violations

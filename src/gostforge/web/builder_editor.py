@@ -351,7 +351,13 @@ def _can_redo() -> bool:
 
 # Минимальный интервал между авто-сохранениями. Меньше — лишняя нагрузка
 # на диск; больше — выше риск потерять прогресс.
-_AUTOSAVE_INTERVAL_SEC = 30.0
+# Минимальный интервал между записями на диск. Цель: ловить
+# изменения максимально близко к моменту правки (раньше — раз в 30с,
+# что давало риск потерять до полминуты при сбое браузера), но не
+# писать при каждом нажатии клавиши. 1.5 с — компромисс: пользователь
+# успевает напечатать слово, но если приостановится — сохранение
+# случается почти сразу.
+_AUTOSAVE_MIN_INTERVAL_SEC = 1.5
 
 
 def _autosave_dir() -> Path:
@@ -376,27 +382,56 @@ def _autosave_path() -> Path:
 
 
 def _autosave_now() -> None:
-    """Сохранить текущий state в autosave-файл. Не дороже одного раза в 30с.
+    """Сохранить state в autosave-файл — content-based debounce.
+
+    Стратегия: пишем только если state РЕАЛЬНО изменился относительно
+    прошлого сохранения (сверяемся по хэшу payload), но не чаще
+    ``_AUTOSAVE_MIN_INTERVAL_SEC`` (1.5 с). Это:
+
+    * минимизирует риск потери данных — сохранение происходит почти
+      сразу после правки (раньше был фиксированный 30-секундный
+      интервал, и при крахе браузера терялось до полминуты);
+    * не нагружает диск при быстром наборе (rerun на каждое нажатие
+      клавиши не вызывает запись, если не прошло 1.5 с от предыдущей);
+    * не пишет вовсе, если state не менялся (например, простое
+      переключение страницы Streamlit-навигации).
 
     Ошибки IO логируются и глотаются — UI продолжает работать даже
     если диск переполнен или каталог недоступен.
 
     Дополнительно: периодически (раз в 5 минут) кладёт snapshot в
     каталог версий ``~/.gostforge/state-versions/<title>-<timestamp>.json``.
-    Это даёт возможность откатиться к более ранней версии работы
-    через ``gostforge state-versions list/restore``.
     """
+    import hashlib
     import time
 
-    last = float(st.session_state.get("builder_autosave_ts", 0.0))
-    now = time.time()
-    if now - last < _AUTOSAVE_INTERVAL_SEC:
-        return
     try:
         state = _get_state()
-        payload = json.dumps(state, ensure_ascii=False, indent=2).encode("utf-8")
-        _autosave_path().write_bytes(payload)
+        payload = json.dumps(state, ensure_ascii=False, indent=2)
+    except Exception as exc:  # pragma: no cover - не валим UI
+        import logging
+
+        logging.getLogger(__name__).warning("autosave: state serialise failed: %s", exc)
+        return
+
+    new_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    last_hash = st.session_state.get("builder_autosave_hash")
+    if new_hash == last_hash:
+        # State не менялся с прошлой записи — не трогаем диск.
+        return
+
+    now = time.time()
+    last = float(st.session_state.get("builder_autosave_ts", 0.0))
+    if now - last < _AUTOSAVE_MIN_INTERVAL_SEC:
+        # Throttle: между записями не меньше 1.5 с. Следующий rerun
+        # уже не пройдёт по hash-check (если state ещё меняется) —
+        # тогда сохраним. Если набор остановится — на следующем
+        # rerun (когда throttle отпустит) сохраним.
+        return
+    try:
+        _autosave_path().write_bytes(payload.encode("utf-8"))
         st.session_state["builder_autosave_ts"] = now
+        st.session_state["builder_autosave_hash"] = new_hash
     except Exception as exc:  # pragma: no cover - не валим UI на диске
         import logging
 
@@ -1143,13 +1178,18 @@ def document_to_state(document: Any) -> dict[str, Any]:
                 "kind": "table",
                 "headers": [_heading_text(h) for h in block.headers],
                 "rows": [[_heading_text(c) for c in r] for r in block.rows],
-                "caption": _heading_text(block.caption),
+                # ВАЖНО: режем префикс «Таблица N — » на импорте, иначе при
+                # следующем экспорте builder добавит ещё один → «Таблица 1
+                # — Таблица 1 — caption».
+                "caption": _strip_caption_prefix(_heading_text(block.caption), kind="table"),
             }
         if isinstance(block, Figure):
             return {
                 "kind": "figure",
                 "image_path": block.image_path or "",
-                "caption": _heading_text(block.caption),
+                # См. комментарий выше — снимаем префикс на импорте,
+                # билдер добавит его обратно по profile.styles.figure.caption.format.
+                "caption": _strip_caption_prefix(_heading_text(block.caption), kind="figure"),
             }
         if isinstance(block, ListBlock):
             return {
@@ -1474,6 +1514,136 @@ def _opt_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+# --- HTML ↔ runs (для WYSIWYG-режима через Quill) ------------------------
+
+
+def _runs_to_html(runs: list[dict[str, Any]]) -> str:
+    """Сконвертировать список text-run-ов в HTML для Quill-редактора.
+
+    Поддерживает bold / italic / underline. Не-текстовые run-ы
+    (formula / xref / citation) пропускаются — WYSIWYG-режим рассчитан
+    только на параграф без них; UI это гарантирует через toggle gate.
+
+    Возвращает HTML-фрагмент. Пустой вход → пустая строка (Quill
+    отобразит placeholder).
+    """
+    import html as _html
+
+    parts: list[str] = []
+    for run in runs:
+        if run.get("kind") != "text":
+            continue
+        text = str(run.get("text") or "")
+        if not text:
+            continue
+        # Перевод строки → отдельный параграф для Quill.
+        chunks = text.split("\n")
+        for i, chunk in enumerate(chunks):
+            inner = _html.escape(chunk)
+            if run.get("bold"):
+                inner = f"<strong>{inner}</strong>"
+            if run.get("italic"):
+                inner = f"<em>{inner}</em>"
+            if run.get("underline"):
+                inner = f"<u>{inner}</u>"
+            if i > 0:
+                parts.append("<br>")
+            parts.append(inner)
+    if not parts:
+        return ""
+    return f"<p>{''.join(parts)}</p>"
+
+
+def _html_to_runs(value: str) -> list[dict[str, Any]]:
+    """Сконвертировать HTML из Quill обратно в список text-run-ов.
+
+    Стратегия — итерация через :class:`html.parser.HTMLParser` с учётом
+    вложенности bold/italic/underline тегов. Между ``<p>``-блоками
+    вставляется ``\\n``; ``<br>`` тоже даёт ``\\n``. Смежные run-ы с
+    идентичным форматом склеиваются — это важно, иначе Quill после
+    нескольких правок генерирует фрагментированный HTML и в state
+    окажется много мелких run-ов.
+
+    Поддерживаемые теги: ``<b>``/``<strong>`` → bold; ``<i>``/``<em>``
+    → italic; ``<u>`` → underline. Прочие игнорируются (содержимое всё
+    равно проходит через handle_data как plain text).
+    """
+    from html.parser import HTMLParser
+
+    class _Parser(HTMLParser):
+        def __init__(self) -> None:
+            super().__init__(convert_charrefs=True)
+            self.runs: list[dict[str, Any]] = []
+            self._bold = 0
+            self._italic = 0
+            self._underline = 0
+            self._seen_paragraph = False
+
+        def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+            if tag in ("b", "strong"):
+                self._bold += 1
+            elif tag in ("i", "em"):
+                self._italic += 1
+            elif tag == "u":
+                self._underline += 1
+            elif tag == "p":
+                # Между параграфами вставляем \n; первый paragraph — без.
+                if self._seen_paragraph:
+                    self._append("\n")
+                self._seen_paragraph = True
+            elif tag == "br":
+                self._append("\n")
+
+        def handle_endtag(self, tag: str) -> None:
+            if tag in ("b", "strong") and self._bold > 0:
+                self._bold -= 1
+            elif tag in ("i", "em") and self._italic > 0:
+                self._italic -= 1
+            elif tag == "u" and self._underline > 0:
+                self._underline -= 1
+
+        def handle_data(self, data: str) -> None:
+            if data:
+                self._append(data)
+
+        def _append(self, text: str) -> None:
+            run: dict[str, Any] = {"kind": "text", "text": text}
+            if self._bold:
+                run["bold"] = True
+            if self._italic:
+                run["italic"] = True
+            if self._underline:
+                run["underline"] = True
+            if self.runs:
+                last = self.runs[-1]
+                if (
+                    last.get("kind") == "text"
+                    and last.get("bold", False) == run.get("bold", False)
+                    and last.get("italic", False) == run.get("italic", False)
+                    and last.get("underline", False) == run.get("underline", False)
+                ):
+                    last["text"] = last["text"] + text
+                    return
+            self.runs.append(run)
+
+    parser = _Parser()
+    parser.feed(value or "")
+    # Убираем пустые «хвостовые» run-ы (Quill часто оставляет «\n» в конце).
+    while parser.runs and not parser.runs[-1].get("text"):
+        parser.runs.pop()
+    # Убираем хвостовые «\n» в последнем run-е (Quill часто оставляет
+    # пустые `<p><br></p>` в конце, что плодит мусор при rerun-ах).
+    if parser.runs:
+        last_run = parser.runs[-1]
+        last_text = str(last_run.get("text", ""))
+        stripped = last_text.rstrip("\n")
+        if stripped != last_text:
+            last_run["text"] = stripped
+            if not stripped:
+                parser.runs.pop()
+    return parser.runs
 
 
 def _runs_from_inline(content: list[Any]) -> list[dict[str, Any]]:
@@ -2177,11 +2347,16 @@ def _render_sidebar_metadata() -> None:
 
     work_types = list(_WORK_TYPE_LABELS.keys())
     current_wt = state.get("work_type", "coursework")
+    # ВАЖНО: явный стабильный `key=` обязателен для multi-page Streamlit.
+    # Без него виджеты получают разные авто-id на каждой подстранице
+    # навигации, теряют состояние и сбрасываются к `index`. Поэтому
+    # после клика «Содержимое → Структура» казалось, что выбор сбрасывается.
     state["work_type"] = st.sidebar.selectbox(
         "Вид работы",
         options=work_types,
         index=work_types.index(current_wt) if current_wt in work_types else 0,
         format_func=lambda key: _WORK_TYPE_LABELS[key],
+        key="builder_meta_work_type",
     )
 
     profiles = list_profiles()
@@ -2191,6 +2366,7 @@ def _render_sidebar_metadata() -> None:
         options=profiles,
         index=(profiles.index(current_profile) if current_profile in profiles else 0),
         help="Профиль определяет, какие проверки нормоконтроля будут запущены.",
+        key="builder_meta_profile_id",
     )
 
     _render_style_overrides_section(state)
@@ -2318,6 +2494,124 @@ def _section_matches_query(section: dict[str, Any], query: str) -> bool:
     return search_in_section(section)
 
 
+def _reorder_sections_by_dnd_items(
+    sections: list[dict[str, Any]],
+    sorted_items: list[str],
+) -> list[dict[str, Any]] | None:
+    """Чистая функция: переставить ``sections`` по DnD-итемам ``"#{id}: {heading}"``.
+
+    Возвращает новый список разделов в нужном порядке, либо ``None``,
+    если матчинг id-ов нестабилен (например, sorted_items содержит
+    мусор или пропущенные id). Не мутирует вход.
+    """
+    if len(sorted_items) != len(sections):
+        return None
+    id_to_index: dict[str, int] = {}
+    for idx, sec in enumerate(sections):
+        sec_id = sec.get("id")
+        if isinstance(sec_id, str):
+            id_to_index[sec_id] = idx
+    new_sections: list[dict[str, Any]] = []
+    for item in sorted_items:
+        if not (isinstance(item, str) and item.startswith("#")):
+            return None
+        sep_idx = item.find(": ")
+        if sep_idx < 1:
+            return None
+        sec_id = item[1:sep_idx]
+        if sec_id not in id_to_index:
+            return None
+        new_sections.append(sections[id_to_index[sec_id]])
+    if len(new_sections) != len(sections):
+        return None
+    return new_sections
+
+
+def _render_section_dnd_panel(sections: list[dict[str, Any]], state: dict[str, Any]) -> bool:
+    """Toggle + drag-and-drop переупорядочивания разделов через streamlit-sortables.
+
+    Возвращает ``True``, если DnD активен и порядок уже отрендерен
+    (вызывающий пропускает классический рендер с кнопками ↑/↓).
+    ``False`` — toggle выключен либо streamlit-sortables недоступен,
+    нужно рендерить старый интерфейс.
+
+    Стратегия идентификации: каждой записи назначается строка
+    ``"#{id}: {heading}"``. ``id`` — стабильный идентификатор раздела
+    из state. После возврата из ``sort_items`` парсим id из префикса
+    и переставляем ``sections`` в найденном порядке.
+    """
+    enabled = st.toggle(
+        "Drag-and-drop разделов",
+        value=bool(state.get("section_dnd_enabled", False)),
+        key="section_dnd_toggle",
+        help=(
+            "Перетаскивайте разделы мышкой вместо ↑/↓. В DnD-режиме "
+            "кнопки дублирования / удаления исчезают — выключите "
+            "toggle, чтобы вернуть их."
+        ),
+    )
+    state["section_dnd_enabled"] = enabled
+    if not enabled:
+        return False
+
+    try:
+        from streamlit_sortables import sort_items  # type: ignore[import-untyped]
+    except ImportError:
+        st.warning(
+            "Модуль `streamlit-sortables` не установлен. Установите "
+            "`gostforge[ui]` или `pip install streamlit-sortables`, "
+            "либо снимите toggle «Drag-and-drop разделов»."
+        )
+        return False
+
+    # Гарантируем, что у всех разделов есть id (нужно для матчинга).
+    items: list[str] = []
+    for idx, sec in enumerate(sections):
+        sec_id = sec.setdefault("id", _new_block_id())
+        heading = sec.get("heading") or f"Раздел {idx + 1}"
+        items.append(f"#{sec_id}: {heading}")
+
+    sorted_items = sort_items(items, direction="vertical", key="section_dnd_sortable")
+    if not isinstance(sorted_items, list) or sorted_items == items:
+        return True
+
+    new_sections = _reorder_sections_by_dnd_items(sections, sorted_items)
+    if new_sections is None:
+        # Нестабильный матчинг — оставляем порядок без изменений.
+        return True
+
+    # Найдём, куда переехал активный раздел, и обновим индекс.
+    active_idx_old = state.get("active_section_index", 0)
+    if 0 <= active_idx_old < len(sections):
+        active_section = sections[active_idx_old]
+        try:
+            state["active_section_index"] = new_sections.index(active_section)
+        except ValueError:
+            state["active_section_index"] = 0
+
+    sections[:] = new_sections
+    st.rerun()
+    return True
+
+
+def _render_section_dnd_select(sections: list[dict[str, Any]], state: dict[str, Any]) -> None:
+    """В DnD-режиме активный раздел выбирается селект-боксом."""
+    options = list(range(len(sections)))
+    active_idx = state.get("active_section_index", 0)
+    if not 0 <= active_idx < len(sections):
+        active_idx = 0
+    chosen = st.selectbox(
+        "Активный раздел",
+        options=options,
+        index=active_idx,
+        format_func=lambda i: sections[i].get("heading") or f"Раздел {i + 1}",
+        key="section_dnd_active_select",
+    )
+    if isinstance(chosen, int) and chosen != active_idx:
+        state["active_section_index"] = chosen
+        st.rerun()
+
+
 def _render_section_tree() -> None:
     """Список разделов с кнопками ↑/↓/⎘/✕ и фильтром-поиском."""
     state = _get_state()
@@ -2350,6 +2644,10 @@ def _render_section_tree() -> None:
 
     if not sections:
         st.info("Нет ни одного раздела. Добавьте раздел кнопкой ниже.")
+    elif _render_section_dnd_panel(sections, state):
+        # DnD активен: классические кнопки ↑/↓/⎘/✕ заменяются
+        # перетаскиванием. Активный раздел выбирается селект-боксом.
+        _render_section_dnd_select(sections, state)
     else:
         for idx, section in enumerate(sections):
             # Если активен фильтр и текущий раздел не совпал — скрываем.
@@ -3755,6 +4053,17 @@ def _apply_autofixes_to_state() -> None:
         profile = load_profile(profile_id)
         applied = run_fix(document, profile)
         new_state = document_to_state(document)
+        # Картинки: parse_docx ставит `image_path = "embedded:rIdN"`,
+        # ссылающийся на ВРЕМЕННЫЙ .docx, который мы тут же удаляем.
+        # Без этого шага после автофикса картинки терялись. Зеркалим
+        # логику импорта .docx через UI: извлекаем media и вшиваем
+        # data-URI в state.
+        import time
+
+        images_dir = Path.home() / ".gostforge" / "autofix" / f"after-{int(time.time())}"
+        rid_to_path = extract_embedded_images(tmp_path, images_dir)
+        if rid_to_path:
+            embed_images_as_data_uri_in_state(new_state, rid_to_path)
     except Exception as exc:
         st.error(f"Не удалось применить автофиксы: {exc}")
         return
@@ -3969,6 +4278,71 @@ def _render_section_validation_panel(section: dict[str, Any], idx: int) -> None:
             )
 
 
+def _render_section_numbering_override_panel(section: dict[str, Any], sec_id: str) -> None:
+    """Панель «Нумерация рисунков и таблиц в этом разделе».
+
+    Позволяет переопределить схему нумерации (`continuous` /
+    `by_chapter`) только для этого раздела. Дополнительно — ручной
+    префикс главы, который перекрывает автоматический счётчик
+    (1, 2, 3…). Полезно, когда в работе есть «Содержание» и
+    «Введение» — они попадают в счётчик глав и сбивают нумерацию;
+    пользователь задаёт префикс вручную («В», «А», «Глава 1»).
+    """
+    section.setdefault("figure_numbering_override", None)
+    section.setdefault("table_numbering_override", None)
+    section.setdefault("chapter_label_override", "")
+
+    # Маппинг для UI selectbox: внутреннее значение -> метка.
+    options: list[str | None] = [None, "continuous", "by_chapter"]
+    labels = {
+        None: "По профилю",
+        "continuous": "Сквозная (1, 2, 3, …)",
+        "by_chapter": "По главе (1.1, 1.2, 2.1, …)",
+    }
+
+    with st.expander("Нумерация рисунков и таблиц в этом разделе", expanded=False):
+        st.caption(
+            "По умолчанию схема нумерации берётся из профиля. "
+            "Здесь можно переопределить её только для этого раздела."
+        )
+        fig_current = section.get("figure_numbering_override")
+        tbl_current = section.get("table_numbering_override")
+        if fig_current not in options:
+            fig_current = None
+        if tbl_current not in options:
+            tbl_current = None
+        new_fig = st.selectbox(
+            "Нумерация рисунков",
+            options=options,
+            index=options.index(fig_current),
+            format_func=lambda v: labels[v],
+            key=f"sec_fig_num_{sec_id}",
+        )
+        new_tbl = st.selectbox(
+            "Нумерация таблиц",
+            options=options,
+            index=options.index(tbl_current),
+            format_func=lambda v: labels[v],
+            key=f"sec_tbl_num_{sec_id}",
+        )
+        section["figure_numbering_override"] = new_fig
+        section["table_numbering_override"] = new_tbl
+
+        # Ручной префикс главы — применяется только при by_chapter.
+        new_prefix = st.text_input(
+            "Свой префикс главы (например, «А», «В», «1»)",
+            value=str(section.get("chapter_label_override") or ""),
+            key=f"sec_chapter_label_{sec_id}",
+            help=(
+                "Применяется только при нумерации «По главе». Перебивает "
+                "автоматический счётчик (1, 2, 3…), который включает в себя "
+                "разделы вроде «Содержание» / «Введение». Оставьте пустым "
+                "для автоматики."
+            ),
+        )
+        section["chapter_label_override"] = new_prefix.strip()
+
+
 def _render_active_section_editor() -> None:
     """Редактор активного раздела: heading, блоки, подразделы, references."""
     state = _get_state()
@@ -4045,6 +4419,7 @@ def _render_active_section_editor() -> None:
                 st.rerun()
 
     _render_section_validation_panel(section, idx)
+    _render_section_numbering_override_panel(section, sec_id)
 
     if section.get("is_bibliography"):
         _render_references_editor(section, idx)
@@ -4096,16 +4471,109 @@ def _render_single_section_pdf_preview(section: dict[str, Any], idx: int) -> Non
 
 
 def _render_blocks_editor(blocks: list[dict[str, Any]], *, key_prefix: str) -> None:
-    """Отрисовать редакторы для каждого блока списка."""
+    """Отрисовать редакторы для каждого блока списка.
+
+    Поддерживает опциональный drag-and-drop переупорядочивания через
+    ``streamlit-sortables`` (toggle над списком, по умолчанию выкл).
+    Когда DnD активен — блоки рендерятся как переcтавляемые метки
+    без expander-ов; редактор открывается через переключение в
+    обычный режим. Это компромисс: streamlit-sortables работает со
+    строками, expander-ы не пересаживаются.
+    """
     if not blocks:
         st.caption("Блоков пока нет — добавьте кнопками ниже.")
         return
+
+    if _render_blocks_dnd_panel(blocks, key_prefix=key_prefix):
+        return
+
     for b_idx, block in enumerate(blocks):
         with st.expander(
             f"{b_idx + 1}. {_block_label(block)}",
             expanded=False,
         ):
             _render_single_block(block, blocks, b_idx, key_prefix=key_prefix)
+
+
+def _reorder_blocks_by_dnd_items(
+    blocks: list[dict[str, Any]],
+    sorted_items: list[str],
+) -> list[dict[str, Any]] | None:
+    """Чистая функция: переставить ``blocks`` по DnD-итемам ``"#{id}: <label>"``.
+
+    Симметрична :func:`_reorder_sections_by_dnd_items`. Возвращает
+    новый список блоков в нужном порядке, либо ``None`` при
+    нестабильном матчинге (защита от потери блоков).
+    """
+    if len(sorted_items) != len(blocks):
+        return None
+    id_to_index: dict[str, int] = {}
+    for idx, blk in enumerate(blocks):
+        blk_id = blk.get("id")
+        if isinstance(blk_id, str):
+            id_to_index[blk_id] = idx
+    new_blocks: list[dict[str, Any]] = []
+    for item in sorted_items:
+        if not (isinstance(item, str) and item.startswith("#")):
+            return None
+        sep_idx = item.find(": ")
+        if sep_idx < 1:
+            return None
+        blk_id = item[1:sep_idx]
+        if blk_id not in id_to_index:
+            return None
+        new_blocks.append(blocks[id_to_index[blk_id]])
+    if len(new_blocks) != len(blocks):
+        return None
+    return new_blocks
+
+
+def _render_blocks_dnd_panel(blocks: list[dict[str, Any]], *, key_prefix: str) -> bool:
+    """Toggle + DnD переупорядочивания блоков внутри раздела.
+
+    Возвращает ``True``, если DnD-режим активен и список уже
+    отрисован — вызывающий пропускает классический рендер expander-ов.
+    """
+    enabled = st.toggle(
+        "Drag-and-drop блоков",
+        value=bool(st.session_state.get(f"blocks_dnd_{key_prefix}", False)),
+        key=f"blocks_dnd_{key_prefix}_toggle",
+        help=(
+            "Перетаскивайте блоки мышкой вместо ↑/↓. В DnD-режиме "
+            "expander-ы редактирования закрыты — выключите toggle, "
+            "чтобы вернуться к правке содержимого."
+        ),
+    )
+    st.session_state[f"blocks_dnd_{key_prefix}"] = enabled
+    if not enabled:
+        return False
+
+    try:
+        from streamlit_sortables import sort_items
+    except ImportError:
+        st.warning(
+            "Модуль `streamlit-sortables` не установлен. Установите "
+            "`gostforge[ui]` или `pip install streamlit-sortables`, "
+            "либо снимите toggle «Drag-and-drop блоков»."
+        )
+        return False
+
+    # Гарантируем id у каждого блока (нужен для матчинга).
+    items: list[str] = []
+    for b_idx, blk in enumerate(blocks):
+        blk_id = blk.setdefault("id", _new_block_id())
+        items.append(f"#{blk_id}: {b_idx + 1}. {_block_label(blk)}")
+
+    sorted_items = sort_items(items, direction="vertical", key=f"blocks_dnd_{key_prefix}_sortable")
+    if not isinstance(sorted_items, list) or sorted_items == items:
+        return True
+
+    new_blocks = _reorder_blocks_by_dnd_items(blocks, sorted_items)
+    if new_blocks is None:
+        return True
+    blocks[:] = new_blocks
+    st.rerun()
+    return True
 
 
 def _paragraph_text_only(block: dict[str, Any]) -> str:
@@ -4185,6 +4653,66 @@ def _block_label(block: dict[str, Any]) -> str:
     return f"Блок: {kind}"
 
 
+def _render_paragraph_wysiwyg_editor(
+    block: dict[str, Any],
+    runs: list[dict[str, Any]],
+    *,
+    base: str,
+) -> bool:
+    """Отрисовать WYSIWYG-редактор параграфа через streamlit-quill.
+
+    Возвращает ``True``, если WYSIWYG-режим активен и редактор уже
+    отрисован (вызывающий должен пропустить старый per-run рендер).
+    ``False`` — режим выключен пользователем или streamlit-quill
+    недоступен, нужно идти классическим путём.
+
+    Toggle хранится в state по ключу ``wysiwyg_<base>`` — выключен по
+    умолчанию, потому что это β-фича. На каждое изменение HTML
+    конвертируется в text-run-ы и сохраняется в ``block["runs"]``.
+    """
+    toggle_key = f"{base}_wysiwyg_toggle"
+    enabled = st.toggle(
+        "WYSIWYG-режим (β)",
+        value=bool(st.session_state.get(toggle_key, False)),
+        key=toggle_key,
+        help=(
+            "Включить визуальное форматирование текста (bold / italic / "
+            "underline) через панель Quill. Формулы / ссылки / цитаты "
+            "в WYSIWYG не поддерживаются — выключите toggle, если они "
+            "вам нужны в этом параграфе."
+        ),
+    )
+    if not enabled:
+        return False
+
+    try:
+        from streamlit_quill import st_quill  # type: ignore[import-untyped]
+    except ImportError:
+        st.warning(
+            "Модуль `streamlit-quill` не установлен. Установите "
+            "`gostforge[ui]` или `pip install streamlit-quill`, "
+            "либо снимите toggle «WYSIWYG-режим»."
+        )
+        return False
+
+    initial_html = _runs_to_html(runs)
+    new_html = st_quill(
+        value=initial_html,
+        placeholder="Введите текст параграфа…",
+        html=True,
+        toolbar=[["bold", "italic", "underline"], ["clean"]],
+        key=f"{base}_quill",
+    )
+    if isinstance(new_html, str) and new_html != initial_html:
+        # Сохраняем стабильные id у уцелевших run-ов: матчинг по
+        # порядку — Quill не выдаёт «идентичность» текста после
+        # форматирования, так что переноса id точечно нет смысла.
+        # Для UI достаточно, что block["runs"] заменяется новым
+        # списком и Streamlit перерисовывает виджеты по новым ключам.
+        block["runs"] = _html_to_runs(new_html)
+    return True
+
+
 def _render_paragraph_inline_editor(block: dict[str, Any], *, base: str) -> None:
     """Inline-редактор параграфа: список run-ов + панель добавления (Фаза 2.5).
 
@@ -4195,11 +4723,20 @@ def _render_paragraph_inline_editor(block: dict[str, Any], *, base: str) -> None
 
     Внизу — четыре кнопки добавления: + Текст, + Формула, + Ссылка,
     + Цитата. Каждая добавляет stub-run и триггерит rerun.
+
+    Опциональный WYSIWYG-режим (β): toggle переключает редактор на
+    встроенный Quill — пользователь печатает и форматирует мышкой /
+    Ctrl+B/I/U. Доступен только если все элементы — text-run (формулы
+    / ссылки / цитаты в Quill не поддерживаются).
     """
     # Гарантируем что block в формате runs (нормализация на месте).
     _normalize_paragraph_state(block)
     runs: list[dict[str, Any]] = block.setdefault("runs", [])
     state = _get_state()
+
+    only_text = all(r.get("kind", "text") == "text" for r in runs)
+    if only_text and _render_paragraph_wysiwyg_editor(block, runs, base=base):
+        return
 
     if not runs:
         st.caption("Параграф пуст — добавьте элементы кнопками ниже.")
@@ -4484,6 +5021,170 @@ def _render_move_block_to_section_panel(section: dict[str, Any], sec_idx: int) -
             state, sec_idx, int(b_idx), int(tgt)
         ):
             st.rerun()
+
+
+def _render_table_block_editor(block: dict[str, Any], *, base: str) -> None:
+    """Визуальный редактор табличного блока.
+
+    Главная зона редактирования — ``st.data_editor`` с
+    ``num_rows="dynamic"``: ячейки правятся inline, строки добавляются
+    через «+»-кнопку snapshot-а внизу, можно вставить блок из Excel /
+    LibreOffice через Ctrl+V. По умолчанию открывается именно этот
+    режим — он стал стандартом UI после roadmap Q2/2026.
+
+    Шапка (``headers``) остаётся как простой ``text_input`` через
+    запятую — таблицы редко имеют 10+ колонок, и для 2-5 это
+    компактнее. Доп. шапка (``extra_header_rows`` для многоуровневой)
+    тоже остаётся текстовой, потому что в ней нужна склейка ячеек
+    через пустые места — это сложно выразить в data_editor.
+
+    Toggle «Сырой текстовый режим» — fallback для опытных
+    пользователей, которые хотят paste-нуть pipe-separated блок.
+    """
+    headers_str = ",".join(block.get("headers") or [])
+    new_headers = st.text_input(
+        "Заголовки колонок (через запятую)",
+        value=headers_str,
+        key=f"{base}_headers",
+        help=(
+            "Пример: «Параметр, Значение, Единица». Запятая внутри названия "
+            "колонки не поддерживается — переименуйте."
+        ),
+    )
+    headers = [h.strip() for h in new_headers.split(",") if h.strip()]
+    block["headers"] = headers
+
+    # Доп. шапка (двух/трёх-уровневая по ГОСТ Р 2.105) — остаётся
+    # текстовой: склейка ячеек через пустые места проще задаётся
+    # символами «|», чем кликабельным интерфейсом.
+    extra_rows_str = "\n".join("|".join(row) for row in (block.get("extra_header_rows") or []))
+    new_extra = st.text_area(
+        "Доп. шапка над заголовками (опц., ячейки через «|»)",
+        value=extra_rows_str,
+        key=f"{base}_extra_headers",
+        height=80,
+        help=(
+            "Для многоуровневой шапки. Пример: «Группа 1||Группа 2|» — "
+            "«Группа 1» займёт 2 колонки и «Группа 2» — следующие 2. "
+            "Каждая строка — отдельный ряд шапки сверху вниз."
+        ),
+    )
+    parsed_extra: list[list[str]] = []
+    for line in new_extra.splitlines():
+        if not line.strip():
+            continue
+        parsed_extra.append([cell.strip() for cell in line.split("|")])
+    block["extra_header_rows"] = parsed_extra
+    block["merges"] = _auto_merges_from_extra_header_rows(parsed_extra)
+
+    if parsed_extra:
+        data_sample = (block.get("rows") or [[]])[0] if block.get("rows") else None
+        preview_html = _build_multi_header_preview_html(
+            extra_rows=parsed_extra,
+            headers=block.get("headers") or [],
+            merges=block.get("merges") or [],
+            data_sample=data_sample,
+        )
+        if preview_html:
+            st.caption("Превью шапки:")
+            st.markdown(preview_html, unsafe_allow_html=True)
+
+    # Без заголовков визуальный редактор бесполезен.
+    if not headers:
+        st.info(
+            "Сначала укажите заголовки колонок выше — после этого появится "
+            "визуальный редактор строк."
+        )
+    else:
+        ncols = len(headers)
+        # Подгоняем существующие строки под количество колонок (могло
+        # измениться после добавления/удаления заголовка).
+        adjusted: list[list[str]] = []
+        for r in block.get("rows") or []:
+            rr = [str(c) for c in (r or [])]
+            if len(rr) < ncols:
+                rr = rr + [""] * (ncols - len(rr))
+            elif len(rr) > ncols:
+                rr = rr[:ncols]
+            adjusted.append(rr)
+
+        use_raw = st.toggle(
+            "Сырой текстовый режим (для copy-paste большой таблицы)",
+            key=f"{base}_raw_toggle",
+            value=False,
+            help="Включите, чтобы редактировать строки в pipe-separated формате.",
+        )
+
+        if use_raw:
+            rows_str = "\n".join("|".join(row) for row in adjusted)
+            new_rows = st.text_area(
+                "Строки таблицы (одна строка ввода = одна строка таблицы; ячейки через «|»)",
+                value=rows_str,
+                key=f"{base}_rows_raw",
+                height=140,
+            )
+            parsed_rows: list[list[str]] = []
+            for line in new_rows.splitlines():
+                if not line.strip():
+                    continue
+                cells = [c.strip() for c in line.split("|")]
+                if len(cells) < ncols:
+                    cells = cells + [""] * (ncols - len(cells))
+                elif len(cells) > ncols:
+                    cells = cells[:ncols]
+                parsed_rows.append(cells)
+            block["rows"] = parsed_rows
+        else:
+            _render_table_data_editor(block, base=base, headers=headers, rows=adjusted)
+
+    block["caption"] = st.text_input(
+        "Подпись таблицы",
+        value=block.get("caption", ""),
+        key=f"{base}_caption",
+    )
+
+
+def _render_table_data_editor(
+    block: dict[str, Any],
+    *,
+    base: str,
+    headers: list[str],
+    rows: list[list[str]],
+) -> None:
+    """Подсекция: ``st.data_editor`` для основных строк таблицы.
+
+    Отделена в свою функцию, чтобы импорт pandas не падал на ImportError
+    в окружении без UI-зависимостей: если pandas нет (например,
+    pip-установка без ``[ui]``-extra), показываем предупреждение и
+    падаем на raw-режим.
+    """
+    try:
+        import pandas as pd  # type: ignore[import-untyped]
+    except ImportError:  # pragma: no cover - pandas идёт в streamlit
+        st.warning(
+            "pandas недоступен — переключитесь в «Сырой текстовый режим». "
+            "Обычно pandas ставится автоматически вместе со streamlit."
+        )
+        return
+
+    ncols = len(headers)
+    # Стартуем хотя бы с одной пустой строкой, чтобы data_editor не
+    # выглядел заброшенным.
+    if not rows:
+        rows = [[""] * ncols]
+
+    df = pd.DataFrame(rows, columns=headers)
+    edited = st.data_editor(
+        df,
+        num_rows="dynamic",
+        use_container_width=True,
+        key=f"{base}_rows_grid",
+        column_config={name: st.column_config.TextColumn(name) for name in headers},
+    )
+    block["rows"] = [
+        ["" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v) for v in row]
+        for row in edited.values.tolist()
+    ]
 
 
 def _render_single_block(
@@ -5035,11 +5736,18 @@ def _render_generate_button() -> None:
     )
 
     cols = st.columns(2)
-    do_generate = cols[0].button("Сгенерировать .docx", key="builder_generate")
+    # Primary-кнопка: главное действие страницы «Экспорт».
+    do_generate = cols[0].button(
+        "Сгенерировать .docx",
+        key="builder_generate",
+        type="primary",
+        use_container_width=True,
+    )
     do_preview = cols[1].button(
         "Сгенерировать + превью PDF",
         key="builder_generate_preview",
         help="Требует LibreOffice. Превращает .docx → .pdf для просмотра в браузере.",
+        use_container_width=True,
     )
 
     if not (do_generate or do_preview):
@@ -5069,6 +5777,8 @@ def _render_generate_button() -> None:
         file_name="work.docx",
         mime=("application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
         key="builder_download_docx",
+        type="primary",
+        use_container_width=True,
     )
     # Markdown / HTML — те же функции, что у CLI export-md/export-html.
     from gostforge.cli import _state_to_html, _state_to_markdown

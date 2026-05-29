@@ -27,6 +27,52 @@ styles:
     first_line_indent_cm: 1.25
     alignment: justify
     hyphenation: false
+  table:
+    # Ячейки таблиц по ГОСТу 7.32 / Р 2.105 — кегль 12 pt (на 2 меньше body),
+    # одинарный интервал, без красной строки и без интервалов между параграфами.
+    cell_font: Times New Roman
+    cell_size_pt: 12.0
+    cell_line_spacing: 1.0
+    cell_first_line_indent_cm: 0.0
+    cell_space_before_pt: 0.0
+    cell_space_after_pt: 0.0
+    cell_alignment: left
+    header_alignment: center
+    header_bold: true
+    # Сквозная нумерация: «Таблица 1», «Таблица 2», ... . Переключить
+    # на «по главам» (Таблица 1.1, 1.2, 2.1) — `numbering: by_chapter`.
+    # В приложениях нумерация всегда буквенная (А.1, Б.1) независимо
+    # от режима.
+    numbering: continuous
+    # ГОСТ 7.32: шапка таблицы повторяется на continuation-страницах.
+    repeat_header: true
+    # «Продолжение таблицы N» как первая строка таблицы (по ГОСТ 7.32 —
+    # обязательно при переносе на следующую страницу). Чисто-OOXML
+    # способа показывать строку только на 2+ странице нет, поэтому на
+    # page 1 она показывается тоже, рядом с обычной подписью «Таблица
+    # N — Title» над таблицей. Это компромисс — отключить можно через
+    # редактор профиля, если кафедра не требует.
+    continuation_caption: true
+    caption:
+      alignment: left
+      position: above
+      format: "Таблица {num} — {title}"
+      keep_with_next: true
+  figure:
+    alignment: center
+    max_width_cm: 16.5
+    # Высота ограничена 22 см, чтобы подпись не съезжала на следующую
+    # страницу (A4 минус поля минус место под подпись).
+    max_height_cm: 22.0
+    # «По умолчанию сквозная. Переключите на by_chapter для
+    # «Рисунок 1.1, 1.2, 2.1». В приложениях — всегда буквенно.
+    numbering: continuous
+    keep_with_next: true
+    caption:
+      alignment: center
+      position: below
+      format: "Рисунок {num} — {title}"
+      keep_with_next: true
   extra:
     caption_size_pt: 12
     footnote_size_pt: 10
@@ -213,6 +259,10 @@ checks:
         - studwood.net
         - studfile.net
   R.14: {enabled: true}   # формат DOI и URL
+  # R.15 — опциональная HTTP-проверка доступности URL. По умолчанию
+  # выключена: требует доступа к сети и заметно замедляет проверку.
+  # Включить вручную перед финальной сдачей: enabled: true.
+  R.15: {enabled: false, params: {timeout: 5.0, max_urls: 50}}
   C.01: {enabled: true}
   C.02: {enabled: true}
   C.03: {enabled: true}

@@ -20,10 +20,67 @@ from gostforge.profile import Profile
 from ..engine import Violation, register
 
 # Формат подписи таблицы по ГОСТ 7.32-2017: «Таблица N — Название».
+#
+# Используется как back-compat fallback, если профильный
+# `styles.table.caption.format` не содержит плейсхолдеров `{num}`/`{title}`
+# (либо пуст). По умолчанию же regex собирается из формата профиля
+# через `_build_caption_regex`.
 _TABLE_CAPTION_RE = re.compile(r"^Таблица\s+\d+(?:\.\d+)?\s+[—–-]\s+\S")
 
 # Альтернативный вариант: «Таблица 1. Название».
 _TABLE_CAPTION_DOT_RE = re.compile(r"^Таблица\s+\d+(?:\.\d+)?\.\s+\S")
+
+# Регекс для номера в подписи: «1», «1.2», «А.1», «Б.2.3» и т. п.
+_NUM_PATTERN = r"(?:\d+(?:\.\d+)*|[А-Я]\.\d+(?:\.\d+)*)"
+
+# Регекс для заголовка («Название»).
+_TITLE_PATTERN = r".+?"
+
+# Символы тире, которые мы считаем взаимозаменяемыми в статических частях
+# формата (em-dash, en-dash, hyphen-minus). В реальных подписях часто
+# подменяют длинное тире коротким или дефисом — это «soft»-нарушение.
+# Регекс матчит ИМЕННО эскейпленную форму (после `re.escape` hyphen
+# становится `\\-`), чтобы один проход подмены не задевал уже
+# подставленные `[…]`.
+_ESCAPED_DASH_RE = re.compile(r"—|–|\\-")
+_DASH_ALT = "[—–-]"
+
+
+def _build_caption_regex(format_str: str) -> re.Pattern[str] | None:
+    """Построить регекс по format-строке профиля.
+
+    Подставляет вместо плейсхолдеров `{num}` и `{title}` соответствующие
+    подвыражения, а статические участки экранирует через `re.escape` и
+    дополнительно делает тире-символы взаимозаменяемыми (em/en/hyphen).
+    Анкорится `^` от начала строки и `\\s*$` в конце.
+
+    Возвращает None, если в `format_str` нет хотя бы одного из
+    плейсхолдеров `{num}`/`{title}` (или строка пуста) — это сигнал
+    вызывающему коду перейти на fallback-поведение.
+    """
+    if not format_str:
+        return None
+    if "{num}" not in format_str or "{title}" not in format_str:
+        return None
+
+    parts = re.split(r"(\{num\}|\{title\})", format_str)
+    pieces: list[str] = []
+    for part in parts:
+        if part == "{num}":
+            pieces.append(_NUM_PATTERN)
+        elif part == "{title}":
+            pieces.append(_TITLE_PATTERN)
+        elif part == "":
+            continue
+        else:
+            escaped = re.escape(part)
+            # Один проход подмены, чтобы уже вставленный `[—–-]` не попал
+            # под повторную замену (иначе получится вложенный класс).
+            escaped = _ESCAPED_DASH_RE.sub(_DASH_ALT, escaped)
+            pieces.append(escaped)
+
+    pattern = "^" + "".join(pieces) + r"\s*$"
+    return re.compile(pattern)
 
 
 def _iter_tables(items: Sequence[LogicalSection | Block]) -> list[Table]:
@@ -130,12 +187,21 @@ def _caption_text(elements: Sequence[InlineElement]) -> str:
 
 @register("B.03")
 def check_table_caption_format(document: Document, profile: Profile) -> list[Violation]:
-    """Подпись таблицы должна быть в формате «Таблица N — Название».
+    """Подпись таблицы должна соответствовать формату из профиля.
+
+    Ожидаемый формат берётся из `profile.styles.table.caption.format`
+    (по умолчанию `"Таблица {num} — {title}"`). Из format-строки
+    собирается регекс: плейсхолдер `{num}` → номер вида «1», «1.2»,
+    «А.1»; `{title}` → любой непустой текст; статические участки
+    экранируются и дополнительно делают тире/дефис взаимозаменяемыми.
 
     Параметры:
     - `allow_dot_after_number` (bool, default False): если True, также
-      принимается «Таблица 1. Название».
+      принимается «Таблица 1. Название» — back-compat для существующих
+      профилей-наследников.
 
+    Back-compat: если в `caption.format` нет плейсхолдеров `{num}`/`{title}`
+    (или строка пуста), используется зашитый regex прежнего поведения.
     Пустые подписи не проверяются — это случай B.01.
     """
     violations: list[Violation] = []
@@ -144,12 +210,17 @@ def check_table_caption_format(document: Document, profile: Profile) -> list[Vio
     if config and config.params.get("allow_dot_after_number") is not None:
         allow_dot = bool(config.params["allow_dot_after_number"])
 
+    expected_format = profile.styles.table.caption.format or ""
+    format_regex = _build_caption_regex(expected_format)
+    primary_regex = format_regex if format_regex is not None else _TABLE_CAPTION_RE
+    expected_msg = expected_format if format_regex is not None else "Таблица N — Название"
+
     for page_section, table in _all_tables(document):
         text = _caption_text(table.caption)
         if not text:
             # Пустая подпись — это B.01, не дублируем.
             continue
-        if _TABLE_CAPTION_RE.match(text):
+        if primary_regex.match(text):
             continue
         if allow_dot and _TABLE_CAPTION_DOT_RE.match(text):
             continue
@@ -158,13 +229,18 @@ def check_table_caption_format(document: Document, profile: Profile) -> list[Vio
                 check_code="B.03",
                 severity="error",
                 message=(
-                    f"Подпись таблицы «{text}» не соответствует формату «Таблица N — Название»"
+                    f"Подпись таблицы «{text}» не соответствует ожидаемому формату «{expected_msg}»"
                 ),
                 location=f"page_sections.{page_section.id}.table[{table.id}]",
                 suggestion=(
-                    "Использовать формат «Таблица 1 — Название» (длинное тире —, не дефис)"
+                    "Привести подпись к формату из профиля "
+                    "или изменить `styles.table.caption.format`"
                 ),
-                details={"table_id": table.id, "caption": text},
+                details={
+                    "table_id": table.id,
+                    "caption": text,
+                    "expected_format": expected_msg,
+                },
             )
         )
     return violations

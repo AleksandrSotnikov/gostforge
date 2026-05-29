@@ -251,3 +251,129 @@ def test_post_check_without_file_returns_422(client: TestClient) -> None:
     """FastAPI validation: отсутствие required file → 422."""
     r = client.post("/check", data={"profile_id": "gost-7.32-2017"})
     assert r.status_code == 422
+
+
+# --- /check/stream (SSE) ---------------------------------------------------
+
+
+def _parse_sse_stream(text: str) -> list[tuple[str, dict[str, object]]]:
+    """Распарсить SSE-поток в список (event_name, json_payload).
+
+    SSE-фрейм:
+        event: <name>
+        data: <json>
+
+        (пустая строка = разделитель)
+    """
+    import json
+
+    events: list[tuple[str, dict[str, object]]] = []
+    for block in text.split("\n\n"):
+        block = block.strip()
+        if not block:
+            continue
+        event_name = ""
+        data_str = ""
+        for line in block.splitlines():
+            if line.startswith("event: "):
+                event_name = line[7:].strip()
+            elif line.startswith("data: "):
+                data_str = line[6:]
+        if event_name:
+            payload = json.loads(data_str) if data_str else {}
+            events.append((event_name, payload))
+    return events
+
+
+def test_post_check_stream_happy_path(client: TestClient, docx_bytes: bytes) -> None:
+    """`/check/stream` стримит события parse → check×N → done."""
+    files = {"file": ("sample.docx", docx_bytes, "application/octet-stream")}
+    r = client.post("/check/stream", files=files, data={"profile_id": "gost-7.32-2017"})
+    assert r.status_code == 200
+    assert "text/event-stream" in r.headers.get("content-type", "")
+    events = _parse_sse_stream(r.text)
+    names = [name for name, _ in events]
+    assert names[0] == "parse", f"Первое событие должно быть parse, получили {names[0]}"
+    assert names[-1] == "done", f"Последнее событие должно быть done, получили {names[-1]}"
+    # Между ними — хотя бы одно событие check.
+    assert "check" in names, f"Ожидался хотя бы один check-event; всего: {names}"
+
+
+def test_post_check_stream_check_events_have_progress(
+    client: TestClient, docx_bytes: bytes
+) -> None:
+    """Каждое `check`-событие содержит code/index/total для прогресс-бара."""
+    files = {"file": ("sample.docx", docx_bytes, "application/octet-stream")}
+    r = client.post("/check/stream", files=files, data={"profile_id": "gost-7.32-2017"})
+    events = _parse_sse_stream(r.text)
+    check_events = [(name, payload) for name, payload in events if name == "check"]
+    assert check_events, "Должен быть хотя бы один check-event"
+    for _, payload in check_events:
+        assert "code" in payload and isinstance(payload["code"], str)
+        assert "index" in payload and isinstance(payload["index"], int)
+        assert "total" in payload and isinstance(payload["total"], int)
+        assert payload["index"] < payload["total"]
+
+
+def test_post_check_stream_done_event_has_summary(client: TestClient, docx_bytes: bytes) -> None:
+    """`done` содержит violations и summary, как у обычного `/check`."""
+    files = {"file": ("sample.docx", docx_bytes, "application/octet-stream")}
+    r = client.post("/check/stream", files=files, data={"profile_id": "gost-7.32-2017"})
+    events = _parse_sse_stream(r.text)
+    done = [payload for name, payload in events if name == "done"]
+    assert len(done) == 1
+    assert "violations" in done[0]
+    assert "summary" in done[0]
+    summary = done[0]["summary"]
+    assert isinstance(summary, dict)
+    assert {"error", "warning", "info"} <= set(summary)
+
+
+def test_post_check_stream_rejects_non_docx(client: TestClient) -> None:
+    """Не-.docx файл — 400 до старта стрима (валидация в _read_docx_upload)."""
+    r = client.post(
+        "/check/stream",
+        files={"file": ("bad.txt", b"hello", "text/plain")},
+    )
+    assert r.status_code == 400
+
+
+def test_post_check_stream_unknown_profile_returns_404(
+    client: TestClient, docx_bytes: bytes
+) -> None:
+    """Несуществующий profile_id — 404 до старта стрима."""
+    files = {"file": ("sample.docx", docx_bytes, "application/octet-stream")}
+    r = client.post(
+        "/check/stream",
+        files=files,
+        data={"profile_id": "nonexistent-profile-99"},
+    )
+    assert r.status_code == 404
+
+
+# --- validator.engine.validate_iter (unit) ----------------------------------
+
+
+def test_validate_iter_yields_check_events_then_done() -> None:
+    """`validate_iter` yields check-события по очереди и финальный done."""
+    from gostforge.profile import load_profile
+    from gostforge.validator.engine import validate_iter
+
+    from .conftest import make_docx
+
+    p = Path("/tmp/sample_for_iter_test.docx")
+    make_docx(p, paragraphs=["Параграф."])
+    from gostforge.parser import parse_docx
+
+    document = parse_docx(p)
+    profile = load_profile("gost-7.32-2017")
+
+    events = list(validate_iter(document, profile))
+    check_events = [e for e in events if e[0] == "check"]
+    done_events = [e for e in events if e[0] == "done"]
+    assert check_events, "Должен быть хотя бы один check-event"
+    assert len(done_events) == 1
+    # check.index растёт от 0 до total-1.
+    indices = [e[2] for e in check_events]
+    assert indices == sorted(indices)
+    assert all(0 <= idx < e[3] for idx, e in zip(indices, check_events, strict=True))

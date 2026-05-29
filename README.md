@@ -157,12 +157,13 @@
 | `convert` | Конвертация форматов через LibreOffice (DOC→DOCX) |
 | `pdf` | `.docx` → PDF |
 | `diff` / `diff-state` | Сравнение submission-ов или state-файлов |
-| `stats` / `stats-state` | Метрики структуры |
+| `stats [--by-section] [--json]` / `stats-state` | Метрики структуры |
 | `state-versions` | Список и восстановление авто-версий state |
 | `ui` | Streamlit-WebApp |
 | `serve` | REST API на FastAPI |
 | `history` | Submission-ы из локальной БД |
 | `checks` | Список всех проверок |
+| `doctor [--json]` | Диагностика окружения: версии deps, профили, LibreOffice |
 | `profiles list/show/install/uninstall/validate/diff` | Управление профилями |
 | `comment add/list/resolve/delete` | Комментарии руководитель↔студент |
 | `plugins list/dir` | Управление пользовательскими плагинами проверок |

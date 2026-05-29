@@ -429,6 +429,34 @@ def _edit_caption(cap: dict[str, Any], prefix: str) -> None:
 
 def _edit_table(data: dict[str, Any]) -> None:
     t = data["styles"]["table"]
+    st.markdown("##### Нумерация и оформление шапки")
+    t["numbering"] = _select(
+        "Схема нумерации таблиц",
+        _NUMBERING_MODES,
+        t.get("numbering", "continuous"),
+        "pe_tb_num",
+        format_func=lambda v: _NUMBERING_LABELS.get(v, v),
+    )
+    st.caption(
+        "В приложениях («Приложение А», «Приложение Б», ...) "
+        "нумерация всегда буквенная (А.1, А.2, Б.1) независимо от выбора."
+    )
+    t["repeat_header"] = st.checkbox(
+        "Повторять шапку при переносе на новую страницу",
+        value=t.get("repeat_header", True),
+        key="pe_tb_repeat_h",
+        help="ГОСТ 7.32: шапка таблицы должна повторяться на каждой continuation-странице.",
+    )
+    t["continuation_caption"] = st.checkbox(
+        "Добавлять строку «Продолжение таблицы N»",
+        value=t.get("continuation_caption", False),
+        key="pe_tb_cont_cap",
+        help=(
+            "Word покажет строку и на первой странице, и на continuation. "
+            "Чисто-OOXML способа показывать её только на 2+ странице нет."
+        ),
+    )
+    st.markdown("##### Рамки и шрифт")
     t["border_style"] = _select("Стиль рамок", _BORDER, t["border_style"], "pe_tb_border")
     t["border_size"] = int(
         st.number_input(
@@ -461,28 +489,6 @@ def _edit_table(data: dict[str, Any]) -> None:
     t["header_alignment"] = _select(
         "Выравнивание шапки", _ALIGN_FULL, t["header_alignment"], "pe_tb_halign"
     )
-    t["numbering"] = _select(
-        "Нумерация таблиц",
-        _NUMBERING_MODES,
-        t.get("numbering", "continuous"),
-        "pe_tb_num",
-        format_func=lambda v: _NUMBERING_LABELS.get(v, v),
-    )
-    t["repeat_header"] = st.checkbox(
-        "Повторять шапку при переносе на новую страницу",
-        value=t.get("repeat_header", True),
-        key="pe_tb_repeat_h",
-        help="ГОСТ 7.32: шапка таблицы должна повторяться на каждой continuation-странице.",
-    )
-    t["continuation_caption"] = st.checkbox(
-        "Добавлять строку «Продолжение таблицы N»",
-        value=t.get("continuation_caption", False),
-        key="pe_tb_cont_cap",
-        help=(
-            "Word покажет строку и на первой странице, и на continuation. "
-            "Чисто-OOXML способа показывать её только на 2+ странице нет."
-        ),
-    )
     t["cell_alignment"] = _select(
         "Выравнивание ячеек", _ALIGN_FULL, t["cell_alignment"], "pe_tb_calign"
     )
@@ -500,7 +506,23 @@ def _edit_table(data: dict[str, Any]) -> None:
 
 def _edit_figure(data: dict[str, Any]) -> None:
     f = data["styles"]["figure"]
+    st.markdown("##### Нумерация и расположение")
+    f["numbering"] = _select(
+        "Схема нумерации рисунков",
+        _NUMBERING_MODES,
+        f.get("numbering", "continuous"),
+        "pe_fig_num",
+        format_func=lambda v: _NUMBERING_LABELS.get(v, v),
+    )
+    st.caption(
+        "В приложениях («Приложение А», «Приложение Б», ...) "
+        "нумерация всегда буквенная (А.1, А.2, Б.1) независимо от выбора."
+    )
     f["alignment"] = _select("Выравнивание рисунка", _ALIGN_FIG, f["alignment"], "pe_fig_align")
+    f["keep_with_next"] = st.checkbox(
+        "Не отрывать рисунок от подписи", value=f["keep_with_next"], key="pe_fig_kwn"
+    )
+    st.markdown("##### Размер")
     f["max_width_cm"] = _num(
         "Макс. ширина (см)", f["max_width_cm"], "pe_fig_mw", step=0.5, min_value=1.0
     )
@@ -510,18 +532,6 @@ def _edit_figure(data: dict[str, Any]) -> None:
         "pe_fig_mh",
         step=0.5,
         min_value=1.0,
-    )
-    # Схема нумерации: «Рисунок 1» (сквозная) или «Рисунок 3.1» (по главам).
-    # В приложениях нумерация всегда буквенная независимо от выбора.
-    f["numbering"] = _select(
-        "Нумерация рисунков",
-        _NUMBERING_MODES,
-        f.get("numbering", "continuous"),
-        "pe_fig_num",
-        format_func=lambda v: _NUMBERING_LABELS.get(v, v),
-    )
-    f["keep_with_next"] = st.checkbox(
-        "Не отрывать рисунок от подписи", value=f["keep_with_next"], key="pe_fig_kwn"
     )
     st.markdown("**Подпись рисунка**")
     _edit_caption(f["caption"], "pe_figcap")
@@ -580,6 +590,56 @@ def _edit_lists(data: dict[str, Any]) -> None:
     )
 
 
+def _edit_check_params(code: str, params: dict[str, Any], prefix: str) -> None:
+    """Редактор params одной проверки. Подбирает widget по типу значения.
+
+    Простые типы — нативные widget-ы (int/float/bool/str). Списки строк —
+    text_area с одним элементом на строке. dict — JSON-editor (редко
+    нужно; пользователь обычно не лезет в такое).
+    """
+    import json
+
+    if not params:
+        st.caption("У этой проверки нет параметров.")
+        return
+    for param_name in sorted(params.keys()):
+        value = params[param_name]
+        widget_key = f"{prefix}_{param_name}"
+        if isinstance(value, bool):
+            params[param_name] = st.checkbox(param_name, value=value, key=widget_key)
+        elif isinstance(value, int) and not isinstance(value, bool):
+            params[param_name] = int(
+                st.number_input(param_name, value=value, step=1, key=widget_key)
+            )
+        elif isinstance(value, float):
+            params[param_name] = float(
+                st.number_input(param_name, value=value, step=0.5, key=widget_key)
+            )
+        elif isinstance(value, str):
+            params[param_name] = st.text_input(param_name, value=value, key=widget_key)
+        elif isinstance(value, list) and all(isinstance(x, str) for x in value):
+            # Список строк → text_area по одному пункту на строке.
+            new_text = st.text_area(
+                f"{param_name} (по одному на строке)",
+                value="\n".join(value),
+                key=widget_key,
+                height=80,
+            )
+            params[param_name] = [line.strip() for line in new_text.splitlines() if line.strip()]
+        else:
+            # Сложный тип (dict / список dict-ов / mixed) → JSON-редактор.
+            text = st.text_area(
+                f"{param_name} (JSON)",
+                value=json.dumps(value, ensure_ascii=False, indent=2),
+                key=widget_key,
+                height=80,
+            )
+            try:
+                params[param_name] = json.loads(text)
+            except json.JSONDecodeError:
+                st.warning(f"`{param_name}`: невалидный JSON — параметр не обновлён.")
+
+
 def _edit_checks(data: dict[str, Any]) -> None:
     checks: dict[str, Any] = data.get("checks") or {}
     if not checks:
@@ -587,7 +647,8 @@ def _edit_checks(data: dict[str, Any]) -> None:
         return
     st.caption(
         "Включение/выключение проверок и их важность. «(по профилю)» — "
-        "оставить severity, заданную в самой проверке."
+        "оставить severity, заданную в самой проверке. Раскройте код "
+        "проверки, чтобы отредактировать её параметры (`params`)."
     )
     rows: list[dict[str, Any]] = []
     for code in sorted(checks):
@@ -618,6 +679,20 @@ def _edit_checks(data: dict[str, Any]) -> None:
         checks[code]["enabled"] = bool(row["Включена"])
         sev = row["Важность"]
         checks[code]["severity"] = None if sev == _SEVERITY_DISPLAY[0] else sev
+
+    # Редактор params для каждой проверки, у которой они есть.
+    # Сворачиваем по умолчанию — params обычно меняют редко, не должны
+    # перегружать вкладку.
+    checks_with_params = sorted(c for c in checks if checks[c].get("params"))
+    if checks_with_params:
+        st.markdown("### Параметры проверок")
+        st.caption(
+            f"У {len(checks_with_params)} проверок есть настраиваемые параметры. "
+            "Раскрывайте по одной, чтобы изменить."
+        )
+        for code in checks_with_params:
+            with st.expander(f"`{code}` — параметры", expanded=False):
+                _edit_check_params(code, checks[code]["params"], prefix=f"pe_p_{code}")
 
 
 # --- Точка входа режима -----------------------------------------------------
@@ -659,14 +734,57 @@ def _render_installed_profiles() -> None:
 
 
 def render_profile_editor() -> None:
-    """Главный рендер режима «Редактор профиля»."""
+    """Главный рендер режима «Редактор профиля».
+
+    Редактор отвечает только за редактирование параметров профиля и
+    сохранение результата. Управление установленными профилями (список,
+    удаление, загрузка YAML с диска) — отдельная страница
+    «Управление профилями» (`pages/profile_manager.py`).
+    """
     st.title("Редактор профиля форматирования")
     st.caption(
         "Загрузите профиль как основу, измените параметры и сохраните как "
-        "свой профиль. Он появится в списке профилей нормоконтроля и конструктора."
+        "свой профиль. Он появится в списке профилей нормоконтроля и конструктора. "
+        "Список установленных и удаление — на странице «Управление профилями»."
     )
 
-    _render_installed_profiles()
+    # Help-блок: единый стиль с другими страницами веб-UI.
+    with st.expander("ℹ️ Что доступно на этой странице", expanded=False):
+        st.markdown(
+            """
+**Что такое профиль:** именованный YAML-файл с параметрами
+форматирования по конкретному ГОСТу (или нестандартной методичке).
+Список проверок, шрифты, поля страницы, шаблон обязательных
+разделов — всё там.
+
+**Поток работы:**
+
+1. **Базовый профиль** — выберите ближайший подходящий
+   (например, `gost-7.32-2017`) и нажмите «Загрузить параметры».
+2. **9 вкладок** — отредактируйте параметры по разделам:
+   - **Страница** — поля, размер, ориентация, нумерация.
+   - **Основной текст** — шрифт, кегль, интервалы, отступы.
+   - **Заголовки** — стиль заголовков 1/2/3-го уровня.
+   - **Таблицы** — шрифт, кегль ячеек, подпись «Таблица N»,
+     «Продолжение таблицы».
+   - **Рисунки** — подпись «Рисунок N», расположение.
+   - **Списки** — маркеры, пунктуация в концах элементов.
+   - **Проверки** — включить / выключить, изменить `params`
+     каждой из 115 проверок (severity, толерансы, списки слов).
+   - **Шаблон секций** — обязательные разделы работы (для
+     конструктора: «Введение / Глава 1 / Заключение / …»).
+   - **YAML / Сохранить** — итоговый YAML и кнопка сохранения.
+3. **Сохраните** — профиль появится в списке проверки / конструктора.
+
+**Наследование:** ваш профиль хранит только **отличия** от базового
+(`extends: gost-7.32-2017`). Это видно в expander-е «Отличия от
+базового» внизу. Так профиль остаётся коротким и обновляется
+автоматически вместе с базовым.
+
+> Управление установленными профилями (удаление, импорт YAML) —
+> на странице «Управление профилями» в навигации.
+"""
+        )
 
     profiles = list_profiles()
     default_base = (
@@ -705,6 +823,7 @@ def render_profile_editor() -> None:
             "Рисунки",
             "Списки",
             "Проверки",
+            "Шаблон секций",
             "YAML / Сохранить",
         ]
     )
@@ -726,7 +845,44 @@ def render_profile_editor() -> None:
     with tabs[6]:
         _edit_checks(data)
     with tabs[7]:
+        _view_sections_template(data)
+    with tabs[8]:
         _render_yaml_and_save(data, st.session_state.get(_SESSION_BASE, ""))
+
+
+def _view_sections_template(data: dict[str, Any]) -> None:
+    """Read-only обзор `sections_template` — типы секций, нумерация, колонтитулы.
+
+    Полноценный редактор для этой структуры пока не делается — вместо
+    него показываем содержимое и подсказку «менять через YAML». В UI
+    обычно достаточно унаследовать sections_template от базового
+    профиля; перекраивать его кафедры обычно не хотят.
+    """
+    import json
+
+    sections = data.get("sections_template") or []
+    st.subheader("Шаблон страничных секций")
+    st.caption(
+        "Описывает типы секций документа (титульник / основная часть / "
+        "приложения) с их колонтитулами и параметрами нумерации страниц. "
+        "**Read-only**: для редактирования сохраните как наследник и "
+        "поправьте YAML напрямую — UI-редактор этой структуры пока нет."
+    )
+    if not sections:
+        st.info(
+            "В этом профиле нет своего sections_template — наследуется от "
+            "родителя (или используется дефолт)."
+        )
+        return
+    for sec in sections:
+        name = sec.get("name", "(без названия)")
+        stype = sec.get("type", "?")
+        with st.expander(f"**{name}** · type=`{stype}`", expanded=False):
+            payload = {k: v for k, v in sec.items() if k not in ("name", "type") and v is not None}
+            if payload:
+                st.code(json.dumps(payload, ensure_ascii=False, indent=2), language="json")
+            else:
+                st.caption("Только name+type без дополнительных настроек.")
 
 
 def _render_yaml_and_save(data: dict[str, Any], base_id: str) -> None:

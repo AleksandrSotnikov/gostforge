@@ -85,6 +85,11 @@ _current_bibliography_index: dict[str, int] | None = None
 # сбрасывается через try/finally.
 _current_profile: Any | None = None
 
+# Per-document счётчик id-ов закладок: bookmarkStart/End требуют
+# уникальные w:id внутри документа. Сбрасывается в export_docx()
+# вместе с _current_profile.
+_bookmark_id_counter: int = 0
+
 _ALIGNMENT_MAP = {
     "left": WD_ALIGN_PARAGRAPH.LEFT,
     "right": WD_ALIGN_PARAGRAPH.RIGHT,
@@ -567,15 +572,19 @@ def _write_caption_paragraph(
     content: Sequence[InlineElement],
     *,
     caption_kind: Literal["figure", "table"] = "figure",
-) -> None:
+) -> Any | None:
     """Записать подпись отдельным параграфом со стилем «Caption».
 
     `caption_kind` определяет, какой `CaptionStyleProfile` использовать —
     figure (по центру под рисунком) или table (слева над таблицей).
     Без него используем стиль figure-подписи (исторический default).
+
+    Возвращает созданный параграф (полезно вызывающему, чтобы
+    привязать bookmark — например, для continuation-row таблицы).
+    ``None`` — если content пустой и параграф не создавался.
     """
     if not content:
-        return
+        return None
     try:
         docx_para = doc.add_paragraph(style="Caption")
     except KeyError:
@@ -584,7 +593,7 @@ def _write_caption_paragraph(
     # Применяем alignment и spacing согласно профилю — стиль Caption общий,
     # а для table-подписи нужны другие настройки (слева, перед таблицей).
     if _current_profile is None:
-        return
+        return docx_para
     if caption_kind == "table":
         cfg = _current_profile.styles.table.caption
     else:
@@ -609,6 +618,7 @@ def _write_caption_paragraph(
             run.bold = True
         if cfg.italic:
             run.italic = True
+    return docx_para
 
 
 def _write_table(doc: DocxDocument, table: Table) -> None:
@@ -618,12 +628,29 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
     bold. Подпись таблицы — слева, ВЫШЕ таблицы (профиль). Если
     ``repeat_header`` включён, на шапочные строки ставится
     ``<w:tblHeader/>`` — Word повторяет их на каждой continuation-странице
-    (ГОСТ 7.32 «шапка таблицы повторяется при переносе»). При
-    ``continuation_caption`` экспортёр прибавляет первой строкой
-    «Продолжение таблицы N» (объединённую по всем колонкам, тоже
-    tblHeader); см. комментарий в схеме профиля про ограничения.
+    (ГОСТ 7.32 «шапка таблицы повторяется при переносе»).
+
+    При ``continuation_caption`` экспортёр прибавляет первой строкой
+    специальную ячейку с OOXML field code
+    ``{IF {PAGE} > {PAGEREF bm} "Продолжение таблицы N" ""}``,
+    привязанным к bookmark-у в caption-параграфе. Word при отрисовке
+    показывает «Продолжение таблицы N» только на continuation-страницах;
+    на первой странице таблицы ячейка пустая. Это решает ограничение
+    OOXML: чисто-XML способа показать row только на 2+ странице нет,
+    но IF-поле даёт корректное поведение «как у руки».
     """
-    _write_caption_paragraph(doc, table.caption, caption_kind="table")
+    cfg = _current_profile.styles.table if _current_profile is not None else None
+    add_continuation = cfg is not None and cfg.continuation_caption and table.number is not None
+    continuation_text = f"Продолжение таблицы {table.number}" if add_continuation else None
+    continuation_bookmark = (
+        f"gf_tbl_cont_{table.number}_{_next_bookmark_id()}" if add_continuation else None
+    )
+
+    caption_paragraph = _write_caption_paragraph(doc, table.caption, caption_kind="table")
+    # Якорь для PAGEREF — кладём в caption-параграф ПЕРЕД таблицей.
+    if continuation_bookmark is not None and caption_paragraph is not None:
+        _add_bookmark_to_paragraph(caption_paragraph, continuation_bookmark)
+
     column_count = len(table.headers) if table.headers else 0
     for extra_row in table.extra_header_rows:
         column_count = max(column_count, len(extra_row))
@@ -631,10 +658,6 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
         column_count = max(column_count, len(row))
     if column_count == 0:
         return
-
-    cfg = _current_profile.styles.table if _current_profile is not None else None
-    add_continuation = cfg is not None and cfg.continuation_caption and table.number is not None
-    continuation_text = f"Продолжение таблицы {table.number}" if add_continuation else None
 
     rows_total = (
         (1 if continuation_text else 0)
@@ -654,13 +677,19 @@ def _write_table(doc: DocxDocument, table: Table) -> None:
 
     row_idx = 0
     # Опциональная строка «Продолжение таблицы N» — широкая на все колонки,
-    # tblHeader-репитер для continuation-страниц.
-    if continuation_text is not None:
+    # tblHeader-репитер для continuation-страниц. Текст подменяется
+    # OOXML field code `{IF {PAGE} > {PAGEREF bm} "..." ""}`: на первой
+    # странице ячейка пустая (всё равно занимает строку — это
+    # ограничение OOXML), на continuation-страницах появляется
+    # «Продолжение таблицы N».
+    if continuation_text is not None and continuation_bookmark is not None:
         cell0 = docx_table.rows[row_idx].cells[0]
         cell0.text = ""
-        _write_runs(cell0.paragraphs[0], [TextRun(text=continuation_text, italic=True)])
         _apply_cell_paragraph_format(cell0, cfg, is_header=True)
         _apply_cell_font(cell0, cfg)
+        _write_continuation_field_in_paragraph(
+            cell0.paragraphs[0], continuation_bookmark, continuation_text
+        )
         if column_count > 1:
             _apply_cell_merges(
                 docx_table,
@@ -739,6 +768,108 @@ def _mark_row_as_header(docx_row: Any) -> None:
     # Не дублируем — если уже есть, ничего не делаем.
     if trPr.find(f"{{{W_NS}}}tblHeader") is None:
         etree.SubElement(trPr, f"{{{W_NS}}}tblHeader")
+
+
+_XML_NS = "http://www.w3.org/XML/1998/namespace"
+
+
+def _next_bookmark_id() -> int:
+    """Выдать новый уникальный w:id для bookmarkStart/End в документе."""
+    global _bookmark_id_counter
+    _bookmark_id_counter += 1
+    return _bookmark_id_counter
+
+
+def _add_bookmark_to_paragraph(paragraph: Any, bookmark_name: str) -> None:
+    """Вставить ``<w:bookmarkStart>``/``<w:bookmarkEnd>`` в начало параграфа.
+
+    Закладка нужна, чтобы PAGEREF в continuation-row знал, на какой
+    странице начинается таблица. Помещается в caption-параграф ПЕРЕД
+    таблицей.
+    """
+    p = paragraph._p
+    bm_id = _next_bookmark_id()
+    bm_start = etree.Element(f"{{{W_NS}}}bookmarkStart")
+    bm_start.set(f"{{{W_NS}}}id", str(bm_id))
+    bm_start.set(f"{{{W_NS}}}name", bookmark_name)
+    bm_end = etree.Element(f"{{{W_NS}}}bookmarkEnd")
+    bm_end.set(f"{{{W_NS}}}id", str(bm_id))
+    # Вставляем bookmarkEnd сразу после Start: длина нулевая, нам нужна
+    # только привязка к странице.
+    p.insert(0, bm_end)
+    p.insert(0, bm_start)
+
+
+def _write_continuation_field_in_paragraph(
+    paragraph: Any,
+    bookmark_name: str,
+    text: str,
+    *,
+    italic: bool = True,
+) -> None:
+    """Записать в параграф OOXML field code ``{IF {PAGE} > {PAGEREF bm} "text" ""}``.
+
+    Word при отрисовке оценивает field динамически:
+
+    * На странице, где начинается таблица, ``PAGE == PAGEREF(bm)`` →
+      пустая строка.
+    * На continuation-страницах ``PAGE > PAGEREF(bm)`` → отображается
+      ``text``.
+
+    Это решает ограничение OOXML «нельзя показать строку только на
+    continuation-страницах» — раньше «Продолжение таблицы N»
+    дублировалось на первой странице. Теперь там виден пустой
+    (но всё ещё занимающий немного места) row; на continuation —
+    корректный «Продолжение таблицы N».
+    """
+    p = paragraph._p
+    # Удалим существующие runs — мы пишем свои.
+    for r in list(p.findall(f"{{{W_NS}}}r")):
+        p.remove(r)
+
+    def _add_fldchar(fld_type: str) -> None:
+        r = etree.SubElement(p, f"{{{W_NS}}}r")
+        if italic:
+            rpr = etree.SubElement(r, f"{{{W_NS}}}rPr")
+            etree.SubElement(rpr, f"{{{W_NS}}}i")
+        fld = etree.SubElement(r, f"{{{W_NS}}}fldChar")
+        fld.set(f"{{{W_NS}}}fldCharType", fld_type)
+
+    def _add_instr(instr: str) -> None:
+        r = etree.SubElement(p, f"{{{W_NS}}}r")
+        if italic:
+            rpr = etree.SubElement(r, f"{{{W_NS}}}rPr")
+            etree.SubElement(rpr, f"{{{W_NS}}}i")
+        i = etree.SubElement(r, f"{{{W_NS}}}instrText")
+        i.set(f"{{{_XML_NS}}}space", "preserve")
+        i.text = instr
+
+    def _add_text(value: str) -> None:
+        r = etree.SubElement(p, f"{{{W_NS}}}r")
+        if italic:
+            rpr = etree.SubElement(r, f"{{{W_NS}}}rPr")
+            etree.SubElement(rpr, f"{{{W_NS}}}i")
+        t = etree.SubElement(r, f"{{{W_NS}}}t")
+        t.set(f"{{{_XML_NS}}}space", "preserve")
+        t.text = value
+
+    # IF { PAGE } > { PAGEREF bm } "text" ""
+    _add_fldchar("begin")
+    _add_instr(" IF ")
+    _add_fldchar("begin")
+    _add_instr(" PAGE ")
+    _add_fldchar("end")
+    _add_instr(" > ")
+    _add_fldchar("begin")
+    _add_instr(f" PAGEREF {bookmark_name} ")
+    _add_fldchar("end")
+    # Кавычки экранируем как escape — IF-field парсит свои операнды
+    # как строки в двойных кавычках. Внутри текста кавычек не ждём.
+    safe_text = text.replace('"', "")
+    _add_instr(f' "{safe_text}" ""')
+    _add_fldchar("separate")
+    _add_text("")  # cached result; Word пересчитает на render
+    _add_fldchar("end")
 
 
 def _apply_cell_merges(docx_table: Any, merges: list[CellMerge]) -> None:
@@ -1592,7 +1723,8 @@ def export_docx(
         _current_source_docx, \
         _current_bibliography_index, \
         _current_profile, \
-        _current_list_numbering
+        _current_list_numbering, \
+        _bookmark_id_counter
     output_path = Path(output_path)
     doc = docx.Document()
 
@@ -1668,6 +1800,7 @@ def export_docx(
         _current_bibliography_index = None
         _current_profile = None
         _current_list_numbering = None
+        _bookmark_id_counter = 0
 
     # Post-processing на уровне zip: запись настроек, которые python-docx
     # не умеет менять напрямую (например, w:autoHyphenation в settings.xml).

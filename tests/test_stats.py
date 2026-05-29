@@ -81,3 +81,159 @@ def test_compute_stats_counts_bibliography() -> None:
     )
     s = compute_stats(doc)
     assert s.bibliography_entries == 2
+
+
+def test_compute_stats_counts_subsection_levels() -> None:
+    """level=2 и level=3 учитываются отдельно от total."""
+    level_3 = LogicalSection(id="s3", level=3, heading=[TextRun(text="1.1.1")])
+    level_2 = LogicalSection(id="s2", level=2, heading=[TextRun(text="1.1")], children=[level_3])
+    level_1 = LogicalSection(id="s1", level=1, heading=[TextRun(text="1")], children=[level_2])
+    doc = _doc_with_content([level_1])
+    s = compute_stats(doc)
+    assert s.logical_sections_level_1 == 1
+    assert s.logical_sections_level_2 == 1
+    assert s.logical_sections_level_3 == 1
+    assert s.logical_sections_total == 3
+
+
+def test_compute_stats_counts_lists_and_formulas() -> None:
+    """ListBlock + Formula считаются."""
+    from gostforge.model import Formula, ListBlock
+
+    doc = _doc_with_content(
+        [
+            ListBlock(id="l1", items=[[TextRun(text="первый")], [TextRun(text="второй")]]),
+            ListBlock(id="l2", items=[[TextRun(text="один")]]),
+            Formula(id="f1", latex="E = mc^2"),
+        ]
+    )
+    s = compute_stats(doc)
+    assert s.lists == 2
+    assert s.list_items == 3
+    assert s.formulas == 1
+
+
+def test_compute_stats_counts_paragraphs_with_inline_elements() -> None:
+    """Параграфы с InlineFormula / CrossRef / Citation считаются отдельно."""
+    from gostforge.model import Citation, CrossRef, InlineFormula
+
+    p_formula = Paragraph(
+        id="p1",
+        content=[TextRun(text="См. "), InlineFormula(latex="x^2")],
+    )
+    p_xref = Paragraph(
+        id="p2",
+        content=[TextRun(text="См. рисунок "), CrossRef(target_id="fig-1")],
+    )
+    p_cite = Paragraph(
+        id="p3",
+        content=[TextRun(text="как пишет "), Citation(source_id="r1")],
+    )
+    p_plain = Paragraph(id="p4", content=[TextRun(text="обычный")])
+    doc = _doc_with_content([p_formula, p_xref, p_cite, p_plain])
+    s = compute_stats(doc)
+    assert s.paragraphs_with_inline_formula == 1
+    assert s.paragraphs_with_xref == 1
+    assert s.paragraphs_with_citation == 1
+
+
+def test_compute_stats_bibliography_by_type() -> None:
+    """Распределение источников по типам."""
+    doc = Document()
+    doc.bibliography.extend(
+        [
+            BibliographyEntry(id="r1", type="book", fields={"raw": "x"}),
+            BibliographyEntry(id="r2", type="book", fields={"raw": "y"}),
+            BibliographyEntry(id="r3", type="article", fields={"raw": "z"}),
+            BibliographyEntry(id="r4", type="web", fields={"raw": "w"}),
+        ]
+    )
+    s = compute_stats(doc)
+    assert s.bibliography_by_type == {"book": 2, "article": 1, "web": 1}
+
+
+def test_avg_words_per_paragraph() -> None:
+    """`avg_words_per_paragraph` корректно считается, пустые параграфы исключены."""
+    doc = _doc_with_content(
+        [
+            Paragraph(id="p1", content=[TextRun(text="один два три")]),  # 3 слова
+            Paragraph(id="p2", content=[TextRun(text="четыре пять")]),  # 2 слова
+            Paragraph(id="p3", content=[TextRun(text="")]),  # пустой — игнор
+        ]
+    )
+    s = compute_stats(doc)
+    assert s.paragraphs_non_empty == 2
+    assert s.words == 5
+    assert s.avg_words_per_paragraph == 2.5
+
+
+def test_avg_words_per_paragraph_zero_when_no_paragraphs() -> None:
+    """Без непустых параграфов — 0.0, не ZeroDivisionError."""
+    doc = Document()
+    s = compute_stats(doc)
+    assert s.avg_words_per_paragraph == 0.0
+
+
+def test_compute_per_section_stats_separates_chapters() -> None:
+    """Stats разбиваются по top-level разделам в порядке появления."""
+    from gostforge.stats import compute_per_section_stats
+
+    ch1 = LogicalSection(
+        id="s1",
+        level=1,
+        heading=[TextRun(text="Глава 1")],
+        children=[
+            Paragraph(id="p1", content=[TextRun(text="один два три")]),
+            Table(id="t1"),
+        ],
+    )
+    ch2 = LogicalSection(
+        id="s2",
+        level=1,
+        heading=[TextRun(text="Глава 2")],
+        children=[
+            Paragraph(id="p2", content=[TextRun(text="четыре пять шесть семь")]),
+            Figure(id="f1"),
+            Figure(id="f2"),
+        ],
+    )
+    doc = _doc_with_content([ch1, ch2])
+    per_sec = compute_per_section_stats(doc)
+    assert len(per_sec) == 2
+    h1, s1 = per_sec[0]
+    h2, s2 = per_sec[1]
+    assert h1 == "Глава 1"
+    assert s1.paragraphs_non_empty == 1
+    assert s1.words == 3
+    assert s1.tables == 1
+    assert s1.figures == 0
+    assert h2 == "Глава 2"
+    assert s2.words == 4
+    assert s2.figures == 2
+
+
+def test_compute_per_section_stats_with_orphan_content() -> None:
+    """Контент до первого LogicalSection попадает в группу «(без раздела)»."""
+    from gostforge.stats import compute_per_section_stats
+
+    p_orphan = Paragraph(id="orph", content=[TextRun(text="до главы")])
+    ch1 = LogicalSection(
+        id="s1",
+        level=1,
+        heading=[TextRun(text="Глава")],
+        children=[Paragraph(id="p", content=[TextRun(text="внутри")])],
+    )
+    doc = _doc_with_content([p_orphan, ch1])
+    per_sec = compute_per_section_stats(doc)
+    assert len(per_sec) == 2
+    # Орфан-блоки идут после всех разделов (раздел добавляется по факту встречи).
+    headings = [h for h, _ in per_sec]
+    assert "Глава" in headings
+    assert "(без раздела)" in headings
+
+
+def test_compute_per_section_stats_handles_empty_document() -> None:
+    """Документ без секций — пустой список без падений."""
+    from gostforge.stats import compute_per_section_stats
+
+    assert compute_per_section_stats(Document()) == []

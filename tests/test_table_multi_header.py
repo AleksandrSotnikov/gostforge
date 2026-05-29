@@ -55,7 +55,11 @@ def test_multi_header_writes_extra_rows_before_main_header(tmp_path: Path) -> No
     sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
     doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
     out = tmp_path / "multi_header.docx"
-    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    # Отключаем continuation_caption — это поведение тестируется отдельно
+    # в test_table_continuation.py. Здесь смотрим только extra_header_rows.
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = False
+    export_docx(doc, profile, out)
     raw = DocxDocument(str(out))
     t = raw.tables[0]
     # 1 extra + 1 main header + 1 data = 3 строки.
@@ -138,7 +142,11 @@ def test_multi_header_roundtrip_preserves_extra_rows(tmp_path: Path) -> None:
     sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
     doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
     out = tmp_path / "rt.docx"
-    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    # Отключаем continuation_caption — round-trip тест на extra_header_rows,
+    # continuation проверяется отдельно.
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = False
+    export_docx(doc, profile, out)
 
     reparsed = parse_docx(out)
     parsed_tables = [
@@ -205,9 +213,89 @@ def test_multi_header_back_compat_no_extra_rows(tmp_path: Path) -> None:
     sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
     doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
     out = tmp_path / "single_header.docx"
-    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    # Отключаем continuation_caption — тест проверяет одноуровневую шапку.
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = False
+    export_docx(doc, profile, out)
     raw = DocxDocument(str(out))
     t = raw.tables[0]
     # 1 шапка + 1 данные.
     assert len(t.rows) == 2
     assert [c.text for c in t.rows[0].cells] == ["X", "Y"]
+
+
+def test_continuation_caption_uses_ooxml_field_code(tmp_path: Path) -> None:
+    """`continuation_caption=True` пишет IF/PAGE/PAGEREF, а не plain text.
+
+    Раньше «Продолжение таблицы N» сохранялся как литерал в ячейке —
+    это давало баг «текст показывается и на первой странице». Теперь
+    экспортёр кладёт OOXML field code, который Word оценивает per-page:
+    пустая ячейка на первой странице, текст на continuation-страницах.
+    """
+    pytest.importorskip("docx")
+    from zipfile import ZipFile
+
+    table = Table(
+        id="t1",
+        caption=[TextRun(text="Таблица 1 — Тест")],
+        headers=[[TextRun(text="A")], [TextRun(text="B")]],
+        rows=[[[TextRun(text="1")], [TextRun(text="2")]]],
+        number=1,
+    )
+    sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
+    doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
+    out = tmp_path / "cont_field.docx"
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = True
+    export_docx(doc, profile, out)
+
+    # В document.xml должен быть instrText с «Продолжение таблицы 1»
+    # внутри IF-field, и НЕ должно быть прямого <w:t>Продолжение таблицы 1</w:t>.
+    with ZipFile(out) as zf:
+        xml_bytes = zf.read("word/document.xml")
+    xml = xml_bytes.decode("utf-8")
+    assert "<w:instrText" in xml, "Field code не записан — отсутствует <w:instrText>"
+    assert "Продолжение таблицы 1" in xml, "Текст «Продолжение таблицы 1» не найден"
+    # Bookmark для PAGEREF тоже должен быть — в caption-параграфе.
+    assert "<w:bookmarkStart" in xml, "Bookmark для PAGEREF не вставлен"
+    assert "gf_tbl_cont_" in xml, "Имя bookmark-а должно начинаться с gf_tbl_cont_"
+
+
+def test_continuation_caption_field_skipped_in_roundtrip(tmp_path: Path) -> None:
+    """Round-trip через field-code-вариант continuation не плодит пустые шапки.
+
+    Регресс на случай, если парсер не распознает поле IF и подхватит
+    пустую ячейку как обычную extra-header-строку.
+    """
+    pytest.importorskip("docx")
+    from gostforge.parser import parse_docx
+
+    table = Table(
+        id="t1",
+        caption=[TextRun(text="Таблица 1 — Тест")],
+        headers=[[TextRun(text="A")], [TextRun(text="B")]],
+        rows=[[[TextRun(text="1")], [TextRun(text="2")]]],
+        number=1,
+    )
+    sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
+    doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
+    out = tmp_path / "cont_field_rt.docx"
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = True
+    export_docx(doc, profile, out)
+
+    reparsed = parse_docx(out)
+    parsed_tables = [
+        b
+        for ps in reparsed.page_sections
+        for s in ps.content
+        if isinstance(s, LogicalSection)
+        for b in s.children
+        if isinstance(b, Table)
+    ]
+    t = parsed_tables[0]
+    # Field-code-row выкидывается парсером; в модели только обычная
+    # шапка + данные.
+    assert t.extra_header_rows == []
+    assert len(t.headers) == 2
+    assert len(t.rows) == 1

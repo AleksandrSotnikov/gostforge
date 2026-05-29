@@ -25,6 +25,7 @@ _RESET_KEYS = (
     "builder_history_cursor",
     "builder_autosave_ts",
     "builder_autosave_dismissed",
+    "builder_autosave_hash",
 )
 
 
@@ -128,3 +129,35 @@ def test_autosave_does_not_crash_on_io_failure(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(Path, "write_bytes", _boom)
     _set_state({"title": "X", "sections": []})
     be._autosave_now()  # должен молча отработать, без исключения
+
+
+def test_autosave_skips_when_state_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Если state не менялся между rerun-ами — не пишем на диск даже после throttle.
+
+    Регресс на изменение семантики: content-based debounce должен
+    отличать «прошло время» от «реально изменилось».
+    """
+    _set_state({"title": "A", "sections": []})
+    be._autosave_now()
+    first_mtime = be._autosave_path().stat().st_mtime
+
+    # Сдвигаем ts глубоко в прошлое, чтобы throttle точно прошёл.
+    st.session_state["builder_autosave_ts"] = time.time() - 60
+    # State НЕ менялся — повторный вызов не должен трогать файл.
+    be._autosave_now()
+    second_mtime = be._autosave_path().stat().st_mtime
+    assert first_mtime == second_mtime, (
+        "autosave не должен писать при неизменном state, даже если throttle прошёл"
+    )
+
+
+def test_autosave_writes_when_state_changed_after_throttle() -> None:
+    """Изменение state + прошёл throttle → новая запись."""
+    _set_state({"title": "A", "sections": []})
+    be._autosave_now()
+    # Throttle прошёл.
+    st.session_state["builder_autosave_ts"] = time.time() - 5
+    _set_state({"title": "B", "sections": []})
+    be._autosave_now()
+    payload = json.loads(be._autosave_path().read_text(encoding="utf-8"))
+    assert payload["title"] == "B"
