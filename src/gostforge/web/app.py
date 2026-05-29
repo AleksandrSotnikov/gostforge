@@ -209,6 +209,61 @@ def _render_stats_table(name: str, document: Document) -> None:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
+def _build_html_report(results: dict[str, list[Violation]], profile_id: str) -> str:
+    """Сформировать самодостаточный HTML-отчёт нормоконтроля (без зависимостей)."""
+    import html as _html
+
+    sev_label = {"error": "Ошибка", "warning": "Предупреждение", "info": "Инфо"}
+    sev_color = {"error": "#c0392b", "warning": "#b9770e", "info": "#1f618d"}
+    total = sum(len(v) for v in results.values())
+    parts: list[str] = [
+        "<!DOCTYPE html><html lang='ru'><head><meta charset='utf-8'>",
+        "<title>Отчёт нормоконтроля gostforge</title>",
+        "<style>body{font-family:'Times New Roman',serif;margin:2em;}"
+        "table{border-collapse:collapse;width:100%;margin:0.5em 0 1.5em;}"
+        "th,td{border:1px solid #ccc;padding:4px 8px;text-align:left;vertical-align:top;}"
+        "th{background:#f0f0f0;}h1{font-size:1.4em;}h2{font-size:1.1em;margin-top:1.2em;}"
+        ".tag{font-weight:bold;}</style></head><body>",
+        f"<h1>Отчёт нормоконтроля — профиль {_html.escape(profile_id)}</h1>",
+        f"<p>Проверено файлов: {len(results)}, всего нарушений: {total}.</p>",
+    ]
+    for name, violations in results.items():
+        parts.append(f"<h2>{_html.escape(name)} — нарушений: {len(violations)}</h2>")
+        if not violations:
+            parts.append("<p>Нарушений не найдено.</p>")
+            continue
+        parts.append(
+            "<table><tr><th>Код</th><th>Серьёзность</th>"
+            "<th>Сообщение</th><th>Что исправить</th></tr>"
+        )
+        for v in violations:
+            color = sev_color.get(v.severity, "#000")
+            parts.append(
+                "<tr>"
+                f"<td class='tag'>{_html.escape(v.check_code)}</td>"
+                f"<td style='color:{color}'>{sev_label.get(v.severity, v.severity)}</td>"
+                f"<td>{_html.escape(v.message)}</td>"
+                f"<td>{_html.escape(v.suggestion or '')}</td>"
+                "</tr>"
+            )
+        parts.append("</table>")
+    parts.append("</body></html>")
+    return "".join(parts)
+
+
+def _build_report_pdf_bytes(results: dict[str, list[Violation]], profile_id: str) -> bytes:
+    """Сконвертировать HTML-отчёт в PDF через LibreOffice."""
+    from gostforge.pdf_exporter import convert_document
+
+    html_text = _build_html_report(results, profile_id)
+    with tempfile.NamedTemporaryFile(suffix=".html", delete=False) as tmp:
+        tmp.write(html_text.encode("utf-8"))
+        html_path = Path(tmp.name)
+    pdf_path = html_path.with_suffix(".pdf")
+    convert_document(html_path, pdf_path, target_format="pdf")
+    return pdf_path.read_bytes()
+
+
 def _build_report_bytes(results: dict[str, list[Violation]], profile_id: str, fmt: str) -> bytes:
     """Сгенерировать отчёт во временный файл и вернуть его байты."""
     suffix = ".md" if fmt == "markdown" else ".xlsx"
@@ -490,8 +545,9 @@ def _render_main(profile_id: str) -> None:
     for uf in uploaded:
         try:
             # .doc/.odt/.rtf → .docx (один раз), чтобы все вкладки работали.
-            norm = _ensure_docx_bytes(uf)
-            document, violations = _process_file(norm, prof)
+            with st.spinner(f"Обрабатываю «{uf.name}»…"):
+                norm = _ensure_docx_bytes(uf)
+                document, violations = _process_file(norm, prof)
         except Exception as e:
             st.error(f"Не удалось обработать «{uf.name}»: {e}")
             continue
@@ -527,7 +583,8 @@ def _render_main(profile_id: str) -> None:
         for name, document in documents.items():
             st.subheader(name)
             try:
-                fixed_bytes, applied = _build_fixed_docx_bytes(document, prof)
+                with st.spinner("Применяю автофиксы…"):
+                    fixed_bytes, applied = _build_fixed_docx_bytes(document, prof)
             except Exception as e:
                 st.error(f"Не удалось сгенерировать исправленный .docx: {e}")
                 continue
@@ -570,7 +627,8 @@ def _render_main(profile_id: str) -> None:
         for name, uf in uploads.items():
             st.subheader(name)
             try:
-                annotated_bytes, n = _build_annotated_docx_bytes(uf, prof, style_label)
+                with st.spinner("Формирую аннотированный .docx…"):
+                    annotated_bytes, n = _build_annotated_docx_bytes(uf, prof, style_label)
             except Exception as e:
                 st.error(f"Не удалось создать аннотированный .docx: {e}")
                 continue
@@ -594,23 +652,45 @@ def _render_main(profile_id: str) -> None:
     total = sum(len(v) for v in results.values())
     st.markdown(f"**Итого:** проверено файлов {len(results)}, всего нарушений {total}.")
 
-    col_md, col_xlsx = st.columns(2)
+    col_md, col_xlsx, col_html, col_pdf = st.columns(4)
     with col_md:
-        md_bytes = _build_report_bytes(results, profile_id, "markdown")
         st.download_button(
-            "Скачать Markdown-отчёт",
-            data=md_bytes,
+            "Markdown-отчёт",
+            data=_build_report_bytes(results, profile_id, "markdown"),
             file_name="report.md",
             mime="text/markdown",
         )
     with col_xlsx:
-        xlsx_bytes = _build_report_bytes(results, profile_id, "xlsx")
         st.download_button(
-            "Скачать Excel-отчёт",
-            data=xlsx_bytes,
+            "Excel-отчёт",
+            data=_build_report_bytes(results, profile_id, "xlsx"),
             file_name="report.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
+    with col_html:
+        st.download_button(
+            "HTML-отчёт",
+            data=_build_html_report(results, profile_id).encode("utf-8"),
+            file_name="report.html",
+            mime="text/html",
+        )
+    with col_pdf:
+        if st.button("PDF-отчёт", key="report_pdf_btn"):
+            try:
+                with st.spinner("Готовлю PDF-отчёт (LibreOffice)…"):
+                    pdf_bytes = _build_report_pdf_bytes(results, profile_id)
+            except LibreOfficeNotFoundError:
+                st.error("Для PDF-отчёта нужен LibreOffice.")
+            except Exception as e:  # pragma: no cover - UI feedback
+                st.error(f"Не удалось сформировать PDF: {e}")
+            else:
+                st.download_button(
+                    "Скачать PDF-отчёт",
+                    data=pdf_bytes,
+                    file_name="report.pdf",
+                    mime="application/pdf",
+                    key="report_pdf_download",
+                )
 
 
 # Карта шаблонов для режима «Конструктор». Ключ — id шаблона (внутренний),

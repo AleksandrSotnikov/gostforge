@@ -179,3 +179,24 @@ def test_compare_violations_identical_no_diff() -> None:
     cmp = _compare_violations([v], [v])
     assert cmp["fixed"] == []
     assert cmp["introduced"] == []
+
+
+def test_build_html_report_contains_violations() -> None:
+    """HTML-отчёт нормоконтроля содержит коды и сообщения, экранирует HTML."""
+    pytest.importorskip("streamlit")
+    from gostforge.validator import Violation
+    from gostforge.web.app import _build_html_report
+
+    results = {
+        "work.docx": [
+            Violation(check_code="T.01", severity="error", message="Шрифт <не> тот", location="p1"),
+            Violation(check_code="F.02", severity="warning", message="Формат", location="s1"),
+        ],
+        "clean.docx": [],
+    }
+    html_text = _build_html_report(results, "gost-7.32-2017")
+    assert html_text.startswith("<!DOCTYPE html>")
+    assert "gost-7.32-2017" in html_text
+    assert "T.01" in html_text and "F.02" in html_text
+    assert "Шрифт &lt;не&gt; тот" in html_text  # HTML экранирован
+    assert "Нарушений не найдено" in html_text  # для clean.docx
