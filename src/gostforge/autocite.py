@@ -208,20 +208,63 @@ def _unique_id(base: str, used: set[str]) -> str:
     return candidate
 
 
-def autofill_references(document: Document) -> list[BibliographyEntry]:
+def _body_paragraphs(document: Document, bib_section: LogicalSection | None) -> list[Paragraph]:
+    """Параграфы тела документа (без раздела библиографии) для вставки цитат."""
+    result: list[Paragraph] = []
+    for ps in document.page_sections:
+        for child in ps.content:
+            if child is bib_section:
+                continue
+            if isinstance(child, Paragraph):
+                result.append(child)
+            elif isinstance(child, LogicalSection):
+                result.extend(_iter_paragraphs([child]))
+    return result
+
+
+def _paragraph_mentions(para: Paragraph, key: str, entry_type: str) -> bool:
+    """Упоминается ли ГОСТ/ФЗ (по ключу) в тексте параграфа."""
+    text = _paragraph_text(para)
+    if entry_type == "standard":
+        return any(_normalize_gost(m.group(0)) == key for m in _GOST_RE.finditer(text))
+    num = key.removeprefix("№").removesuffix("-ФЗ")
+    return any(m.group(1) == num for m in _FZ_BARE_RE.finditer(text))
+
+
+def autofill_references(
+    document: Document, *, insert_citations: bool = False
+) -> list[BibliographyEntry]:
     """Добавить упомянутые в тексте ГОСТ/ФЗ в список литературы.
 
     Возвращает список добавленных записей (пустой, если новых нет).
     Идемпотентна: повторный вызов на том же документе ничего не добавит.
     Если раздела библиографии нет — записи всё равно добавляются в
     `document.bibliography` (для нормоконтроля), но без видимого абзаца.
+
+    При ``insert_citations=True`` в первый упоминающий абзац добавляется
+    inline-ссылка `Citation` на добавленный источник (только для вновь
+    добавленных записей — дубликатов при пересборке не возникает).
     """
+    from gostforge.model import Citation
+
     bib_section = _find_bibliography_section(document)
     body = _body_text(document, bib_section)
+    body_paras = _body_paragraphs(document, bib_section) if insert_citations else []
 
     seen = _existing_keys(document)
     used_ids = {e.id for e in document.bibliography}
     added: list[BibliographyEntry] = []
+
+    def _insert_citation(key: str, entry_type: str, source_id: str) -> None:
+        for para in body_paras:
+            if not _paragraph_mentions(para, key, entry_type):
+                continue
+            already = any(
+                isinstance(el, Citation) and el.source_id == source_id for el in para.content
+            )
+            if not already:
+                para.content.append(Citation(source_id=source_id))
+            return
 
     def _add(key: str, entry_type: str, raw: str, fields_extra: dict[str, str]) -> None:
         if key in seen:
@@ -234,6 +277,8 @@ def autofill_references(document: Document) -> list[BibliographyEntry]:
         document.bibliography.append(entry)
         if bib_section is not None:
             bib_section.children.append(Paragraph(id=entry_id, content=[TextRun(text=raw)]))
+        if insert_citations:
+            _insert_citation(key, entry_type, entry_id)
         added.append(entry)
 
     # --- ГОСТы (все упомянутые) ---------------------------------------------

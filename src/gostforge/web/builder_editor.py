@@ -1246,8 +1246,6 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
                     sec_builder.skip_checks(*[str(c) for c in disabled])
 
     _apply_title_block_from_state(builder, state)
-    if state.get("autofill_refs"):
-        builder.autofill_references()
 
     with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
         out_path = Path(tmp.name)
@@ -1257,6 +1255,13 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
     # Phase 2.5: подменяем proxy source_id у Citation на реальные
     # BibliographyEntry.id, назначенные в build().
     _resolve_citation_proxies(document, state)
+    # Авто-добавление ГОСТ/ФЗ (после build/resolve): захватываем отчёт для
+    # уведомления пользователя в UI.
+    if state.get("autofill_refs"):
+        from gostforge.autocite import autofill_references
+
+        added = autofill_references(document, insert_citations=bool(state.get("autofill_cite_fz")))
+        st.session_state["builder_autofill_report"] = [e.fields.get("raw", "") for e in added]
     profile_id = state.get("profile_id") or document.profile_id
     profile = load_profile(profile_id)
     # Применяем style_overrides из sidebar (если заданы) поверх профиля.
@@ -2048,10 +2053,27 @@ def _render_sidebar_metadata() -> None:
         value=bool(state.get("autofill_refs", False)),
         help=(
             "При сборке упомянутые в тексте ГОСТ и федеральные законы "
-            "добавляются в список источников. Дубликаты при пересборке "
-            "не создаются."
+            "добавляются в список источников (по ГОСТ Р 7.0.100-2018). "
+            "Дубликаты при пересборке не создаются."
         ),
     )
+    if state["autofill_refs"]:
+        state["autofill_cite_fz"] = st.sidebar.checkbox(
+            "Проставлять inline-ссылки [N] на ФЗ/ГОСТ в тексте",
+            value=bool(state.get("autofill_cite_fz", False)),
+            help=(
+                "В первый упоминающий абзац добавляется ссылка [N] на "
+                "добавленный источник. Можно убрать вручную."
+            ),
+        )
+        report = st.session_state.get("builder_autofill_report")
+        if report:
+            st.sidebar.info(
+                "Добавлено источников: {n}\n\n{items}".format(
+                    n=len(report),
+                    items="\n".join(f"• {r}" for r in report),
+                )
+            )
 
     st.sidebar.divider()
     st.sidebar.subheader("Шаблоны")

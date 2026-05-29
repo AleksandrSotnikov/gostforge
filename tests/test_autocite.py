@@ -158,3 +158,36 @@ def test_known_fz_title_and_catalog_date() -> None:
     assert "Об образовании в Российской Федерации" in law.fields["raw"]
     assert "29.12.2012" in law.fields["raw"]
     assert law.fields["year"] == "2012"
+
+
+def test_insert_citations_adds_reference_in_paragraph() -> None:
+    """insert_citations=True добавляет Citation в упоминающий абзац."""
+    from gostforge.model import Citation
+
+    doc = _doc_with_body_and_bib("Работа выполнена по ГОСТ 7.32-2017.")
+    added = autofill_references(doc, insert_citations=True)
+    gost = next(e for e in added if e.fields["designation"] == "ГОСТ 7.32-2017")
+    body_para = doc.page_sections[0].content[0].children[0]  # type: ignore[attr-defined]
+    cites = [el for el in body_para.content if isinstance(el, Citation)]
+    assert any(c.source_id == gost.id for c in cites)
+
+
+def test_insert_citations_idempotent() -> None:
+    """Повторный вызов не добавляет вторую Citation на тот же источник."""
+    from gostforge.model import Citation
+
+    doc = _doc_with_body_and_bib("По ГОСТ 7.32-2017.")
+    autofill_references(doc, insert_citations=True)
+    autofill_references(doc, insert_citations=True)
+    body_para = doc.page_sections[0].content[0].children[0]  # type: ignore[attr-defined]
+    cites = [el for el in body_para.content if isinstance(el, Citation)]
+    assert len(cites) == 1
+
+
+def test_no_citations_without_flag() -> None:
+    from gostforge.model import Citation
+
+    doc = _doc_with_body_and_bib("По ГОСТ 7.32-2017.")
+    autofill_references(doc)  # insert_citations=False по умолчанию
+    body_para = doc.page_sections[0].content[0].children[0]  # type: ignore[attr-defined]
+    assert not any(isinstance(el, Citation) for el in body_para.content)
