@@ -155,3 +155,112 @@ def test_purge_section_ids_recursively_clears_nested_subsections() -> None:
     assert "id" not in subsub
     # heading и структура сохраняются.
     assert section["heading"] == "Глава 1"
+
+
+# --- Регресс: дублирование подписей через document_to_state ----------------
+
+
+def test_document_to_state_strips_table_caption_prefix() -> None:
+    """`document_to_state` снимает префикс «Таблица N — » при разложении модели в state.
+
+    Регресс на баг, при котором после export → parse → document_to_state →
+    export получалось «Таблица 1 — Таблица 1 — caption».
+    """
+    from gostforge.model import (
+        Document,
+        LogicalSection,
+        PageSection,
+        Table,
+        TextRun,
+    )
+    from gostforge.web.builder_editor import document_to_state
+
+    table = Table(
+        id="t1",
+        caption=[TextRun(text="Таблица 1 — Описание базы данных")],
+        headers=[[TextRun(text="A")]],
+        rows=[[[TextRun(text="x")]]],
+        number=1,
+    )
+    sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[table])
+    doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
+
+    state = document_to_state(doc)
+    # Достаём первый Table из state.
+    tables = [
+        b
+        for s in state["sections"]
+        for b in s.get("blocks", [])
+        if isinstance(b, dict) and b.get("kind") == "table"
+    ]
+    assert tables, "должна быть одна таблица в state"
+    assert tables[0]["caption"] == "Описание базы данных", (
+        f"префикс «Таблица 1 — » не снят: {tables[0]['caption']!r}"
+    )
+
+    # Заодно: уже задвоённый префикс снимается полностью.
+    table2 = Table(
+        id="t2",
+        caption=[TextRun(text="Таблица 2 — Таблица 2 — Дважды задвоено")],
+        headers=[[TextRun(text="A")]],
+        rows=[[[TextRun(text="x")]]],
+        number=2,
+    )
+    sec2 = LogicalSection(id="s2", level=1, heading=[TextRun(text="Глава")], children=[table2])
+    doc2 = Document(page_sections=[PageSection(id="p2", name="main", type="main", content=[sec2])])
+    state2 = document_to_state(doc2)
+    tables2 = [
+        b
+        for s in state2["sections"]
+        for b in s.get("blocks", [])
+        if isinstance(b, dict) and b.get("kind") == "table"
+    ]
+    assert tables2[0]["caption"] == "Дважды задвоено", (
+        f"итеративный strip не сработал: {tables2[0]['caption']!r}"
+    )
+
+
+def test_document_to_state_strips_figure_caption_prefix() -> None:
+    """Зеркальный регресс для рисунков."""
+    from gostforge.model import (
+        Document,
+        Figure,
+        LogicalSection,
+        PageSection,
+        TextRun,
+    )
+    from gostforge.web.builder_editor import document_to_state
+
+    fig = Figure(
+        id="f1",
+        image_path="",
+        caption=[TextRun(text="Рисунок 1 — Схема алгоритма")],
+        number=1,
+    )
+    sec = LogicalSection(id="s1", level=1, heading=[TextRun(text="Глава")], children=[fig])
+    doc = Document(page_sections=[PageSection(id="p", name="main", type="main", content=[sec])])
+
+    state = document_to_state(doc)
+    figs = [
+        b
+        for s in state["sections"]
+        for b in s.get("blocks", [])
+        if isinstance(b, dict) and b.get("kind") == "figure"
+    ]
+    assert figs, "должен быть один рисунок в state"
+    assert figs[0]["caption"] == "Схема алгоритма", (
+        f"префикс «Рисунок 1 — » не снят: {figs[0]['caption']!r}"
+    )
+
+
+def test_cell_size_pt_12_applies_from_default_profile() -> None:
+    """gost-7.32-2017 теперь явно ставит cell_size_pt=12.0 (а не None → 14pt).
+
+    Регресс на жалобу пользователя: «шрифт внутри таблиц 14, хотя в
+    профиле должно быть 12».
+    """
+    from gostforge.profile import load_profile
+
+    profile = load_profile("gost-7.32-2017")
+    assert profile.styles.table.cell_size_pt == 12.0
+    assert profile.styles.table.cell_font == "Times New Roman"

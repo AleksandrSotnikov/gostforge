@@ -889,19 +889,91 @@ def check_suspicious_domains(document: Document, profile: Profile) -> list[Viola
 _DOI_FORMAT_RE = re.compile(r"^10\.\d{4,9}/\S+$")
 # URL: http(s):// + домен.
 _URL_FORMAT_RE = re.compile(r"^https?://[^\s/$.?#].\S*$", re.IGNORECASE)
+# DOI, обёрнутый в URL ("https://doi.org/10.NNNN/..." или
+# "doi.org/10.NNNN/...") — частая ошибка: в поле DOI кладут ссылку.
+_DOI_AS_URL_RE = re.compile(
+    r"^(?:https?://)?(?:dx\.)?doi\.org/(10\.\d{4,9}/\S+)$",
+    re.IGNORECASE,
+)
+# Типичные опечатки в URL (схема без двоеточия / двоеточие без слешей и пр.).
+_URL_TYPO_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"^https?//", re.IGNORECASE),
+        "пропущено двоеточие в схеме: `https//` вместо `https://`",
+    ),
+    (
+        re.compile(r"^https?:/[^/]", re.IGNORECASE),
+        "пропущен слэш в схеме: `https:/x` вместо `https://x`",
+    ),
+    (re.compile(r"^https?;//", re.IGNORECASE), "точка с запятой вместо двоеточия в схеме"),
+    # Специфичные опечатки в схеме. Порядок важен: более длинный
+    # паттерн `htps://` (без второй `t` в `https`) должен матчиться
+    # раньше, чем `htp://`, иначе `htps://...` подцепится как `htp` +
+    # «лишний `s`».
+    (re.compile(r"^htps://", re.IGNORECASE), "опечатка в схеме: `htps` вместо `https`"),
+    (re.compile(r"^htp://", re.IGNORECASE), "опечатка в схеме: `htp` вместо `http`"),
+)
+
+
+def _diagnose_doi_format(doi: str) -> str | None:
+    """Найти конкретную ошибку в формате DOI или None если всё ок.
+
+    Различает: пробелы в начале/конце, обёрнутый в URL DOI («https://doi.org/...»),
+    отсутствие префикса 10.NNNN/, общий «не тот формат».
+    """
+    if not doi:
+        return None
+    if doi != doi.strip():
+        return "лишние пробелы в начале или конце"
+    if " " in doi or "\t" in doi:
+        return "пробелы или табы внутри значения"
+    if _DOI_AS_URL_RE.match(doi):
+        # «https://doi.org/10.1234/abc» — частая ошибка, в поле DOI должен
+        # быть «голый» идентификатор без https://.
+        return "DOI обёрнут в URL — оставьте только идентификатор после `doi.org/`"
+    if _DOI_FORMAT_RE.match(doi):
+        return None
+    if not doi.startswith("10."):
+        return "DOI должен начинаться с «10.» (например, «10.1234/abc»)"
+    if "/" not in doi:
+        return "после префикса «10.NNNN» должен быть `/` и идентификатор"
+    return "не соответствует стандарту «10.NNNN/...»"
+
+
+def _diagnose_url_format(url: str) -> str | None:
+    """Найти конкретную ошибку в формате URL или None если всё ок.
+
+    Ловит типичные опечатки (https//, http;//, htp://) и даёт явное
+    сообщение вместо общего «не тот формат».
+    """
+    if not url:
+        return None
+    if url != url.strip():
+        return "лишние пробелы в начале или конце"
+    if " " in url or "\t" in url:
+        return "пробелы или табы внутри URL"
+    for pattern, msg in _URL_TYPO_PATTERNS:
+        if pattern.match(url):
+            return msg
+    if _URL_FORMAT_RE.match(url):
+        return None
+    if not url.lower().startswith(("http://", "https://")):
+        return "URL должен начинаться с `http://` или `https://`"
+    return "не соответствует формату `https://domain/path`"
 
 
 @register("R.14")
 def check_doi_url_format(document: Document, profile: Profile) -> list[Violation]:
     """Валидация формата DOI и URL в записях библиографии.
 
-    DOI должен соответствовать паттерну ``10.NNNN/...`` (где NNNN —
-    4-9 цифр регистратора, дальше произвольный suffix).
-    URL должен начинаться с ``http://`` или ``https://`` и содержать
-    минимум один символ после ``//`` (валидный домен).
+    Сообщение нарушения содержит **конкретную** диагностику ошибки:
+    лишние пробелы, DOI обёрнут в URL, типовая опечатка в схеме
+    (`https//` без двоеточия, `htp://`, `http;//`), отсутствие
+    префикса `10.` и т. п. — пользователь сразу видит, что чинить,
+    без необходимости знать формат DOI наизусть.
 
-    Severity = warning — это не критическая ошибка, но может
-    указать на опечатку (например, «https//» вместо «https://»).
+    Severity = warning — это не критическая ошибка, но почти всегда
+    указывает на опечатку при копировании из PDF/Word.
 
     Параметров профиля нет.
     """
@@ -909,41 +981,145 @@ def check_doi_url_format(document: Document, profile: Profile) -> list[Violation
     violations: list[Violation] = []
     for idx, entry in enumerate(document.bibliography, start=1):
         doi = entry.fields.get("doi")
-        if doi and not _DOI_FORMAT_RE.match(doi):
-            violations.append(
-                Violation(
-                    check_code="R.14",
-                    severity="warning",
-                    message=(
-                        f"Источник {idx}: DOI «{doi}» не соответствует "
-                        f"стандартному формату «10.NNNN/...»"
-                    ),
-                    location=f"bibliography[{entry.id}].doi",
-                    suggestion=(
-                        "Проверить формат DOI: должен быть «10.NNNN/...» "
-                        "(подробнее: https://www.doi.org)"
-                    ),
-                    details={"entry_id": entry.id, "doi": doi},
+        if doi:
+            problem = _diagnose_doi_format(doi)
+            if problem:
+                violations.append(
+                    Violation(
+                        check_code="R.14",
+                        severity="warning",
+                        message=f"Источник {idx}: DOI «{doi}» — {problem}",
+                        location=f"bibliography[{entry.id}].doi",
+                        suggestion=(
+                            "DOI должен быть «голым» идентификатором вида "
+                            "«10.NNNN/suffix» без https://doi.org/ и без пробелов "
+                            "(подробнее: https://www.doi.org)"
+                        ),
+                        details={"entry_id": entry.id, "doi": doi, "problem": problem},
+                    )
                 )
-            )
         url = entry.fields.get("url")
-        if url and not _URL_FORMAT_RE.match(url):
-            violations.append(
-                Violation(
-                    check_code="R.14",
-                    severity="warning",
-                    message=(
-                        f"Источник {idx}: URL «{url}» не соответствует "
-                        f"формату «http(s)://domain/...»"
-                    ),
-                    location=f"bibliography[{entry.id}].url",
-                    suggestion=(
-                        "Проверить URL: должен начинаться с http:// "
-                        "или https:// и содержать валидный домен"
-                    ),
-                    details={"entry_id": entry.id, "url": url},
+        if url:
+            problem = _diagnose_url_format(url)
+            if problem:
+                violations.append(
+                    Violation(
+                        check_code="R.14",
+                        severity="warning",
+                        message=f"Источник {idx}: URL «{url}» — {problem}",
+                        location=f"bibliography[{entry.id}].url",
+                        suggestion=(
+                            "URL должен быть полным: `https://domain/path` "
+                            "(или `http://...`), без пробелов и опечаток в схеме"
+                        ),
+                        details={"entry_id": entry.id, "url": url, "problem": problem},
+                    )
                 )
+    return violations
+
+
+def _check_url_reachable_http(url: str, timeout: float) -> str | None:
+    """HTTP HEAD-запрос к URL. Возвращает None при успехе, иначе человекочитаемое
+    описание проблемы.
+
+    Поведение:
+
+    * 2xx / 3xx (включая редиректы) — успех, возвращается None.
+    * 4xx — `"HTTP {status}"` (для 405 «Method Not Allowed» делаем
+      fallback на GET — некоторые сервера блокируют HEAD политикой).
+    * 5xx — `"HTTP {status}"`.
+    * URLError / TimeoutError / прочие — `"таймаут (Ns)"` или
+      `"сетевая ошибка: …"`.
+
+    Вынесено отдельной функцией, чтобы в тестах можно было мокать через
+    ``monkeypatch.setattr`` на этот один символ.
+    """
+    import urllib.error
+    import urllib.request
+
+    def _do(method: str) -> str | None:
+        req = urllib.request.Request(
+            url,
+            method=method,
+            headers={"User-Agent": "gostforge/url-reachability-check"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                # urlopen уже разрешил редиректы; считаем 2xx/3xx живыми.
+                status = getattr(resp, "status", 200)
+                if 200 <= int(status) < 400:
+                    return None
+                return f"HTTP {status}"
+        except urllib.error.HTTPError as exc:
+            return f"HTTP {exc.code}"
+        except TimeoutError:
+            return f"таймаут ({timeout:g} с)"
+        except urllib.error.URLError as exc:
+            return f"сетевая ошибка: {exc.reason}"
+        except Exception as exc:
+            return f"ошибка соединения: {exc}"
+
+    result = _do("HEAD")
+    # Некоторые сервера отвергают HEAD (405). Пробуем GET как fallback.
+    if result == "HTTP 405":
+        return _do("GET")
+    return result
+
+
+@register("R.15")
+def check_url_reachable(document: Document, profile: Profile) -> list[Violation]:
+    """Опциональная HTTP-проверка доступности URL из списка литературы.
+
+    По умолчанию выключена (``enabled: false`` в профиле). Включается
+    явно через ``profile.checks["R.15"].enabled = True``, обычно — для
+    финальной проверки перед сдачей работы. Делает HEAD-запрос (или
+    fallback на GET, если HEAD = 405) с таймаутом из профиля.
+
+    Сетевые ошибки (4xx/5xx/таймаут) выдаются как **warning**, а не
+    error — мёртвая ссылка не делает работу непроходимой, но требует
+    внимания (заменить на актуальный URL или указать дату обращения).
+
+    Форматно-некорректные URL пропускаются — их ловит R.14.
+
+    Параметры профиля (`checks.R.15.params`):
+
+    * ``timeout`` — таймаут одного запроса в секундах (default 5.0);
+    * ``max_urls`` — лимит на число проверяемых URL (default 50,
+      защита от медленных нормоконтролей с тысячами источников).
+    """
+    config = profile.checks.get("R.15")
+    if not (config and config.enabled):
+        return []
+    timeout = _float_param(config.params, "timeout", 5.0)
+    max_urls = _int_param(config.params, "max_urls", 50)
+
+    violations: list[Violation] = []
+    checked = 0
+    for idx, entry in enumerate(document.bibliography, start=1):
+        url = entry.fields.get("url")
+        if not url or _diagnose_url_format(url) is not None:
+            # Форматно-сломанные URL — ответственность R.14.
+            continue
+        if checked >= max_urls:
+            break
+        checked += 1
+        problem = _check_url_reachable_http(url, timeout)
+        if problem is None:
+            continue
+        violations.append(
+            Violation(
+                check_code="R.15",
+                severity="warning",
+                message=f"Источник {idx}: URL «{url}» недоступен — {problem}",
+                location=f"bibliography[{entry.id}].url",
+                suggestion=(
+                    "Проверить ссылку вручную. Если страница переехала — "
+                    "указать актуальный URL. Если временный сбой — повторить "
+                    "проверку позже."
+                ),
+                details={"entry_id": entry.id, "url": url, "problem": problem},
             )
+        )
     return violations
 
 
@@ -962,4 +1138,5 @@ __all__ = [
     "check_references_resolve_alias",
     "check_required_fields_by_type",
     "check_suspicious_domains",
+    "check_url_reachable",
 ]

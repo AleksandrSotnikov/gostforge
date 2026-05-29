@@ -364,3 +364,124 @@ def test_document_to_state_extracts_bibliography_references() -> None:
     ]
     assert bibs_with_refs, "Должна быть хотя бы одна bibliography-секция с references"
     assert "Иванов" in bibs_with_refs[0]["references"][0]
+
+
+def test_build_document_from_state_applies_figure_numbering_override() -> None:
+    """Per-section `figure_numbering_override` меняет схему в одной главе.
+
+    Roadmap Q2/2026: Per-section override схемы нумерации рисунков/таблиц.
+    """
+    state = {
+        "title": "T",
+        "author": "A",
+        "year": 2026,
+        "work_type": "coursework",
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава 1",
+                "blocks": [
+                    {"kind": "paragraph", "text": "x"},
+                ],
+                "subsections": [],
+            },
+            {
+                "id": "s2",
+                "heading": "Глава 2",
+                "figure_numbering_override": "by_chapter",
+                "blocks": [
+                    {"kind": "paragraph", "text": "y"},
+                ],
+                "subsections": [],
+            },
+        ],
+    }
+    data = _build_document_from_state(state)
+    xml = _docx_xml(data)
+    # Профиль ГОСТ 7.32 — continuous, override должен дать «Рисунок 2.»
+    # для рисунков второй главы. Здесь явных рисунков нет, поэтому
+    # просто гарантируем, что override не ломает сборку и .docx
+    # корректный.
+    assert data[:2] == b"PK"
+    assert "Глава 2" in xml or "ГЛАВА 2" in xml
+
+
+def test_build_document_from_state_ignores_invalid_override() -> None:
+    """Невалидное значение override игнорируется — фоллбэк на профиль."""
+    state = {
+        "title": "T",
+        "author": "A",
+        "year": 2026,
+        "work_type": "coursework",
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава 1",
+                "figure_numbering_override": "wat",  # невалидно
+                "blocks": [{"kind": "paragraph", "text": "x"}],
+                "subsections": [],
+            },
+        ],
+    }
+    data = _build_document_from_state(state)
+    assert data[:2] == b"PK"
+
+
+def test_build_document_from_state_applies_chapter_label_override() -> None:
+    """Per-section `chapter_label_override` подменяет автоматический префикс главы.
+
+    Roadmap Q2/2026: ручной префикс главы для разделов с нестандартной
+    позицией (Содержание, Введение в счётчик попадают, но не должны).
+    """
+    state = {
+        "title": "T",
+        "author": "A",
+        "year": 2026,
+        "work_type": "coursework",
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Введение",
+                "figure_numbering_override": "by_chapter",
+                "chapter_label_override": "В",
+                "blocks": [{"kind": "paragraph", "text": "x"}],
+                "subsections": [],
+            },
+            {
+                "id": "s2",
+                "heading": "Глава 1",
+                "figure_numbering_override": "by_chapter",
+                "blocks": [{"kind": "paragraph", "text": "y"}],
+                "subsections": [],
+            },
+        ],
+    }
+    data = _build_document_from_state(state)
+    assert data[:2] == b"PK"
+    # Проверяем, что override не ломает сборку. Подробное поведение метки
+    # тестируется в test_numbering_schemes.py через WorkBuilder напрямую.
+
+
+def test_build_document_from_state_handles_empty_chapter_label_override() -> None:
+    """Пустая/whitespace строка в `chapter_label_override` игнорируется."""
+    state = {
+        "title": "T",
+        "author": "A",
+        "year": 2026,
+        "work_type": "coursework",
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            {
+                "id": "s1",
+                "heading": "Глава",
+                "chapter_label_override": "   ",  # whitespace = no-op
+                "blocks": [{"kind": "paragraph", "text": "x"}],
+                "subsections": [],
+            }
+        ],
+    }
+    data = _build_document_from_state(state)
+    assert data[:2] == b"PK"

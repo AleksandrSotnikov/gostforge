@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import tempfile
 from collections import Counter
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,7 +43,7 @@ from gostforge.pdf_exporter import LibreOfficeNotFoundError, convert_to_pdf
 from gostforge.profile import list_profiles, load_profile
 from gostforge.stats import compute_stats
 from gostforge.validator import Violation, validate
-from gostforge.validator.engine import registered_checks
+from gostforge.validator.engine import registered_checks, validate_iter
 
 if TYPE_CHECKING:
     from gostforge.model import Document
@@ -95,6 +96,33 @@ def _process_file(uploaded_file: Any, profile: Profile) -> tuple[Document, list[
     return document, validate(document, profile)
 
 
+def _process_file_with_progress(
+    uploaded_file: Any,
+    profile: Profile,
+    on_progress: Callable[[str, int, int], None] | None = None,
+) -> tuple[Document, list[Violation]]:
+    """Аналог `_process_file`, но вызывает ``on_progress(code, index, total)``
+    перед каждой проверкой.
+
+    ``on_progress`` — опциональный коллбэк для прогресс-бара UI. Семантика
+    идентична :func:`_process_file`; разница только в callback-уведомлениях.
+    Если ``on_progress`` — None, эквивалентно `_process_file`.
+    """
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+        tmp.write(uploaded_file.getvalue())
+        tmp_path = Path(tmp.name)
+    document = parse_docx(tmp_path)
+    violations: list[Violation] = []
+    for evt in validate_iter(document, profile):
+        if evt[0] == "check":
+            if on_progress is not None:
+                _, code, idx, total = evt
+                on_progress(code, idx, total)
+        elif evt[0] == "done":
+            violations = evt[1]
+    return document, violations
+
+
 def _build_fixed_docx_bytes(document: Document, profile: Profile) -> tuple[bytes, list[FixApplied]]:
     """Применить автофиксы к документу и вернуть байты исправленного .docx.
 
@@ -139,21 +167,54 @@ def _build_pdf_bytes(uploaded_file: Any) -> bytes:
 
 
 def _render_stats_table(name: str, document: Document) -> None:
-    """Вкладка «Статистика» — числовые метрики структуры документа."""
+    """Вкладка «Статистика» — числовые метрики структуры документа.
+
+    Сгруппировано: «Структура», «Содержимое», «Плотность», «Источники».
+    Сверху — крупные `st.metric`-карточки с ключевыми цифрами.
+    """
     st.subheader(name)
     s = compute_stats(document)
-    rows = [
+
+    # Топ-карточки: 4 ключевые цифры крупно.
+    mcols = st.columns(4)
+    mcols[0].metric("Разделов 1 уровня", s.logical_sections_level_1)
+    mcols[1].metric("Параграфов", s.paragraphs_non_empty)
+    mcols[2].metric("Слов", s.words)
+    avg = s.avg_words_per_paragraph
+    mcols[3].metric(
+        "Среднее слов на параграф",
+        avg,
+        help="Помогает понять, заполнена ли работа реальным текстом или это пока каркас.",
+    )
+
+    # Детальная таблица: показатели в категориях.
+    rows: list[tuple[str, object]] = [
+        ("📐 Структура", ""),
         ("Секций вёрстки", s.page_sections),
-        ("Разделов 1 уровня", s.logical_sections_level_1),
         ("Разделов всего", s.logical_sections_total),
+        ("  …уровня 1", s.logical_sections_level_1),
+        ("  …уровня 2", s.logical_sections_level_2),
+        ("  …уровня 3", s.logical_sections_level_3),
+        ("📝 Содержимое", ""),
         ("Параграфов всего", s.paragraphs),
         ("  …непустых", s.paragraphs_non_empty),
         ("Таблиц", s.tables),
         ("Рисунков", s.figures),
-        ("Источников", s.bibliography_entries),
-        ("Слов", s.words),
+        ("Списков", s.lists),
+        ("  …элементов в них", s.list_items),
+        ("Формул (блочных)", s.formulas),
+        ("📏 Плотность", ""),
+        ("Параграфов с inline-формулами", s.paragraphs_with_inline_formula),
+        ("Параграфов с перекр. ссылками", s.paragraphs_with_xref),
+        ("Параграфов с цитатами", s.paragraphs_with_citation),
+        ("Слов всего", s.words),
         ("Символов", s.characters),
+        ("📚 Источники", ""),
+        ("Источников всего", s.bibliography_entries),
     ]
+    # Распределение по типам — каждый тип отдельной строкой.
+    for type_name, count in sorted(s.bibliography_by_type.items()):
+        rows.append((f"  …тип «{type_name}»", count))
     try:
         import pandas as pd  # type: ignore[import-untyped]
 
@@ -318,6 +379,42 @@ def _render_main(profile_id: str) -> None:
         "и отчёт по выбранному профилю."
     )
 
+    # Help-блок: новички не знают, что после загрузки появятся 4 вкладки
+    # с разными ракурсами + кнопки отчётов внизу. Свёрнут по умолчанию.
+    with st.expander("ℹ️ Что доступно на этой странице", expanded=False):
+        st.markdown(
+            """
+**Сразу после загрузки:**
+
+- **Несколько файлов** — uploader поддерживает batch: перетащите
+  пачку `.docx` (например, работы группы) — проверка пройдёт для
+  каждого.
+- **Профиль ГОСТ** — выбирается в sidebar слева; от него зависит,
+  какие проверки запустятся.
+
+**После проверки появляются 4 вкладки:**
+
+- **Проверка** — список нарушений по каждому файлу с группировкой
+  по серьёзности (error / warning / info) и категории
+  (F-страница, T-текст, H-заголовки, S-структура и т. д.).
+- **Статистика** — числовые метрики структуры: разделы, параграфы,
+  таблицы, рисунки, источники, среднее слов на абзац и т. п.
+- **Автоисправление** — превью применённых автофиксов (28 безопасных
+  правок: пробелы, кавычки, тире, NBSP, поля страницы, формат
+  заголовков). Кнопка «Скачать исправленный .docx».
+- **PDF** — конвертация исходных файлов в PDF (нужен LibreOffice).
+
+**Внизу страницы:**
+
+- **Markdown-отчёт** — для git-ревью / Obsidian / печати.
+- **Excel-отчёт** — таблица нарушений с фильтрами для разбора руками.
+
+> Чтобы поменять параметры проверки — откройте «Редактор профиля»
+> и сохраните свой профиль; он появится в списке слева.
+> Чтобы собрать работу с нуля — откройте «Конструктор».
+"""
+        )
+
     uploaded = st.file_uploader(
         "Перетащите .docx или нажмите для выбора",
         type=["docx"],
@@ -336,15 +433,30 @@ def _render_main(profile_id: str) -> None:
     results: dict[str, list[Violation]] = {}
     uploads: dict[str, Any] = {}
 
-    for uf in uploaded:
+    total_files = len(uploaded)
+    progress_bar = st.progress(0.0, text="Подготовка…")
+    for fi, uf in enumerate(uploaded):
+
+        def _on_progress(
+            code: str, idx: int, total: int, _fi: int = fi, _name: str = uf.name
+        ) -> None:
+            # Глобальный прогресс: завершённые файлы + текущий внутри файла.
+            per_file = (idx + 1) / max(total, 1)
+            global_frac = (_fi + per_file) / total_files
+            progress_bar.progress(
+                min(global_frac, 1.0),
+                text=f"[{_fi + 1}/{total_files}] {_name}: {code} ({idx + 1}/{total})",
+            )
+
         try:
-            document, violations = _process_file(uf, prof)
+            document, violations = _process_file_with_progress(uf, prof, _on_progress)
         except Exception as e:
             st.error(f"Не удалось обработать «{uf.name}»: {e}")
             continue
         documents[uf.name] = document
         results[uf.name] = violations
         uploads[uf.name] = uf
+    progress_bar.empty()
 
     if not results:
         return
@@ -565,76 +677,108 @@ def _render_builder_mode() -> None:
 
 
 def render() -> None:
-    """Главная функция рендера — точка входа streamlit-приложения."""
+    """Точка входа streamlit-приложения.
+
+    Multi-page через ``st.navigation`` + ``st.Page``: каждый режим —
+    отдельная страница со своим URL (`?page=...`) и браузерной историей.
+    Sidebar-навигацию Streamlit ставит автоматически. Sharable-ссылки
+    можно отправлять руководителю, refresh не сбрасывает выбранный
+    режим.
+    """
     st.set_page_config(
         page_title="gostforge — нормоконтроль и конструктор по ГОСТу",
         page_icon="📄",
         layout="wide",
         initial_sidebar_state="expanded",
     )
-    profiles = list_profiles()
-    if not profiles:
+    if not list_profiles():
         st.error("Не найдено ни одного профиля. Проверьте директорию profiles/.")
         return
 
-    mode = st.radio(
-        "Режим",
-        options=[
-            "Главная",
-            "Нормоконтроль",
-            "Конструктор",
-            "Редактор профиля",
-            "История",
-            "Документация",
-        ],
-        horizontal=True,
-        help=(
-            "Главная — обзор возможностей и быстрый старт. "
-            "Нормоконтроль — проверка существующего .docx по ГОСТ. "
-            "Конструктор — сборка работы по ГОСТу с нуля или из .docx. "
-            "Редактор профиля — настройка всех параметров оформления и "
-            "сохранение своего профиля. "
-            "История — все прошлые проверки + обсуждение руководитель↔студент. "
-            "Документация — встроенный просмотр руководства."
-        ),
+    # Импорты обёрток отложены до самого st.navigation — они в свою очередь
+    # делают lazy-import тяжёлого модуля только при заходе на страницу.
+    from gostforge.web.pages import docs as docs_page
+    from gostforge.web.pages import history as history_page
+    from gostforge.web.pages import home as home_page
+    from gostforge.web.pages import normocontrol as normocontrol_page
+    from gostforge.web.pages import profile_editor as profile_editor_page
+    from gostforge.web.pages import profile_manager as profile_manager_page
+    from gostforge.web.pages.builder import (
+        content as builder_content,
+    )
+    from gostforge.web.pages.builder import (
+        export as builder_export,
+    )
+    from gostforge.web.pages.builder import (
+        structure as builder_structure,
+    )
+    from gostforge.web.pages.builder import (
+        validation as builder_validation,
     )
 
-    if mode == "Главная":
-        from gostforge.web.dashboard import render_dashboard
-
-        render_dashboard()
-        return
-
-    if mode == "Документация":
-        from gostforge.web.docs_viewer import render_docs_viewer
-
-        render_docs_viewer()
-        return
-
-    if mode == "Редактор профиля":
-        from gostforge.web.profile_editor import render_profile_editor
-
-        render_profile_editor()
-        return
-
-    if mode == "История":
-        from gostforge.web.history_viewer import render_history_viewer
-
-        render_history_viewer()
-        return
-
-    if mode == "Конструктор":
-        # Новый интерактивный редактор (Фаза 2). Старый _render_builder_mode
-        # с генерацией болванки по шаблону сохранён в этом модуле для
-        # обратной совместимости и доступен напрямую через
-        # ``_render_builder_mode()`` — кнопка «Загрузить шаблон» внутри
-        # интерактивного редактора покрывает тот же сценарий.
-        from gostforge.web.builder_editor import render_interactive_builder
-
-        render_interactive_builder()
-    else:
-        profile_id = _render_sidebar(profiles)
-        _render_main(profile_id)
+    # Группируем по смыслу — у пользователя сразу видна иерархия
+    # (workflow «обзор → действие → справка»). Конструктор — отдельная
+    # группа из 4 подстраниц, отражающих workflow «структура → контент
+    # → проверка → экспорт».
+    pages = {
+        "Старт": [
+            st.Page(home_page.page, title="Главная", icon="🏠", url_path="home", default=True),
+        ],
+        "Работа с документом": [
+            st.Page(
+                normocontrol_page.page,
+                title="Нормоконтроль",
+                icon="🔍",
+                url_path="normocontrol",
+            ),
+        ],
+        "Конструктор": [
+            st.Page(
+                builder_structure.page,
+                title="Структура",
+                icon="🏗️",
+                url_path="builder-structure",
+            ),
+            st.Page(
+                builder_content.page,
+                title="Содержимое",
+                icon="✏️",
+                url_path="builder-content",
+            ),
+            st.Page(
+                builder_validation.page,
+                title="Проверка",
+                icon="✅",
+                url_path="builder-validation",
+            ),
+            st.Page(
+                builder_export.page,
+                title="Экспорт",
+                icon="📤",
+                url_path="builder-export",
+            ),
+        ],
+        "Настройка": [
+            st.Page(
+                profile_editor_page.page,
+                title="Редактор профиля",
+                icon="⚙️",
+                url_path="profile-editor",
+            ),
+            st.Page(
+                profile_manager_page.page,
+                title="Управление профилями",
+                icon="📋",
+                url_path="profile-manager",
+            ),
+        ],
+        "Справка": [
+            st.Page(history_page.page, title="История", icon="📜", url_path="history"),
+            st.Page(docs_page.page, title="Документация", icon="📚", url_path="docs"),
+        ],
+    }
+    nav = st.navigation(pages)
+    nav.run()
 
 
 # Streamlit запускает файл как ``__main__``. При обычном ``import`` модуля

@@ -82,6 +82,69 @@ curl -X POST http://localhost:8000/check \
 }
 ```
 
+### 4.1.1. Прогрессивная проверка (SSE)
+
+Для длинных документов и UI с прогресс-баром: `/check/stream`
+возвращает [Server-Sent Events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events)
+с событиями `parse` → `check` × N → `done`.
+
+```bash
+curl -N -X POST http://localhost:8000/check/stream \
+  -H "X-API-Key: $KEY" \
+  -F file=@thesis.docx \
+  -F profile_id=gost-7.32-2017
+```
+
+Пример ответа (поток):
+
+```
+event: parse
+data: {}
+
+event: check
+data: {"code":"F.01","index":0,"total":115}
+
+event: check
+data: {"code":"F.02","index":1,"total":115}
+
+...
+
+event: done
+data: {"profile_id":"gost-7.32-2017","violations":[...],"summary":{"error":3,"warning":12,"info":4}}
+```
+
+JavaScript-клиент:
+
+```js
+const form = new FormData();
+form.append("file", fileInput.files[0]);
+form.append("profile_id", "gost-7.32-2017");
+const res = await fetch("/check/stream", { method: "POST", body: form });
+const reader = res.body.getReader();
+const dec = new TextDecoder();
+let buf = "";
+while (true) {
+  const { value, done } = await reader.read();
+  if (done) break;
+  buf += dec.decode(value, { stream: true });
+  // Парсим SSE-фреймы: разделитель «\n\n».
+  let idx;
+  while ((idx = buf.indexOf("\n\n")) >= 0) {
+    const frame = buf.slice(0, idx);
+    buf = buf.slice(idx + 2);
+    const event = frame.match(/^event: (.+)$/m)?.[1];
+    const data = JSON.parse(frame.match(/^data: (.+)$/m)?.[1] || "{}");
+    if (event === "check") updateProgress(data.index, data.total);
+    else if (event === "done") showReport(data);
+  }
+}
+```
+
+Отличия от `/check`:
+- Submission **не записывается** в БД (стрим рассчитан на интерактивные UI).
+- При фатальной ошибке парсинга возвращается `event: error`, после
+  чего поток закрывается; клиент должен это обработать.
+
 ### 4.2. Применить автофиксы
 
 ```bash

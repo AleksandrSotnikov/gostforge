@@ -287,40 +287,6 @@ def fix_initials_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
     return applied
 
 
-@register("U.01")
-def fix_si_unit_nbsp(document: Document, profile: Profile) -> list[FixApplied]:
-    """Заменить обычный пробел между числом и единицей СИ на NBSP (U.01).
-
-    Использует тот же паттерн, что и проверка U.01, поэтому исправляет
-    ровно то, что она находит (единицы по ГОСТ Р 8.000-2015). Работает
-    в пределах одного TextRun; видимо текст не меняется.
-    """
-    from gostforge.validator.checks.units import _RE_REGULAR_SPACE_BEFORE_UNIT
-
-    applied: list[FixApplied] = []
-    for paragraph in _all_paragraphs(document):
-        paragraph_changed = False
-        for run in _text_runs(paragraph):
-            if not run.text:
-                continue
-            new_text = _RE_REGULAR_SPACE_BEFORE_UNIT.sub(rf"\1{_NBSP}\3", run.text)
-            if new_text != run.text:
-                run.text = new_text
-                paragraph_changed = True
-        if paragraph_changed:
-            applied.append(
-                FixApplied(
-                    fixer_code="U.01",
-                    location=_paragraph_location(paragraph),
-                    description=(
-                        "Обычные пробелы между числом и единицей измерения (СИ) "
-                        "заменены на неразрывные"
-                    ),
-                )
-            )
-    return applied
-
-
 @register("T.01")
 def fix_body_font(document: Document, profile: Profile) -> list[FixApplied]:
     """Привести шрифт явно-заданных text-run-ов к ожидаемому (T.01).

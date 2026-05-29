@@ -439,6 +439,87 @@ def profiles_install(path: Path, overwrite: bool) -> None:
     click.echo("\nИспользовать: gostforge check FILE.docx --profile " + rec.profile_id)
 
 
+@profiles.group("community")
+def profiles_community() -> None:
+    """Маркетплейс кафедральных профилей (community-registry).
+
+    YAML-профили в каталоге profiles/community/ — иллюстративные
+    образцы кафедральных профилей. Команды этой группы позволяют
+    просмотреть список и установить выбранный в локальный реестр.
+    """
+
+
+@profiles_community.command("list")
+def profiles_community_list() -> None:
+    """Показать доступные community-профили с описанием."""
+    from gostforge.profile import list_community_profiles
+
+    items = list_community_profiles()
+    if not items:
+        click.echo("В community-каталоге нет ни одного профиля.")
+        return
+    click.echo(click.style(f"Доступно профилей: {len(items)}\n", bold=True))
+    for entry in items:
+        click.echo(
+            click.style(entry["id"], fg="cyan", bold=True)
+            + f"  {entry['name']}  (v{entry['version']})"
+        )
+        if entry["extends"]:
+            click.echo(f"  → наследует: {entry['extends']}")
+        desc = entry["description"]
+        if desc:
+            # Первая строка описания — короткое summary.
+            first_line = desc.splitlines()[0].strip()
+            click.echo(f"  {first_line}")
+        click.echo("")
+    click.echo("Установить: gostforge profiles community install <id>")
+
+
+@profiles_community.command("install")
+@click.argument("profile_id")
+@click.option(
+    "--overwrite",
+    is_flag=True,
+    help="Перезаписать, если профиль с таким id уже установлен.",
+)
+def profiles_community_install(profile_id: str, overwrite: bool) -> None:
+    """Установить community-профиль в локальный реестр по id."""
+    from gostforge.profile import read_community_profile_yaml
+
+    try:
+        yaml_content = read_community_profile_yaml(profile_id)
+    except FileNotFoundError as exc:
+        click.echo(click.style(f"Ошибка: {exc}", fg="red"), err=True)
+        click.echo("Список доступных: gostforge profiles community list", err=True)
+        sys.exit(2)
+
+    try:
+        from gostforge.db import get_connection, install_profile
+    except ImportError as exc:  # pragma: no cover
+        click.echo(f"Ошибка импорта модуля БД: {exc}", err=True)
+        sys.exit(2)
+
+    try:
+        with get_connection() as conn:
+            rec = install_profile(
+                conn,
+                yaml_content=yaml_content,
+                source=f"community:{profile_id}",
+                overwrite=overwrite,
+            )
+    except ValueError as exc:
+        click.echo(click.style(f"Ошибка: {exc}", fg="red"), err=True)
+        sys.exit(2)
+
+    click.echo(
+        click.style("Профиль установлен:", fg="green", bold=True)
+        + f" {rec.profile_id}  ({rec.name}, v{rec.version})"
+    )
+    click.echo(f"  Источник:    {rec.source}")
+    click.echo(f"  Установлен:  {rec.installed_at}")
+    click.echo("\nИспользовать: gostforge check FILE.docx --profile " + rec.profile_id)
+
+
 @profiles.command("uninstall")
 @click.argument("profile_id")
 def profiles_uninstall(profile_id: str) -> None:
@@ -1004,7 +1085,13 @@ def _print_violations_brief(violations: list[Violation], indent: str = "  ") -> 
 @click.argument("file_b", type=click.Path(exists=True, path_type=Path))
 @click.option("--profile", "-p", default="gost-7.32-2017", help="ID профиля для проверки")
 @click.option("--quiet", "-q", is_flag=True, help="Не показывать детали по нарушениям")
-def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
+@click.option(
+    "--json",
+    "json_output",
+    is_flag=True,
+    help="Машиночитаемый JSON-вывод (для CI/скриптов).",
+)
+def diff(file_a: Path, file_b: Path, profile: str, quiet: bool, json_output: bool) -> None:
     """Сравнить два .docx по списку нарушений.
 
     Выводит:
@@ -1040,6 +1127,41 @@ def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
 
     errors_a = sum(1 for v in violations_a if v.severity == "error")
     errors_b = sum(1 for v in violations_b if v.severity == "error")
+
+    if json_output:
+        import json as _json
+
+        payload = {
+            "profile_id": profile,
+            "file_a": str(file_a),
+            "file_b": str(file_b),
+            "totals": {
+                "a": len(violations_a),
+                "b": len(violations_b),
+                "errors_a": errors_a,
+                "errors_b": errors_b,
+            },
+            "fixed": [
+                {
+                    "code": v.check_code,
+                    "severity": v.severity,
+                    "message": v.message,
+                    "location": v.location,
+                }
+                for v in fixed
+            ],
+            "introduced": [
+                {
+                    "code": v.check_code,
+                    "severity": v.severity,
+                    "message": v.message,
+                    "location": v.location,
+                }
+                for v in introduced
+            ],
+        }
+        click.echo(_json.dumps(payload, ensure_ascii=False, indent=2))
+        sys.exit(1 if errors_b > errors_a else 0)
 
     click.echo(click.style("Профиль: ", bold=True) + profile + f" (v{prof.version})")
     click.echo(
@@ -1098,20 +1220,78 @@ def diff(file_a: Path, file_b: Path, profile: str, quiet: bool) -> None:
     sys.exit(0)
 
 
+def _stats_dict(s: Any) -> dict[str, Any]:
+    """DocumentStats → JSON-friendly dict (включая avg_words_per_paragraph)."""
+    return {
+        "page_sections": s.page_sections,
+        "logical_sections_total": s.logical_sections_total,
+        "logical_sections_level_1": s.logical_sections_level_1,
+        "logical_sections_level_2": s.logical_sections_level_2,
+        "logical_sections_level_3": s.logical_sections_level_3,
+        "paragraphs": s.paragraphs,
+        "paragraphs_non_empty": s.paragraphs_non_empty,
+        "tables": s.tables,
+        "figures": s.figures,
+        "lists": s.lists,
+        "list_items": s.list_items,
+        "formulas": s.formulas,
+        "paragraphs_with_inline_formula": s.paragraphs_with_inline_formula,
+        "paragraphs_with_xref": s.paragraphs_with_xref,
+        "paragraphs_with_citation": s.paragraphs_with_citation,
+        "bibliography_entries": s.bibliography_entries,
+        "bibliography_by_type": dict(s.bibliography_by_type),
+        "words": s.words,
+        "characters": s.characters,
+        "avg_words_per_paragraph": s.avg_words_per_paragraph,
+    }
+
+
 @main.command()
 @click.argument("path", type=click.Path(exists=True, path_type=Path))
-def stats(path: Path) -> None:
+@click.option(
+    "--by-section",
+    is_flag=True,
+    help="Дополнительно показать статистику по каждому разделу 1 уровня.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Вывести JSON (machine-readable). Объединяется с --by-section.",
+)
+def stats(path: Path, by_section: bool, as_json: bool) -> None:
     """Показать структурную статистику документа.
 
     Считает число разделов, параграфов, таблиц, рисунков, источников
-    и слов. Не зависит от профиля и не выполняет проверки.
+    и слов плюс метрики плотности (средняя длина параграфа,
+    распределение источников по типам). Не зависит от профиля и не
+    выполняет проверки.
+
+    Флаги:
+    * ``--by-section`` — разбивка по разделам 1 уровня.
+    * ``--json`` — JSON-вывод (для скриптов / CI).
     """
-    from gostforge.stats import compute_stats
+    from gostforge.stats import compute_per_section_stats, compute_stats
 
     targets = [path] if path.is_file() else sorted(path.glob("*.docx"))
     if not targets:
         click.echo(f"Не найдено .docx файлов в {path}", err=True)
         sys.exit(1)
+
+    if as_json:
+        payload: dict[str, Any] = {}
+        for target in targets:
+            document = parse_docx(target)
+            doc_stats = compute_stats(document)
+            entry: dict[str, Any] = {"total": _stats_dict(doc_stats)}
+            if by_section:
+                entry["by_section"] = [
+                    {"heading": heading, "stats": _stats_dict(s)}
+                    for heading, s in compute_per_section_stats(document)
+                ]
+            payload[target.name] = entry
+        click.echo(json.dumps(payload, ensure_ascii=False, indent=2))
+        return
 
     for target in targets:
         document = parse_docx(target)
@@ -1120,17 +1300,41 @@ def stats(path: Path) -> None:
         rows = [
             ("Секций вёрстки (PageSection)", s.page_sections),
             ("Разделов 1 уровня", s.logical_sections_level_1),
+            ("  …уровня 2", s.logical_sections_level_2),
+            ("  …уровня 3", s.logical_sections_level_3),
             ("Разделов всего", s.logical_sections_total),
             ("Параграфов всего", s.paragraphs),
             ("  …непустых", s.paragraphs_non_empty),
+            ("  …средняя длина в словах", s.avg_words_per_paragraph),
             ("Таблиц", s.tables),
             ("Рисунков", s.figures),
+            ("Списков", s.lists),
+            ("  …элементов в них", s.list_items),
+            ("Формул (блочных)", s.formulas),
+            ("Параграфов с inline-формулами", s.paragraphs_with_inline_formula),
+            ("Параграфов с перекр. ссылками", s.paragraphs_with_xref),
+            ("Параграфов с цитатами", s.paragraphs_with_citation),
             ("Источников", s.bibliography_entries),
             ("Слов", s.words),
             ("Символов", s.characters),
         ]
         for label, value in rows:
             click.echo(f"  {label:<32} {value}")
+        if s.bibliography_by_type:
+            click.echo("  Источников по типам:")
+            for type_name, count in sorted(s.bibliography_by_type.items()):
+                click.echo(f"    {type_name:<28} {count}")
+
+        if by_section:
+            click.secho("\nПо разделам:", bold=True)
+            for heading, sec_stats in compute_per_section_stats(document):
+                click.echo(
+                    f"  • {heading:<32} "
+                    f"параграфов {sec_stats.paragraphs_non_empty}, "
+                    f"слов {sec_stats.words}, "
+                    f"таблиц {sec_stats.tables}, "
+                    f"рисунков {sec_stats.figures}"
+                )
 
 
 @main.command()
@@ -2748,6 +2952,253 @@ def import_pdf_cmd(path: Path, output: Path, profile_id: str, title: str | None)
         "Структуру стоит проверить в `gostforge ui` "
         "(форматирование PDF не переносится)."
     )
+
+
+# --- gostforge doctor: диагностика окружения --------------------------------
+
+
+def _collect_doctor_report() -> dict[str, Any]:
+    """Собрать состояние окружения для команды `gostforge doctor`.
+
+    Возвращает структурированный отчёт со следующими разделами:
+
+    * ``python``: версия интерпретатора и платформа;
+    * ``gostforge``: версия пакета;
+    * ``dependencies``: статус core-deps (python-docx, lxml, pydantic,
+      click) и опциональных extras (streamlit, fastapi, pdfplumber);
+    * ``libreoffice``: найден ли бинарник (нужен для `pdf` / `convert`);
+    * ``profiles``: каталог + список профилей;
+    * ``registry``: число зарегистрированных проверок и фиксеров;
+    * ``database``: путь к локальной БД истории и доступность.
+
+    Чистая функция (никакого I/O в stdout, всё через словарь) —
+    тестируется без CliRunner и легко переиспользуется UI-доктором
+    или REST endpoint-ом в будущем.
+    """
+    import importlib
+    import platform
+    import shutil
+
+    from gostforge.fixer.engine import registered_fixers
+    from gostforge.profile import list_profiles
+    from gostforge.validator.engine import registered_checks
+
+    report: dict[str, Any] = {}
+
+    # --- Python / gostforge -----------------------------------------------
+    report["python"] = {
+        "version": platform.python_version(),
+        "platform": platform.platform(),
+        "min_required": "3.11",
+        "ok": sys.version_info >= (3, 11),
+    }
+    report["gostforge"] = {"version": __version__}
+
+    # --- Зависимости -------------------------------------------------------
+    # Маппинг python module name → имя дистрибутива на PyPI (для метаданных).
+    # У большинства пакетов совпадает; ниже — известные исключения.
+    _dist_names = {"docx": "python-docx", "yaml": "PyYAML", "PIL": "Pillow"}
+
+    def _module_info(modname: str, *, optional: bool = False) -> dict[str, Any]:
+        try:
+            importlib.import_module(modname)
+        except ImportError as exc:
+            return {"installed": False, "optional": optional, "error": str(exc)}
+        # `importlib.metadata.version` — современный способ узнать версию.
+        # `mod.__version__` deprecated в Click 9.1+ и не всегда есть у пакетов.
+        from importlib.metadata import PackageNotFoundError, version
+
+        try:
+            ver = version(_dist_names.get(modname, modname))
+        except PackageNotFoundError:
+            ver = "?"
+        return {"installed": True, "optional": optional, "version": ver}
+
+    report["dependencies"] = {
+        # Обязательные.
+        "python-docx": _module_info("docx"),
+        "lxml": _module_info("lxml"),
+        "pydantic": _module_info("pydantic"),
+        "yaml": _module_info("yaml"),
+        "click": _module_info("click"),
+        "openpyxl": _module_info("openpyxl"),
+        # Опциональные extras.
+        "streamlit": _module_info("streamlit", optional=True),
+        "fastapi": _module_info("fastapi", optional=True),
+        "uvicorn": _module_info("uvicorn", optional=True),
+        "pdfplumber": _module_info("pdfplumber", optional=True),
+        "PIL": _module_info("PIL", optional=True),
+    }
+
+    # --- LibreOffice (нужен для PDF / DOC→DOCX конверсии) -----------------
+    libre = shutil.which("libreoffice") or shutil.which("soffice")
+    report["libreoffice"] = {"installed": libre is not None, "path": libre}
+
+    # --- Профили -----------------------------------------------------------
+    try:
+        prof_ids = list_profiles()
+        report["profiles"] = {
+            "count": len(prof_ids),
+            "ids": list(prof_ids),
+            "ok": len(prof_ids) > 0,
+        }
+    except Exception as exc:  # pragma: no cover - реестр может упасть только при поломке файла
+        report["profiles"] = {"count": 0, "ids": [], "ok": False, "error": str(exc)}
+
+    # --- Реестр проверок/фиксеров ------------------------------------------
+    report["registry"] = {
+        "checks_count": len(registered_checks()),
+        "fixers_count": len(registered_fixers()),
+    }
+
+    # --- Локальная БД ------------------------------------------------------
+    db_path = Path.home() / ".gostforge" / "gostforge.db"
+    report["database"] = {
+        "path": str(db_path),
+        "exists": db_path.exists(),
+        "size_bytes": db_path.stat().st_size if db_path.exists() else 0,
+    }
+
+    # --- Плагины -----------------------------------------------------------
+    try:
+        from gostforge.plugins import discover_plugin_files, plugins_dir
+
+        plug_dir = plugins_dir()
+        plug_files = discover_plugin_files() if plug_dir.exists() else []
+        report["plugins"] = {
+            "dir": str(plug_dir),
+            "exists": plug_dir.exists(),
+            "files_count": len(plug_files),
+        }
+    except Exception as exc:  # pragma: no cover
+        report["plugins"] = {"dir": "?", "exists": False, "error": str(exc)}
+
+    return report
+
+
+def _doctor_status(report: dict[str, Any]) -> tuple[bool, list[str]]:
+    """Определить общий статус: ok + список warning-сообщений.
+
+    `ok=True` означает, что критичных проблем нет (Python ≥ 3.11,
+    core-deps установлены, хотя бы один профиль). Опциональные deps
+    и LibreOffice дают warning, но не делают окружение «не рабочим».
+    """
+    warnings: list[str] = []
+    ok = True
+
+    py = report.get("python", {})
+    if not py.get("ok"):
+        warnings.append(
+            f"Python {py.get('version', '?')} — требуется ≥ {py.get('min_required', '3.11')}"
+        )
+        ok = False
+
+    deps = report.get("dependencies", {})
+    for name, info in deps.items():
+        if info.get("installed"):
+            continue
+        if info.get("optional"):
+            warnings.append(f"{name} (опционально) не установлен")
+        else:
+            warnings.append(f"{name} (обязательно) не установлен")
+            ok = False
+
+    if not report.get("libreoffice", {}).get("installed"):
+        warnings.append("LibreOffice не найден — команды `pdf` и `convert` не сработают")
+
+    profs = report.get("profiles", {})
+    if not profs.get("ok"):
+        warnings.append("Не найдено ни одного профиля (`profiles/` пуст?)")
+        ok = False
+
+    reg = report.get("registry", {})
+    if reg.get("checks_count", 0) == 0:
+        warnings.append("Реестр проверок пуст — что-то не так с пакетом")
+        ok = False
+
+    return ok, warnings
+
+
+@main.command()
+@click.option("--json", "as_json", is_flag=True, help="Вывести отчёт как JSON (machine-readable).")
+def doctor(as_json: bool) -> None:
+    """Диагностика окружения gostforge.
+
+    Показывает: версии Python и зависимостей, наличие LibreOffice,
+    каталог и список профилей, число зарегистрированных проверок и
+    фиксеров, путь к локальной БД, каталог плагинов.
+
+    Exit codes:
+    * 0 — критичных проблем нет, можно работать;
+    * 1 — есть критичные проблемы (нет core-deps, нет профилей, и т. п.).
+    """
+    report = _collect_doctor_report()
+    ok, warnings = _doctor_status(report)
+
+    if as_json:
+        out = {"ok": ok, "warnings": warnings, "report": report}
+        click.echo(json.dumps(out, ensure_ascii=False, indent=2))
+        sys.exit(0 if ok else 1)
+
+    # Человекочитаемый вывод.
+    click.echo(click.style(f"gostforge v{__version__}", bold=True))
+    py = report["python"]
+    py_mark = click.style("✓", fg="green") if py["ok"] else click.style("✗", fg="red")
+    click.echo(f"{py_mark} Python: {py['version']} ({py['platform']})")
+
+    click.echo("\n📦 Зависимости:")
+    for name, info in report["dependencies"].items():
+        if info.get("installed"):
+            mark = click.style("✓", fg="green")
+            ver = info.get("version", "?")
+            tag = " (опционально)" if info.get("optional") else ""
+            click.echo(f"  {mark} {name}: {ver}{tag}")
+        else:
+            mark = (
+                click.style("⚠", fg="yellow")
+                if info.get("optional")
+                else click.style("✗", fg="red")
+            )
+            tag = " (опционально)" if info.get("optional") else " (ОБЯЗАТЕЛЬНО)"
+            click.echo(f"  {mark} {name}: не установлен{tag}")
+
+    lo = report["libreoffice"]
+    mark = click.style("✓", fg="green") if lo["installed"] else click.style("⚠", fg="yellow")
+    where = lo["path"] or "не найден"
+    click.echo(f"\n📄 LibreOffice: {mark} {where}")
+
+    profs = report["profiles"]
+    mark = click.style("✓", fg="green") if profs.get("ok") else click.style("✗", fg="red")
+    click.echo(f"\n⚙ Профили: {mark} {profs.get('count', 0)} шт.")
+    for pid in profs.get("ids", []):
+        click.echo(f"    • {pid}")
+
+    reg = report["registry"]
+    click.echo(f"\n🔍 Реестр: проверок {reg['checks_count']} · автофиксеров {reg['fixers_count']}")
+
+    db = report["database"]
+    if db.get("exists"):
+        size_kb = db.get("size_bytes", 0) // 1024
+        click.echo(f"\n📊 БД истории: {db['path']} ({size_kb} КБ)")
+    else:
+        click.echo(f"\n📊 БД истории: {db['path']} (создастся при первой проверке)")
+
+    plug = report["plugins"]
+    if plug.get("exists"):
+        click.echo(f"\n🔌 Плагины: {plug['dir']} ({plug['files_count']} файлов)")
+    else:
+        click.echo(f"\n🔌 Плагины: {plug['dir']} (каталог не создан)")
+
+    # Сводка.
+    if warnings:
+        click.echo("\n" + click.style("Предупреждения:", fg="yellow", bold=True))
+        for w in warnings:
+            click.echo(f"  • {w}")
+    if ok:
+        click.echo("\n" + click.style("Готово к работе.", fg="green"))
+    else:
+        click.echo("\n" + click.style("Есть критичные проблемы — см. выше.", fg="red"))
+    sys.exit(0 if ok else 1)
 
 
 if __name__ == "__main__":

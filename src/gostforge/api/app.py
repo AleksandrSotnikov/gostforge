@@ -11,24 +11,26 @@ from __future__ import annotations
 import os
 import tempfile
 from collections import Counter
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 try:
     from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse, Response
+    from fastapi.responses import JSONResponse, Response, StreamingResponse
     from starlette.middleware.base import BaseHTTPMiddleware
     from starlette.types import ASGIApp
 except ImportError as exc:  # pragma: no cover — extras [api] обязателен
     raise ImportError('Установите gostforge[api] для REST API: pip install -e ".[api]"') from exc
 
 import contextlib
+import json
 
 from gostforge import __version__
 from gostforge.profile import Profile, list_profiles, load_profile
 from gostforge.validator import validate
-from gostforge.validator.engine import registered_checks
+from gostforge.validator.engine import registered_checks, validate_iter
 
 # --- Конфигурация из env ----------------------------------------------------
 
@@ -188,6 +190,17 @@ def _parse_uploaded_docx(data: bytes) -> Any:
     finally:
         with contextlib.suppress(OSError):
             tmp_path.unlink()
+
+
+def _sse_event(event_name: str, payload: dict[str, Any]) -> str:
+    """Сформировать SSE-фрейм ``event: <name>\\ndata: <json>\\n\\n``.
+
+    SSE-протокол (W3C EventSource) требует CRLF-нейтральные разделители
+    и пустую строку как конец события. JSON компактный (без пробелов)
+    — браузер парсит как `event.data`.
+    """
+    body = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+    return f"event: {event_name}\ndata: {body}\n\n"
 
 
 # --- Фабрика приложения -----------------------------------------------------
@@ -388,6 +401,73 @@ def create_app() -> FastAPI:
                 },
                 "submission_id": submission_id,
             }
+        )
+
+    @app.post("/check/stream")
+    async def post_check_stream(
+        file: UploadFile = File(...),
+        profile_id: str = Form("gost-7.32-2017"),
+    ) -> StreamingResponse:
+        """SSE-вариант ``/check``: стримит прогресс проверки в реальном времени.
+
+        Клиент использует ``EventSource``/``fetch`` и читает события:
+
+        * ``parse`` — начали парсить .docx (без data).
+        * ``check`` — запустилась очередная проверка
+          ``{code, index, total}`` для прогресс-бара.
+        * ``done`` — финал ``{violations, summary}``; этот event
+          гарантированно последний и его получение можно использовать
+          как сигнал «всё, отписываемся».
+        * ``error`` — фатальная ошибка (только при крахе парсинга);
+          клиент должен обработать и отключиться.
+
+        В отличие от ``/check`` submission в БД не пишется —
+        streaming-вариант рассчитан на интерактивные UI, которым
+        нужен прогресс, а не запись в историю.
+        """
+        data = await _read_docx_upload(file)
+        profile = _load_profile_or_404(profile_id)
+
+        def event_stream() -> Iterator[str]:
+            yield _sse_event("parse", {})
+            try:
+                document = _parse_uploaded_docx(data)
+            except Exception as exc:
+                yield _sse_event("error", {"message": f"Не удалось распарсить .docx: {exc}"})
+                return
+            violations_final: list[Any] = []
+            for evt in validate_iter(document, profile):
+                if evt[0] == "check":
+                    _, code, index, total = evt
+                    yield _sse_event(
+                        "check",
+                        {"code": code, "index": index, "total": total},
+                    )
+                elif evt[0] == "done":
+                    violations_final = evt[1]
+            summary = Counter(v.severity for v in violations_final)
+            yield _sse_event(
+                "done",
+                {
+                    "profile_id": profile_id,
+                    "violations": [_violation_to_dict(v) for v in violations_final],
+                    "summary": {
+                        "error": summary.get("error", 0),
+                        "warning": summary.get("warning", 0),
+                        "info": summary.get("info", 0),
+                    },
+                },
+            )
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            # Заголовки против буферизации в типичных reverse-proxy
+            # (nginx) — иначе клиент получит всё разом в конце.
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
         )
 
     @app.post("/fix")

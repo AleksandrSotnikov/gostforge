@@ -63,14 +63,22 @@ def test_table_cell_single_line_spacing(tmp_path: Path) -> None:
 
 
 def test_table_header_centered_cells_left(tmp_path: Path) -> None:
-    """Шапка по центру (header_alignment), ячейки слева (cell_alignment)."""
+    """Шапка по центру (header_alignment), ячейки слева (cell_alignment).
+
+    Отключаем `continuation_caption` — это первая строка-маркер
+    «Продолжение таблицы N», которую дефолтный профиль теперь
+    добавляет. Здесь мы тестируем именно header/cell alignment, поэтому
+    оставляем чистую структуру header+data.
+    """
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.table.continuation_caption = False
     b = (
         work("X", year=2026)
         .section("Введение")
         .table(headers=["A", "B"], rows=[["x", "y"]], caption="T")
     )
     out = tmp_path / "tbl3.docx"
-    export_docx(b.build(), load_profile("gost-7.32-2017"), out)
+    export_docx(b.build(), profile, out)
     raw = DocxDocument(str(out))
     t = raw.tables[0]
     # Row 0 — header.

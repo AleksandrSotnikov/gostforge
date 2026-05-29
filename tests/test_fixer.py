@@ -905,3 +905,96 @@ def test_t02_fixer_respects_caption_size() -> None:
     fix(doc, profile, codes=["T.02"])
     runs = [el for el in paragraph.content if isinstance(el, TextRun)]
     assert runs[0].size_pt == 12.0
+
+
+def test_u02_fix_registered() -> None:
+    """Фиксер U.02 присутствует в реестре."""
+    assert "U.02" in registered_fixers()
+
+
+def test_u02_replaces_punct_with_nbsp() -> None:
+    """«10.кг» → «10<NBSP>кг»: точка между числом и единицей заменяется на NBSP."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="значение 10.кг")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.02"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "U.02"
+    assert isinstance(applied[0], FixApplied)
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    # В тексте должен появиться неразрывный пробел (U+00A0).
+    assert " " in text_runs[0].text
+    assert text_runs[0].text == "значение 10 кг"
+
+
+def test_u02_no_change_when_clean() -> None:
+    """Если между числом и единицей уже стоит обычный пробел — U.02 не трогает."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="10 кг")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.02"])
+    assert applied == []
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "10 кг"
+
+
+# --- U.03: точка после единицы -----------------------------------------------
+
+
+def test_u03_fix_registered() -> None:
+    """Фиксер U.03 присутствует в реестре."""
+    assert "U.03" in registered_fixers()
+
+
+def test_u03_strips_trailing_dot() -> None:
+    """«10 кг.» → «10 кг»: точка после единицы измерения убирается."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="вес 10 кг.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.03"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "U.03"
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "вес 10 кг"
+
+
+def test_u03_preserves_year_g() -> None:
+    """«1990 г.» — это «год», а не «грамм». Фиксер должен пропустить."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="в 1990 г. произошло событие")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.03"])
+    assert applied == []
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "в 1990 г. произошло событие"
+
+
+def test_u03_preserves_page_s() -> None:
+    """«5 с.» — это «страница» в библиографии, фиксер пропускает «с.»."""
+    paragraph = Paragraph(
+        id="p1",
+        content=[TextRun(text="см. 5 с.")],
+        style_name="Normal",
+    )
+    doc = _doc_with_paragraph(paragraph)
+    profile = load_profile("gost-7.32-2017")
+    applied = fix(doc, profile, codes=["U.03"])
+    assert applied == []
+    text_runs = [el for el in paragraph.content if isinstance(el, TextRun)]
+    assert text_runs[0].text == "см. 5 с."
