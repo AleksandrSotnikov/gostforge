@@ -22,8 +22,8 @@
 
 ## Текущее состояние
 
-**119 проверок** в 16 категориях · **35 автофиксеров** · **30 CLI-команд** ·
-**6 режимов веб-UI** · **REST API на FastAPI** · **1654+ тестов**
+**119 проверок** в 16 категориях · **35 автофиксеров** · **27 CLI-команд** ·
+**6 режимов веб-UI** · **REST API на FastAPI** · **1740+ тестов**
 (`ruff check`, `ruff format`, `mypy --strict` чисты).
 
 Актуальный реестр проверок — `gostforge checks`. План того, что
@@ -60,7 +60,7 @@ src/gostforge/
 ├── db/             # SQLite-БД истории submissions + комментариев
 ├── api/            # FastAPI-приложение (опц.)
 ├── web/            # Streamlit-приложение (опц.): app, builder_editor, profile_editor, ...
-└── cli.py          # Точка входа `gostforge` (30 команд)
+└── cli.py          # Точка входа `gostforge` (27 команд)
 
 profiles/           # YAML-профили (base + примеры наследников)
 tests/              # pytest (fixtures/ под gitignore для реальных .docx)
