@@ -48,6 +48,9 @@ cover/
 .venv
 env/
 venv/
+
+# Резервные копии БД, создаваемые scripts/update.sh
+backups/
 ENV/
 env.bak/
 venv.bak/

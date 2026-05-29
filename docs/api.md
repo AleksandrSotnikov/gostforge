@@ -209,6 +209,22 @@ curl -X POST http://localhost:8000/check \
 * `Dockerfile.ui` — Streamlit UI (порт 8501).
 * `docker-compose.yml` — оба сервиса вместе.
 
+### Скрипты автоматизации (рекомендуется)
+
+Каталог `scripts/` содержит кроссплатформенные обёртки, которые сами
+доустанавливают Docker/Compose (Ubuntu/Linux/macOS — `*.sh`, Windows —
+`*.ps1`), создают `.env`, собирают образы, поднимают сервисы и ждут
+healthcheck:
+
+```bash
+./scripts/deploy.sh            # развернуть (api + ui)
+./scripts/update.sh            # обновить из git с бэкапом БД и откатом
+```
+
+Подробности и опции — в [scripts/README.md](../scripts/README.md).
+
+### Вручную через docker compose
+
 ```bash
 cp .env.example .env
 # отредактируйте .env: задайте GOSTFORGE_API_KEYS и GOSTFORGE_CORS_ORIGINS
