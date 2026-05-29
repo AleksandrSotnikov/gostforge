@@ -7,6 +7,7 @@ from pathlib import Path
 import docx as python_docx
 
 from gostforge.exporter import export_docx
+from gostforge.fixer import fix, registered_fixers
 from gostforge.model import (
     Document,
     PageGeometry,
@@ -16,7 +17,18 @@ from gostforge.model import (
     TitleBlock,
     TitleBlockRole,
 )
+from gostforge.parser import parse_docx
 from gostforge.profile import load_profile
+from gostforge.validator import validate
+
+
+def _profile_requiring_title_block():  # type: ignore[no-untyped-def]
+    """Профиль ЕСКД с включённым штампом (для F.08)."""
+    from gostforge.profile.schema import TitleBlockProfile
+
+    profile = load_profile("gost-7.32-2017")
+    profile.styles.page.title_block = TitleBlockProfile(enabled=True, organization="Кафедра X")
+    return profile
 
 
 def _doc_with_title_block(tb: TitleBlock | None) -> Document:
@@ -153,3 +165,69 @@ def test_title_block_applied_from_profile(tmp_path: Path) -> None:
     tables = _footer_tables(out)
     assert len(tables) == 1
     assert "Кафедра X" in _all_cell_text(tables[0])
+
+
+# --- парсер: детекция наличия штампа -----------------------------------------
+
+
+def test_parser_detects_title_block_presence(tmp_path: Path) -> None:
+    """Экспортированный штамп определяется парсером как присутствующий."""
+    tb = TitleBlock(enabled=True, form="form1", designation="X.001", organization="Каф.")
+    doc = _doc_with_title_block(tb)
+    out = tmp_path / "rt.docx"
+    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    reparsed = parse_docx(out)
+    parsed_tb = reparsed.page_sections[0].title_block
+    assert parsed_tb is not None
+    assert parsed_tb.enabled is True
+
+
+def test_parser_no_title_block_when_absent(tmp_path: Path) -> None:
+    """Без штампа парсер возвращает title_block=None."""
+    doc = _doc_with_title_block(None)
+    out = tmp_path / "rt-none.docx"
+    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    reparsed = parse_docx(out)
+    assert reparsed.page_sections[0].title_block is None
+
+
+# --- F.08: нормоконтроль наличия штампа --------------------------------------
+
+
+def test_f08_silent_when_not_required() -> None:
+    """Профиль без штампа (gost-7.32) → F.08 молчит."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_title_block(None)
+    assert [v for v in validate(doc, profile) if v.check_code == "F.08"] == []
+
+
+def test_f08_errors_when_missing() -> None:
+    """Профиль требует штамп, а его нет → ошибка F.08."""
+    profile = _profile_requiring_title_block()
+    doc = _doc_with_title_block(None)
+    f08 = [v for v in validate(doc, profile) if v.check_code == "F.08"]
+    assert len(f08) == 1
+    assert f08[0].severity == "error"
+
+
+def test_f08_fixer_adds_title_block() -> None:
+    """F.08-фиксер добавляет штамп из профиля; после фикса проверка молчит."""
+    assert "F.08" in registered_fixers()
+    profile = _profile_requiring_title_block()
+    doc = _doc_with_title_block(None)
+
+    applied = fix(doc, profile, codes=["F.08"])
+    assert len(applied) == 1
+    assert applied[0].fixer_code == "F.08"
+    tb = doc.page_sections[0].title_block
+    assert tb is not None and tb.enabled is True
+    assert tb.organization == "Кафедра X"
+    assert [v for v in validate(doc, profile) if v.check_code == "F.08"] == []
+
+
+def test_f08_fixer_noop_when_not_required() -> None:
+    """Профиль штамп не требует — фиксер ничего не делает."""
+    profile = load_profile("gost-7.32-2017")
+    doc = _doc_with_title_block(None)
+    assert fix(doc, profile, codes=["F.08"]) == []
+    assert doc.page_sections[0].title_block is None

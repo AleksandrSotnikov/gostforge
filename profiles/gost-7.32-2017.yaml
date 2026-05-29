@@ -115,6 +115,9 @@ checks:
   # (styles.page.border отсутствует), поэтому проверка фактически
   # бездействует; включена для единообразия с профилями ЕСКД.
   F.07: {enabled: true}
+  # F.08 — основная надпись (штамп ЕСКД). Бездействует, пока
+  # styles.page.title_block не включён (для отчётов 7.32 штампа нет).
+  F.08: {enabled: true}
   T.01: {enabled: true, params: {font: "Times New Roman"}}
   T.02: {enabled: true, params: {body_size: 14, caption_size: 12, footnote_size: 10}}
   T.03: {enabled: true, params: {line_spacing: 1.5}}

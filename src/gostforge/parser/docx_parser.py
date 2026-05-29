@@ -48,6 +48,7 @@ from gostforge.model import (
     ParagraphAlignment,
     Table,
     TextRun,
+    TitleBlock,
 )
 
 # Relationship-namespace для <w:hyperlink r:id="...">.
@@ -499,7 +500,32 @@ def _extract_page_section(docx_doc: DocxDocument) -> PageSection:
         if _template_has_text(header_config.default, "{page}"):
             page_section.page_numbering.visible = True
 
+    page_section.title_block = _extract_title_block(sect)
+
     return page_section
+
+
+def _extract_title_block(sect: DocxSection) -> TitleBlock | None:
+    """Определить наличие основной надписи (штампа) по таблице в footer-е.
+
+    Эвристика: основная надпись ЕСКД рендерится таблицей в нижнем
+    колонтитуле. Если в footer-е есть хотя бы одна таблица — считаем,
+    что штамп присутствует, и возвращаем ``TitleBlock(enabled=True)``.
+
+    Поля штампа (обозначение, организация и т.д.) обратно из .docx не
+    восстанавливаются — это только детекция наличия для нормоконтроля
+    (проверка F.08). Возвращает None, если таблиц в footer нет.
+    """
+    footer = sect.footer
+    if footer is None:
+        return None
+    try:
+        tables = footer.tables
+    except (AttributeError, KeyError):
+        return None
+    if not tables:
+        return None
+    return TitleBlock(enabled=True)
 
 
 def _template_has_text(template: ContentTemplate | None, needle: str) -> bool:

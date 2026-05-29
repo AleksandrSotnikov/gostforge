@@ -11,6 +11,8 @@ from gostforge.model import (
     InlineElement,
     PageBorder,
     TextRun,
+    TitleBlock,
+    TitleBlockRole,
 )
 from gostforge.profile import Profile
 
@@ -242,6 +244,40 @@ def fix_page_border(document: Document, profile: Profile) -> list[FixApplied]:
     return applied
 
 
+@register("F.08")
+def fix_title_block(document: Document, profile: Profile) -> list[FixApplied]:
+    """Добавить основную надпись (штамп) из профиля (F.08).
+
+    Зеркально проверке F.08. Если профиль штамп не требует
+    (`None` / `enabled = False`) — фиксер ничего не делает. Иначе каждой
+    секции без включённого штампа выставляется `TitleBlock` из профиля
+    (форма, организация, роли). Безопасная правка метаданных вёрстки.
+    """
+    expected = profile.styles.page.title_block
+    if expected is None or not expected.enabled:
+        return []
+
+    applied: list[FixApplied] = []
+    for section in document.page_sections:
+        tb = section.title_block
+        if tb is not None and tb.enabled:
+            continue
+        section.title_block = TitleBlock(
+            enabled=True,
+            form=expected.form,
+            organization=expected.organization,
+            roles=[TitleBlockRole(role=r.role, name=r.name, date=r.date) for r in expected.roles],
+        )
+        applied.append(
+            FixApplied(
+                fixer_code="F.08",
+                location=f"page_sections.{section.id}.title_block",
+                description="Добавлена основная надпись (штамп ЕСКД) из профиля",
+            )
+        )
+    return applied
+
+
 @register("F.04")
 def fix_page_number_position(
     document: Document,
@@ -327,4 +363,5 @@ __all__ = [
     "fix_page_number_position",
     "fix_page_numbering_start",
     "fix_paper_size",
+    "fix_title_block",
 ]

@@ -328,6 +328,44 @@ def check_page_border(document: Document, profile: Profile) -> list[Violation]:
     return violations
 
 
+@register("F.08")
+def check_title_block(document: Document, profile: Profile) -> list[Violation]:
+    """Основная надпись (штамп ЕСКД, ГОСТ 2.104) присутствует, если требует профиль.
+
+    Ожидание — из `profile.styles.page.title_block`:
+
+    * если профиль штамп не требует (`None` или `enabled = False`) —
+      проверка молчит (у многих специальностей штампа нет — это норма);
+    * если профиль штамп требует — у каждой секции должна быть включённая
+      основная надпись, иначе `error`.
+
+    Наличие штампа определяется парсером по таблице в нижнем колонтитуле
+    (см. `_extract_title_block`); поля штампа обратно не разбираются.
+    """
+    expected = profile.styles.page.title_block
+    if expected is None or not expected.enabled:
+        return []
+
+    violations: list[Violation] = []
+    for section in document.page_sections:
+        tb = section.title_block
+        if tb is None or not tb.enabled:
+            violations.append(
+                Violation(
+                    check_code="F.08",
+                    severity="error",
+                    message=(
+                        f"В секции «{section.name}» отсутствует основная надпись "
+                        f"(штамп), хотя профиль её требует (ЕСКД, ГОСТ 2.104)"
+                    ),
+                    location=f"page_sections.{section.id}.title_block",
+                    suggestion="Добавить основную надпись (штамп) согласно профилю",
+                    details={"expected": "enabled", "actual": "none"},
+                )
+            )
+    return violations
+
+
 @register("F.03")
 def check_orientation(document: Document, profile: Profile) -> list[Violation]:
     """Проверка ориентации страницы (по умолчанию portrait).
