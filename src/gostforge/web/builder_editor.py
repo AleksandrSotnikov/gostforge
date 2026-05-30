@@ -260,6 +260,84 @@ def build_table_header_preview(
     return grid
 
 
+def _build_multi_header_preview_html(
+    *,
+    extra_rows: list[list[str]],
+    headers: list[str],
+    merges: list[dict[str, int]],
+    data_sample: list[str] | None = None,
+) -> str:
+    """Сгенерировать HTML-превью многоуровневой шапки таблицы.
+
+    Когда пользователь редактирует двух/трёх-уровневую шапку через
+    ``|``-разделитель и пустые ячейки для авто-склейки, ему трудно
+    представить итоговый вид. Превью показывает таблицу с реальными
+    ``colspan`` из merges + (опц.) первую строку данных, чтобы было
+    видно, как названия столбцов выровнены относительно данных.
+
+    Если ``extra_rows`` пуст — вернёт пустую строку (превью не нужно
+    для одноуровневой шапки).
+    """
+    import html
+
+    if not extra_rows:
+        return ""
+
+    # Какие ячейки «съедены» colspan/rowspan: набор (row, col),
+    # которые НЕ рисуются.
+    skip: set[tuple[int, int]] = set()
+    merge_map: dict[tuple[int, int], tuple[int, int]] = {}
+    for m in merges:
+        r, c = int(m.get("row", 0)), int(m.get("col", 0))
+        rs, cs = int(m.get("rowspan", 1)), int(m.get("colspan", 1))
+        merge_map[(r, c)] = (rs, cs)
+        for dr in range(rs):
+            for dc in range(cs):
+                if (dr, dc) != (0, 0):
+                    skip.add((r + dr, c + dc))
+
+    # Соберём все строки: extra_rows сверху, потом main header,
+    # потом первая data-row для контекста (если есть).
+    all_rows: list[tuple[list[str], bool]] = [(row, True) for row in extra_rows]
+    all_rows.append((headers, True))
+    if data_sample is not None:
+        all_rows.append((data_sample, False))
+
+    n_cols = max((len(r) for r, _ in all_rows), default=0)
+    if n_cols == 0:
+        return ""
+
+    parts = [
+        '<table style="border-collapse: collapse; margin: 6px 0; '
+        'font-family: monospace; font-size: 0.9em;">'
+    ]
+    for r, (row, is_header) in enumerate(all_rows):
+        tag = "th" if is_header else "td"
+        parts.append("<tr>")
+        for c in range(n_cols):
+            if (r, c) in skip:
+                continue
+            text = row[c] if c < len(row) else ""
+            text_html = html.escape(text) if text else "&nbsp;"
+            attr_list = []
+            if (r, c) in merge_map:
+                rs, cs = merge_map[(r, c)]
+                if rs > 1:
+                    attr_list.append(f'rowspan="{rs}"')
+                if cs > 1:
+                    attr_list.append(f'colspan="{cs}"')
+            style_parts = ["border: 1px solid #888;", "padding: 4px 10px;"]
+            if is_header:
+                style_parts.append("background: #eef;")
+                style_parts.append("font-weight: bold;")
+                style_parts.append("text-align: center;")
+            attr_list.append(f'style="{" ".join(style_parts)}"')
+            parts.append(f"<{tag} {' '.join(attr_list)}>{text_html}</{tag}>")
+        parts.append("</tr>")
+    parts.append("</table>")
+    return "".join(parts)
+
+
 def _purge_section_ids_recursively(section: dict[str, Any]) -> None:
     """Убрать `id` у самой секции и всех вложенных подразделов.
 
@@ -1348,32 +1426,56 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
         builder.section("Введение").paragraph("")
     else:
         for sec in sections:
-            fig_num = sec.get("figure_numbering") or None
-            tbl_num = sec.get("table_numbering") or None
-            sec_builder = builder.section(
-                sec.get("heading", "Раздел"),
-                figure_numbering=fig_num if fig_num in ("continuous", "by_chapter") else None,
-                table_numbering=tbl_num if tbl_num in ("continuous", "by_chapter") else None,
+            # Per-section override схемы нумерации рисунков/таблиц.
+            # Допустимые значения: "by_chapter" / "continuous" / None
+            # (использовать профиль). Невалидные значения молча
+            # игнорируются — UI всегда даёт корректные.
+            # Канонический ключ — *_override (UI-панель). Старые сохранённые
+            # state могут хранить figure_numbering/table_numbering — читаем их
+            # как fallback для обратной совместимости.
+            fig_override_raw = sec.get("figure_numbering_override") or sec.get("figure_numbering")
+            tbl_override_raw = sec.get("table_numbering_override") or sec.get("table_numbering")
+            fig_override = cast(
+                "Literal['continuous', 'by_chapter'] | None",
+                fig_override_raw if fig_override_raw in ("continuous", "by_chapter") else None,
             )
-            _apply_blocks(sec_builder, sec.get("blocks") or [])
-            for sub in sec.get("subsections") or []:
-                sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))
-                _apply_blocks(sub_builder, sub.get("blocks") or [])
-                # Рекурсия для подразделов 3-го уровня и глубже.
-                for subsub in sub.get("subsections") or []:
-                    subsub_builder = sub_builder.subsection(subsub.get("heading", "Подраздел"))
-                    _apply_blocks(subsub_builder, subsub.get("blocks") or [])
-            if sec.get("is_bibliography"):
-                for ref in sec.get("references") or []:
-                    if isinstance(ref, str) and ref.strip():
-                        sec_builder.reference(ref)
-            # Отключённые проверки раздела (UI: «Нормоконтроль раздела»).
-            disabled = sec.get("disabled_checks") or []
-            if isinstance(disabled, list) and disabled:
-                if "*" in disabled:
-                    sec_builder.skip_all_checks()
-                else:
-                    sec_builder.skip_checks(*[str(c) for c in disabled])
+            tbl_override = cast(
+                "Literal['continuous', 'by_chapter'] | None",
+                tbl_override_raw if tbl_override_raw in ("continuous", "by_chapter") else None,
+            )
+            # Свой префикс главы для нумерации «X.N» (например, «А», «В», «I.1»).
+            # Применяется ПОСЛЕ section() — потому что section() сам выставляет
+            # автоматический _current_chapter_label.
+            chapter_label_raw = sec.get("chapter_label_override")
+            chapter_label = (
+                chapter_label_raw.strip()
+                if isinstance(chapter_label_raw, str) and chapter_label_raw.strip()
+                else None
+            )
+            with builder.numbering_override(figure=fig_override, table=tbl_override):
+                sec_builder = builder.section(sec.get("heading", "Раздел"))
+                with builder.chapter_label_override(chapter_label):
+                    _apply_blocks(sec_builder, sec.get("blocks") or [])
+                    for sub in sec.get("subsections") or []:
+                        sub_builder = sec_builder.subsection(sub.get("heading", "Подраздел"))
+                        _apply_blocks(sub_builder, sub.get("blocks") or [])
+                        # Рекурсия для подразделов 3-го уровня и глубже.
+                        for subsub in sub.get("subsections") or []:
+                            subsub_builder = sub_builder.subsection(
+                                subsub.get("heading", "Подраздел")
+                            )
+                            _apply_blocks(subsub_builder, subsub.get("blocks") or [])
+                    if sec.get("is_bibliography"):
+                        for ref in sec.get("references") or []:
+                            if isinstance(ref, str) and ref.strip():
+                                sec_builder.reference(ref)
+                    # Отключённые проверки раздела (UI: «Нормоконтроль раздела»).
+                    disabled = sec.get("disabled_checks") or []
+                    if isinstance(disabled, list) and disabled:
+                        if "*" in disabled:
+                            sec_builder.skip_all_checks()
+                        else:
+                            sec_builder.skip_checks(*[str(c) for c in disabled])
 
     _apply_title_block_from_state(builder, state)
     _apply_page_border_from_state(builder, state)
@@ -4369,36 +4471,6 @@ def _render_active_section_editor() -> None:
         key=f"edit_heading_{sec_id}",
     )
 
-    # Per-section override схемы нумерации рисунков/таблиц (поверх профиля).
-    with st.expander("Нумерация рисунков/таблиц в разделе", expanded=False):
-        _num_opts = ["(по профилю)", "continuous", "by_chapter"]
-        _num_labels = {
-            "(по профилю)": "По профилю",
-            "continuous": "Сквозная (1, 2, 3, …)",
-            "by_chapter": "По главам (1.1, 1.2, …)",
-        }
-
-        def _num_index(value: str) -> int:
-            return _num_opts.index(value) if value in _num_opts else 0
-
-        fig_choice = st.selectbox(
-            "Рисунки",
-            options=_num_opts,
-            index=_num_index(section.get("figure_numbering") or "(по профилю)"),
-            format_func=lambda v: _num_labels[v],
-            key=f"sec_fig_num_{sec_id}",
-        )
-        tbl_choice = st.selectbox(
-            "Таблицы",
-            options=_num_opts,
-            index=_num_index(section.get("table_numbering") or "(по профилю)"),
-            format_func=lambda v: _num_labels[v],
-            key=f"sec_tbl_num_{sec_id}",
-        )
-        section["figure_numbering"] = "" if fig_choice == "(по профилю)" else fig_choice
-        section["table_numbering"] = "" if tbl_choice == "(по профилю)" else tbl_choice
-        st.caption("В приложениях нумерация всегда буквенная (А.1, …) независимо от выбора.")
-
     # Быстрое переупорядочивание: select-box с целевой позицией.
     # Альтернатива drag-and-drop, не требующая внешних библиотек.
     if len(sections) > 1:
@@ -5205,59 +5277,7 @@ def _render_single_block(
     if kind == "paragraph":
         _render_paragraph_inline_editor(block, base=base)
     elif kind == "table":
-        # Простейший табличный редактор: два text_area — заголовки и строки.
-        # Это сознательно низкоуровнево: data_editor в Streamlit требует
-        # pandas DataFrame и непросто меняет схему при добавлении колонок.
-        headers_str = ",".join(block.get("headers") or [])
-        new_headers = st.text_input(
-            "Заголовки (через запятую)",
-            value=headers_str,
-            key=f"{base}_headers",
-        )
-        block["headers"] = [h.strip() for h in new_headers.split(",") if h.strip()]
-        # Дополнительные ряды шапки (для двух-/трёх-уровневой шапки по ГОСТ Р 2.105).
-        extra_rows_str = "\n".join("|".join(row) for row in (block.get("extra_header_rows") or []))
-        new_extra = st.text_area(
-            "Доп. шапка (один ряд = одна строка; пустая ячейка склеится с левой соседней)",
-            value=extra_rows_str,
-            key=f"{base}_extra_headers",
-            height=80,
-            help=(
-                "Пример: «Группа 1||Группа 2|» — «Группа 1» займёт 2 колонки и "
-                "«Группа 2» — следующие 2. Каждая строка — отдельный ряд шапки сверху вниз."
-            ),
-        )
-        parsed_extra: list[list[str]] = []
-        for line in new_extra.splitlines():
-            if not line.strip():
-                continue
-            parsed_extra.append([cell.strip() for cell in line.split("|")])
-        block["extra_header_rows"] = parsed_extra
-        # Авто-генерация merges из пустых ячеек: подряд идущие пустые → colspan.
-        block["merges"] = _auto_merges_from_extra_header_rows(parsed_extra)
-        # Превью многоуровневой шапки: метки групп раскрыты по своим колонкам.
-        if parsed_extra:
-            preview_grid = build_table_header_preview(parsed_extra, block["headers"])
-            st.caption("Превью шапки (группы раскрыты по колонкам):")
-            st.table(preview_grid)
-        rows_str = "\n".join("|".join(row) for row in (block.get("rows") or []))
-        new_rows = st.text_area(
-            "Строки (одна строка таблицы — одна строка ввода; ячейки разделять символом «|»)",
-            value=rows_str,
-            key=f"{base}_rows",
-            height=140,
-        )
-        parsed_rows: list[list[str]] = []
-        for line in new_rows.splitlines():
-            if not line.strip():
-                continue
-            parsed_rows.append([cell.strip() for cell in line.split("|")])
-        block["rows"] = parsed_rows
-        block["caption"] = st.text_input(
-            "Подпись таблицы",
-            value=block.get("caption", ""),
-            key=f"{base}_caption",
-        )
+        _render_table_block_editor(block, base=base)
     elif kind == "figure":
         block["caption"] = st.text_input(
             "Подпись рисунка",

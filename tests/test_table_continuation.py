@@ -107,4 +107,4 @@ def test_continuation_row_uses_full_column_span(tmp_path: Path) -> None:
     assert "Продолжение таблицы 1" in document_xml
     assert "<w:instrText" in document_xml
     # gridSpan=3 на первой ячейке таблицы (объединена по 3 колонкам).
-    assert 'w:val="3"' in document_xml, "Ожидался <w:gridSpan w:val=\"3\"/>"
+    assert 'w:val="3"' in document_xml, 'Ожидался <w:gridSpan w:val="3"/>'

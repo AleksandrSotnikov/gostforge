@@ -1261,7 +1261,7 @@ def test_u02_fix_registered() -> None:
     assert "U.02" in registered_fixers()
 
 
-def test_u02_replaces_punct_with_nbsp() -> None:
+def test_u02_replaces_punct_with_nbsp_exact() -> None:
     """«10.кг» → «10<NBSP>кг»: точка между числом и единицей заменяется на NBSP."""
     paragraph = Paragraph(
         id="p1",
