@@ -112,16 +112,19 @@ def test_frontmatter_section_has_no_colontitul() -> None:
     assert stamped, f"нет footer со штампом: {footers}"
 
 
-def test_main_section_full_stamp_first_then_reduced() -> None:
-    """Содержание (первая страница) — полная надпись (Разраб./Руковод.),
-    последующие листы — сокращённая (только обозначение + Лист)."""
+def test_main_section_stamp_only_on_first_page() -> None:
+    """Основная надпись печатается ТОЛЬКО на первой странице секции
+    (содержание): есть полный штамп (Разраб.) и нет отдельной сокращённой
+    надписи на последующих листах."""
     out = tempfile.mktemp(suffix=".docx")
     export_docx(_three_section_document(), load_profile("gost-7.32-2017"), out)
     footers = _footers(out)
     full = [t for t in footers.values() if "Разраб" in t]
+    # Сокращённая надпись (footer с обозначением, но без ролей) не должна
+    # появляться — на последующих листах колонтитула нет.
     reduced = [t for t in footers.values() if "ПЗ" in t and "Разраб" not in t]
-    assert full, f"нет полной основной надписи (форма 2): {footers}"
-    assert reduced, f"нет сокращённой надписи (форма 2а): {footers}"
+    assert full, f"нет полной основной надписи (форма 2) на содержании: {footers}"
+    assert reduced == [], f"штамп не должен повторяться на последующих листах: {footers}"
 
 
 def test_main_section_first_heading_break_suppressed() -> None:
@@ -155,7 +158,9 @@ def test_stamp_sheet_static_when_provided() -> None:
     out = tempfile.mktemp(suffix=".docx")
     export_docx(doc, load_profile("gost-7.32-2017"), out)
     footers_text = "".join(_footers(out).values())
-    assert "Лист 5" in footers_text
+    # Номер листа статичный («5»), без авто-поля PAGE в этой ячейке.
+    assert "5" in footers_text
+    assert "Лист" in footers_text
 
 
 def test_single_section_still_one_sectpr() -> None:

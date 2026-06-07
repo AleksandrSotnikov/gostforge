@@ -101,7 +101,8 @@ def test_form1_renders_with_graphs(tmp_path: Path) -> None:
     assert "Анализ алгоритмов" in text
     assert "Кафедра ИВТ" in text
     assert "Разраб." in text and "Иванов" in text
-    assert "Листов 42" in text
+    # «Листов» — отдельная графа-метка, значение — в соседней ячейке.
+    assert "Листов" in text and "42" in text
 
 
 def test_title_defaults_to_document_title(tmp_path: Path) -> None:

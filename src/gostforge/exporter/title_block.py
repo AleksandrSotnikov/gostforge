@@ -15,7 +15,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
+from docx.enum.table import (
+    WD_CELL_VERTICAL_ALIGNMENT,
+    WD_ROW_HEIGHT_RULE,
+    WD_TABLE_ALIGNMENT,
+)
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Mm, Pt
 from lxml import etree  # type: ignore[import-untyped]
@@ -24,10 +28,14 @@ from gostforge.model import TitleBlock
 
 W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
-# Канонические ширины колонок формы 1 (мм), сумма = 185.
-_FORM1_COLS_MM = [7, 10, 23, 15, 10, 14, 53, 53]
-_FORM1_LABEL_PT = 8.0  # мелкий текст граф
-_FORM1_TITLE_PT = 12.0  # наименование / обозначение
+# Канонические ширины колонок основной надписи (мм), сумма = 185.
+# Левый блок изменений/ролей: 7+10+23+15+10 = 65. Правый блок: 70 (графа 1
+# наименование) + 25 + 25 (графы 4/7/8) = 120.
+_FORM1_COLS_MM = [7, 10, 23, 15, 10, 70, 25, 25]
+_FORM1_LABEL_PT = 7.0  # мелкий текст граф (компактно, как в ГОСТ-форме)
+_FORM1_TITLE_PT = 9.0  # наименование / обозначение
+# Высота строки штампа: ГОСТ 2.104 — строки ~5 мм, итог формы 2 ≈ 35–40 мм.
+_FORM_ROW_MM = 5.0
 
 
 def _set_table_borders(table: Any) -> None:
@@ -46,6 +54,34 @@ def _set_table_borders(table: Any) -> None:
         el.set(f"{{{W_NS}}}sz", "4")  # 0.5 pt
         el.set(f"{{{W_NS}}}space", "0")
         el.set(f"{{{W_NS}}}color", "auto")
+
+
+def _make_compact(table: Any, row_mm: float = _FORM_ROW_MM) -> None:
+    """Сделать таблицу штампа компактной: нулевые отступы ячеек и
+    фиксированная высота строк.
+
+    Без этого Word авто-растягивает строки по содержимому и добавляет
+    поля ячеек — штамп получается «огромным». Задаём точную высоту строк
+    (``trHeight … exact``) и обнуляём ``tblCellMar``, чтобы форма
+    укладывалась в канонические ~5 мм на строку.
+    """
+    tbl = table._element
+    tbl_pr = tbl.find(f"{{{W_NS}}}tblPr")
+    if tbl_pr is None:
+        tbl_pr = etree.SubElement(tbl, f"{{{W_NS}}}tblPr")
+    # Нулевые поля ячеек (top/bottom = 0, left/right = ~0.5 мм для воздуха).
+    existing = tbl_pr.find(f"{{{W_NS}}}tblCellMar")
+    if existing is not None:
+        tbl_pr.remove(existing)
+    cell_mar = etree.SubElement(tbl_pr, f"{{{W_NS}}}tblCellMar")
+    for side, twips in (("top", 0), ("bottom", 0), ("left", 28), ("right", 28)):
+        el = etree.SubElement(cell_mar, f"{{{W_NS}}}{side}")
+        el.set(f"{{{W_NS}}}w", str(twips))
+        el.set(f"{{{W_NS}}}type", "dxa")
+    # Фиксированная высота строк.
+    for row in table.rows:
+        row.height = Mm(row_mm)
+        row.height_rule = WD_ROW_HEIGHT_RULE.EXACTLY
 
 
 def _set_cell(
@@ -79,18 +115,18 @@ def _set_cell(
     run.font.bold = bold
 
 
-def _set_cell_sheet(cell: Any, tb: TitleBlock) -> None:
+def _set_cell_sheet(cell: Any, tb: TitleBlock, *, prefix: str = "Лист ") -> None:
     """Записать графу 7 «Лист»: статичный номер или авто-поле PAGE.
 
-    Если ``tb.sheet`` задан явно — пишем «Лист N» как обычный текст. Если
-    пусто — вставляем «Лист » + OOXML-поле ``PAGE``, чтобы номер листа
+    Если ``tb.sheet`` задан явно — пишем «{prefix}N» как обычный текст. Если
+    пусто — вставляем ``prefix`` + OOXML-поле ``PAGE``, чтобы номер листа
     подставлялся автоматически по фактической странице (для основной
     надписи, повторяющейся в колонтитуле всех листов секции).
     """
     if tb.sheet:
-        _set_cell(cell, f"Лист {tb.sheet}".strip())
+        _set_cell(cell, f"{prefix}{tb.sheet}".strip())
         return
-    _set_cell(cell, "Лист ")
+    _set_cell(cell, prefix)
     para = cell.paragraphs[0]
     fld = etree.SubElement(para._p, f"{{{W_NS}}}fldSimple")
     fld.set(f"{{{W_NS}}}instr", "PAGE")
@@ -115,52 +151,58 @@ def _set_fixed_layout(table: Any, cols_mm: list[int]) -> None:
 
 
 def _write_form1(footer: Any, tb: TitleBlock) -> Any:
-    """Построить форму 1 (заглавный лист) — таблица 185×~ мм в footer-е."""
-    table = footer.add_table(rows=7, cols=8, width=Mm(sum(_FORM1_COLS_MM)))
+    """Построить основную надпись «Форма 2» (заглавный лист текстового
+    документа, ГОСТ 2.104) — компактная таблица 185×35 мм в footer-е.
+
+    Раскладка граф:
+    * слева сверху — шапка блока изменений «Изм.|Лист|№ докум.|Подп.|Дата»;
+    * слева ниже — роли (графа 10/11/13): «Разраб./Пров./Н.контр./Утв.» с
+      фамилией и датой;
+    * справа сверху — обозначение документа (графа 2);
+    * справа в центре — наименование (графа 1);
+    * справа узкие графы — Лит. (4), Лист (7, авто-поле PAGE), Листов (8);
+    * справа снизу — организация (графа 9).
+    """
+    rows = 7
+    table = footer.add_table(rows=rows, cols=8, width=Mm(sum(_FORM1_COLS_MM)))
     table.alignment = WD_TABLE_ALIGNMENT.RIGHT
     _set_fixed_layout(table, _FORM1_COLS_MM)
 
-    # Row 0 — обозначение документа (графа 2), на всю ширину.
-    table.cell(0, 0).merge(table.cell(0, 7))
-    _set_cell(table.cell(0, 0), tb.designation, bold=True, size_pt=_FORM1_TITLE_PT)
-
-    # Row 1 — левый заголовок блока изменений (графы 14–18).
+    # --- Левый блок: шапка изменений + роли --------------------------------
     for col, label in enumerate(("Изм.", "Лист", "№ докум.", "Подп.", "Дата")):
-        _set_cell(table.cell(1, col), label)
-
-    # Right — наименование (графа 1): объединяем строки 1–3, колонки 5–7.
-    table.cell(1, 5).merge(table.cell(3, 7))
-    _set_cell(table.cell(1, 5), tb.title, bold=True, size_pt=_FORM1_TITLE_PT)
-
-    # Rows 2–6 — роли (графы 11/13). Слева: метка (c0+c1), фамилия (c2),
-    # подпись (c3, пусто), дата (c4).
-    roles = tb.roles[:5]
-    for i in range(5):
-        r = 2 + i
-        table.cell(r, 0).merge(table.cell(r, 1))
-        if i < len(roles):
-            _set_cell(table.cell(r, 0), roles[i].role, align="left")
-            _set_cell(table.cell(r, 2), roles[i].name)
-            _set_cell(table.cell(r, 4), roles[i].date)
+        _set_cell(table.cell(0, col), label)
+    # Роли в строках 1..6: метка (c0-c1), фамилия (c2), дата (c4).
+    roles = tb.roles[:6]
+    for i in range(1, rows):
+        table.cell(i, 0).merge(table.cell(i, 1))
+        role = roles[i - 1] if i - 1 < len(roles) else None
+        if role is not None:
+            _set_cell(table.cell(i, 0), role.role, align="left")
+            _set_cell(table.cell(i, 2), role.name)
+            _set_cell(table.cell(i, 4), role.date)
         else:
-            _set_cell(table.cell(r, 0), "")
+            _set_cell(table.cell(i, 0), "")
 
-    # Row 4 справа — литера / масса / масштаб (графы 4/5/6).
-    _set_cell(table.cell(4, 5), f"Лит. {tb.stage}".strip())
-    _set_cell(table.cell(4, 6), f"Масса {tb.mass}".strip())
-    _set_cell(table.cell(4, 7), f"М {tb.scale}".strip())
-
-    # Row 5 справа — лист / листов (графы 7/8). Лист — авто-поле PAGE,
-    # если номер не задан явно.
-    _set_cell_sheet(table.cell(5, 5), tb)
-    table.cell(5, 6).merge(table.cell(5, 7))
-    _set_cell(table.cell(5, 6), f"Листов {tb.sheets_total}".strip())
-
-    # Row 6 справа — организация (графа 9).
-    table.cell(6, 5).merge(table.cell(6, 7))
-    _set_cell(table.cell(6, 5), tb.organization, size_pt=_FORM1_LABEL_PT)
+    # --- Правый блок -------------------------------------------------------
+    # Обозначение (графа 2) — верхняя строка на всю ширину правого блока.
+    table.cell(0, 5).merge(table.cell(0, 7))
+    _set_cell(table.cell(0, 5), tb.designation, bold=True, size_pt=_FORM1_TITLE_PT)
+    # Наименование (графа 1) — c5, строки 1..3.
+    table.cell(1, 5).merge(table.cell(3, 5))
+    _set_cell(table.cell(1, 5), tb.title, bold=True, size_pt=_FORM1_TITLE_PT)
+    # Узкие графы 4/7/8 — c6/c7, строки 1..3.
+    _set_cell(table.cell(1, 6), "Лит.")
+    _set_cell(table.cell(1, 7), "Лист")
+    _set_cell(table.cell(2, 6), tb.stage)
+    _set_cell_sheet(table.cell(2, 7), tb, prefix="")  # авто-PAGE
+    _set_cell(table.cell(3, 6), "Листов")
+    _set_cell(table.cell(3, 7), tb.sheets_total)
+    # Организация (графа 9) — c5-c7, строки 4..6.
+    table.cell(4, 5).merge(table.cell(rows - 1, 7))
+    _set_cell(table.cell(4, 5), tb.organization, size_pt=_FORM1_LABEL_PT)
 
     _set_table_borders(table)
+    _make_compact(table)
     return table
 
 
@@ -176,6 +218,7 @@ def _write_form2a(footer: Any, tb: TitleBlock) -> Any:
     _set_cell(table.cell(0, 0), tb.designation, bold=True, align="left")
     _set_cell_sheet(table.cell(0, 1), tb)
     _set_table_borders(table)
+    _make_compact(table, row_mm=8.0)
     return table
 
 

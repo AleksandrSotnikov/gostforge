@@ -1715,13 +1715,13 @@ def _write_toc(doc: DocxDocument, toc: TableOfContents) -> None:
 def _configure_section_headers_footers(sect: Any, ps: PageSection, document: Document) -> None:
     """Настроить колонтитулы и основную надпись одной физической секции docx.
 
-    Логика трёх случаев (как в дипломе СПО, ГОСТ 2.104):
+    Логика случаев (как в дипломе СПО, ГОСТ 2.104):
     * секция без колонтитула (``footer is None`` и штамп выключен) —
       отвязываем footer от предыдущей секции и оставляем пустым, чтобы не
       унаследовать чужой штамп/номер (титульный лист + задание);
-    * секция со штампом и ``different_first_page`` — на первой странице
-      (содержание) полная основная надпись (форма 1/2), на последующих
-      листах — сокращённая (форма 2а);
+    * секция со штампом и ``different_first_page`` — основная надпись
+      (форма 2) печатается ТОЛЬКО на первой странице секции (содержание),
+      на последующих листах колонтитула нет;
     * обычная секция со штампом/footer — пишем один footer на все страницы.
     """
     from .title_block import write_title_block
@@ -1744,10 +1744,9 @@ def _configure_section_headers_footers(sect: Any, ps: PageSection, document: Doc
             if not tb.title and document.metadata.title:
                 tb = replace(tb, title=document.metadata.title)
             if different_first:
-                # Первая страница секции (содержание) — полная основная
-                # надпись; последующие листы — сокращённая форма 2а.
-                write_title_block(sect.first_page_footer, replace(tb, form="form1"))
-                write_title_block(sect.footer, replace(tb, form="form2a"))
+                # Штамп только на первой странице секции (содержание);
+                # остальные листы — без колонтитула (default footer пуст).
+                write_title_block(sect.first_page_footer, tb)
             else:
                 write_title_block(sect.footer, tb)
     else:

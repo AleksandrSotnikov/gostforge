@@ -582,23 +582,23 @@ def _extract_title_block(sect: DocxSection) -> TitleBlock | None:
         )
 
     if ncols >= 8:
-        # Форма 1 — зеркало _write_form1.
+        # Форма 2 (основная надпись текстового документа) — зеркало
+        # _write_form1: слева роли (строки 1..6), справа обозначение (0,5),
+        # наименование (1,5), графы Лит./Лист/Листов и организация (4,5).
         roles: list[TitleBlockRole] = []
-        for r in range(2, 7):
+        for r in range(1, 7):
             label = cell_text(r, 0)
             if label:
                 roles.append(TitleBlockRole(role=label, name=cell_text(r, 2), date=cell_text(r, 4)))
         return TitleBlock(
             enabled=True,
             form="form1",
-            designation=cell_text(0, 0),
+            designation=cell_text(0, 5),
             title=cell_text(1, 5),
-            organization=cell_text(6, 5),
-            stage=_strip_label(cell_text(4, 5), "Лит. ", "Лит."),
-            mass=_strip_label(cell_text(4, 6), "Масса ", "Масса"),
-            scale=_strip_label(cell_text(4, 7), "М ", "М"),
-            sheet=_strip_label(cell_text(5, 5), "Лист ", "Лист"),
-            sheets_total=_strip_label(cell_text(5, 6), "Листов ", "Листов"),
+            organization=cell_text(4, 5),
+            stage=cell_text(2, 6),
+            sheet=cell_text(2, 7),
+            sheets_total=cell_text(3, 7),
             roles=roles,
         )
 
