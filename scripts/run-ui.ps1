@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     run-ui.ps1 — нативное развёртывание и запуск веб-интерфейса gostforge
     (без Docker). Python вызывается через лаунчер `py`.
@@ -8,6 +8,9 @@
     extra [ui] и запускает Streamlit-интерфейс. python.exe берётся прямо из
     venv — скрипт НЕ зависит от активации, политики выполнения PowerShell и
     не цепляет Store-заглушку `python`.
+
+    ВАЖНО: файл сохранён в UTF-8 с BOM — иначе Windows PowerShell 5.1 читает
+    кириллицу в кодировке cp1251 и падает с ошибкой парсинга.
 
 .PARAMETER Port
     Порт веб-интерфейса (по умолчанию 8501).
@@ -36,7 +39,7 @@ function Write-Info { param([string]$m) Write-Host "[*] $m" -ForegroundColor Blu
 function Write-Ok { param([string]$m) Write-Host "[+] $m" -ForegroundColor Green }
 function Write-Err { param([string]$m) Write-Host "[x] $m" -ForegroundColor Red }
 
-# Корень репозитория: scripts\ → на уровень выше.
+# Корень репозитория: scripts\ -> на уровень выше.
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 Set-Location $root
 Write-Info "Корень проекта: $root"
@@ -55,11 +58,11 @@ Write-Info "Python: $pyVer"
 $venv = Join-Path $root '.venv'
 $venvPy = Join-Path $venv 'Scripts\python.exe'
 if ($Reinstall -and (Test-Path $venv)) {
-    Write-Info "Удаляю старое окружение (-Reinstall)…"
+    Write-Info "Удаляю старое окружение (-Reinstall)..."
     Remove-Item -Recurse -Force $venv
 }
 if (-not (Test-Path $venvPy)) {
-    Write-Info "Создаю виртуальное окружение (.venv)…"
+    Write-Info "Создаю виртуальное окружение (.venv)..."
     & py -3 -m venv $venv
     if (-not (Test-Path $venvPy)) {
         Write-Err "Не удалось создать venv: $venvPy не появился."
@@ -73,9 +76,9 @@ else {
 
 # 3. Установка зависимостей (через python из venv — без активации,
 #    поэтому 'pip' не нужен и ошибка launcher-а pip.exe исключена).
-Write-Info "Обновляю pip…"
+Write-Info "Обновляю pip..."
 & $venvPy -m pip install --upgrade pip
-Write-Info "Устанавливаю gostforge[ui] (editable)…"
+Write-Info "Устанавливаю gostforge[ui] (editable)..."
 & $venvPy -m pip install -e ".[ui]"
 if ($LASTEXITCODE -ne 0) {
     Write-Err "Установка зависимостей не удалась (см. вывод выше)."
@@ -90,7 +93,7 @@ if ($NoLaunch) {
     exit 0
 }
 $app = Join-Path $root 'src\gostforge\web\app.py'
-Write-Ok "Запускаю веб-интерфейс: http://localhost:$Port   (Ctrl+C — остановить)"
+Write-Ok "Запускаю веб-интерфейс: http://localhost:$Port  (Ctrl+C - остановить)"
 & $venvPy -m streamlit run $app `
     --server.address localhost `
     --server.port $Port `
