@@ -1766,6 +1766,21 @@ def _configure_section_headers_footers(sect: Any, ps: PageSection, document: Doc
         sect.header.is_linked_to_previous = False
 
 
+def _suppress_page_break_before(docx_paragraph: DocxParagraph) -> None:
+    """Явно отключить ``pageBreakBefore`` у параграфа (``w:val="false"``).
+
+    Нужно для первого заголовка секции после разрыва «с новой страницы»:
+    стиль «Заголовок 1» ставит pageBreakBefore, и он складывается с
+    разрывом секции, давая лишнюю пустую страницу. Явный атрибут на
+    параграфе перекрывает значение стиля.
+    """
+    p_pr = docx_paragraph._p.get_or_add_pPr()
+    for existing in p_pr.findall(f"{{{W_NS}}}pageBreakBefore"):
+        p_pr.remove(existing)
+    el = etree.SubElement(p_pr, f"{{{W_NS}}}pageBreakBefore")
+    el.set(f"{{{W_NS}}}val", "false")
+
+
 def _export_multi_section(doc: DocxDocument, document: Document, profile: Profile) -> None:
     """Записать документ как несколько физических секций docx.
 
@@ -1778,10 +1793,20 @@ def _export_multi_section(doc: DocxDocument, document: Document, profile: Profil
     все ``doc.sections`` уже существуют.
     """
     page_sections = document.page_sections
+    # Индекс первого body-параграфа каждой секции — чтобы снять лишний
+    # page-break у первого заголовка (разрыв секции уже даёт новую страницу).
+    first_para_index: list[int] = []
     for idx, ps in enumerate(page_sections):
         if idx > 0:
             doc.add_section(WD_SECTION.NEW_PAGE)
+        first_para_index.append(len(doc.paragraphs))
         _write_items(doc, ps.content)
+
+    paragraphs = doc.paragraphs
+    for idx in range(1, len(page_sections)):
+        start = first_para_index[idx]
+        if start < len(paragraphs):
+            _suppress_page_break_before(paragraphs[start])
 
     for idx, ps in enumerate(page_sections):
         _sync_page_section_with_profile(ps, profile)

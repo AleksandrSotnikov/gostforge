@@ -124,6 +124,40 @@ def test_main_section_full_stamp_first_then_reduced() -> None:
     assert reduced, f"нет сокращённой надписи (форма 2а): {footers}"
 
 
+def test_main_section_first_heading_break_suppressed() -> None:
+    """Первый заголовок основной секции (содержание) не должен давать
+    лишнюю пустую страницу: pageBreakBefore явно отключён (разрыв секции
+    уже переносит на новую страницу)."""
+    out = tempfile.mktemp(suffix=".docx")
+    export_docx(_three_section_document(), load_profile("gost-7.32-2017"), out)
+    assert 'pageBreakBefore w:val="false"' in _doc_xml(out)
+
+
+def test_stamp_sheet_uses_page_field_when_empty() -> None:
+    """Графа «Лист» основной надписи — авто-поле PAGE, если номер не задан."""
+    out = tempfile.mktemp(suffix=".docx")
+    export_docx(_three_section_document(), load_profile("gost-7.32-2017"), out)
+    with zipfile.ZipFile(out) as z:
+        footers = [
+            z.read(n).decode("utf-8", "replace")
+            for n in z.namelist()
+            if re.search(r"word/footer\d+\.xml$", n)
+        ]
+    assert any('w:instr="PAGE"' in f for f in footers), "нет авто-поля PAGE в штампе"
+
+
+def test_stamp_sheet_static_when_provided() -> None:
+    """Если номер листа задан явно — он статичен (без поля PAGE)."""
+    doc = _three_section_document()
+    tb = doc.page_sections[1].title_block
+    assert tb is not None
+    tb.sheet = "5"
+    out = tempfile.mktemp(suffix=".docx")
+    export_docx(doc, load_profile("gost-7.32-2017"), out)
+    footers_text = "".join(_footers(out).values())
+    assert "Лист 5" in footers_text
+
+
 def test_single_section_still_one_sectpr() -> None:
     """Регресс: документ с одной PageSection экспортируется как одна секция."""
     main = PageSection(

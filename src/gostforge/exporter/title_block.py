@@ -79,6 +79,32 @@ def _set_cell(
     run.font.bold = bold
 
 
+def _set_cell_sheet(cell: Any, tb: TitleBlock) -> None:
+    """Записать графу 7 «Лист»: статичный номер или авто-поле PAGE.
+
+    Если ``tb.sheet`` задан явно — пишем «Лист N» как обычный текст. Если
+    пусто — вставляем «Лист » + OOXML-поле ``PAGE``, чтобы номер листа
+    подставлялся автоматически по фактической странице (для основной
+    надписи, повторяющейся в колонтитуле всех листов секции).
+    """
+    if tb.sheet:
+        _set_cell(cell, f"Лист {tb.sheet}".strip())
+        return
+    _set_cell(cell, "Лист ")
+    para = cell.paragraphs[0]
+    fld = etree.SubElement(para._p, f"{{{W_NS}}}fldSimple")
+    fld.set(f"{{{W_NS}}}instr", "PAGE")
+    run = etree.SubElement(fld, f"{{{W_NS}}}r")
+    rpr = etree.SubElement(run, f"{{{W_NS}}}rPr")
+    rfonts = etree.SubElement(rpr, f"{{{W_NS}}}rFonts")
+    rfonts.set(f"{{{W_NS}}}ascii", "Times New Roman")
+    rfonts.set(f"{{{W_NS}}}hAnsi", "Times New Roman")
+    sz = etree.SubElement(rpr, f"{{{W_NS}}}sz")
+    sz.set(f"{{{W_NS}}}val", str(int(_FORM1_LABEL_PT * 2)))  # half-points
+    rt = etree.SubElement(run, f"{{{W_NS}}}t")
+    rt.text = ""
+
+
 def _set_fixed_layout(table: Any, cols_mm: list[int]) -> None:
     """Зафиксировать ширины колонок (fixed layout, без автоподбора)."""
     table.autofit = False
@@ -124,8 +150,9 @@ def _write_form1(footer: Any, tb: TitleBlock) -> Any:
     _set_cell(table.cell(4, 6), f"Масса {tb.mass}".strip())
     _set_cell(table.cell(4, 7), f"М {tb.scale}".strip())
 
-    # Row 5 справа — лист / листов (графы 7/8).
-    _set_cell(table.cell(5, 5), f"Лист {tb.sheet}".strip())
+    # Row 5 справа — лист / листов (графы 7/8). Лист — авто-поле PAGE,
+    # если номер не задан явно.
+    _set_cell_sheet(table.cell(5, 5), tb)
     table.cell(5, 6).merge(table.cell(5, 7))
     _set_cell(table.cell(5, 6), f"Листов {tb.sheets_total}".strip())
 
@@ -147,7 +174,7 @@ def _write_form2a(footer: Any, tb: TitleBlock) -> Any:
     table.alignment = WD_TABLE_ALIGNMENT.RIGHT
     _set_fixed_layout(table, _FORM2A_COLS_MM)
     _set_cell(table.cell(0, 0), tb.designation, bold=True, align="left")
-    _set_cell(table.cell(0, 1), f"Лист {tb.sheet}".strip())
+    _set_cell_sheet(table.cell(0, 1), tb)
     _set_table_borders(table)
     return table
 
