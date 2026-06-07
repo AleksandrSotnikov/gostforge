@@ -35,6 +35,74 @@ def test_title_inserts_at_front() -> None:
     assert "title" in _FRONT_TEMPLATES
 
 
+def test_spo_diploma_templates_registered_and_front() -> None:
+    """Титульный лист и задание дипломного проекта СПО — готовые шаблоны,
+    вставляются в начало работы."""
+    assert "title_spo" in _SECTION_TEMPLATES
+    assert "task_spo" in _SECTION_TEMPLATES
+    assert {"title_spo", "task_spo"} <= _FRONT_TEMPLATES
+
+
+def test_spo_diploma_templates_not_normocontrolled() -> None:
+    """Титульник/задание оформляются по форме учебного заведения и НЕ
+    должны проверяться/исправляться нробором (disabled_checks=['*'])."""
+    for key in ("title_spo", "task_spo"):
+        section = _SECTION_TEMPLATES[key][1]()
+        assert section.get("disabled_checks") == ["*"], key
+        assert section["blocks"], key
+
+
+def test_spo_diploma_templates_have_no_personal_data() -> None:
+    """В шаблоны не зашиты реальные ФИО (CLAUDE.md: персональные данные
+    не хранятся) — только плейсхолдеры для ручного заполнения."""
+    import json
+
+    blob = json.dumps(
+        [_SECTION_TEMPLATES["title_spo"][1](), _SECTION_TEMPLATES["task_spo"][1]()],
+        ensure_ascii=False,
+    )
+    for forbidden in ("Чечетка", "Рудакова", "Удрас", "Репин", "Шиллер", "Сотников"):
+        assert forbidden not in blob, forbidden
+
+
+def test_spo_diploma_templates_build_valid_docx_without_violations() -> None:
+    """Работа с титульником/заданием СПО собирается в валидный .docx, и
+    нормоконтроль не выдаёт нарушений, привязанных к этим разделам."""
+    import tempfile
+    from pathlib import Path
+
+    from gostforge.parser import parse_docx
+    from gostforge.profile import load_profile
+    from gostforge.validator import validate
+    from gostforge.web.builder_editor import _build_document_from_state
+
+    title = {**_SECTION_TEMPLATES["title_spo"][1](), "id": "titlesec"}
+    task = {**_SECTION_TEMPLATES["task_spo"][1](), "id": "tasksec"}
+    state = {
+        "title": "Тест",
+        "author": "Аноним",
+        "year": 2026,
+        "profile_id": "gost-7.32-2017",
+        "sections": [
+            title,
+            task,
+            {
+                "id": "intro",
+                "heading": "Введение",
+                "blocks": [{"kind": "paragraph", "text": "Текст введения."}],
+                "subsections": [],
+            },
+        ],
+    }
+    out = Path(tempfile.mktemp(suffix=".docx"))
+    out.write_bytes(_build_document_from_state(state))
+    assert out.read_bytes()[:2] == b"PK"
+    doc = parse_docx(out)
+    viols = validate(doc, load_profile("gost-7.32-2017"))
+    bad = [v for v in viols if "titlesec" in (v.location or "") or "tasksec" in (v.location or "")]
+    assert bad == [], [v.message for v in bad]
+
+
 def test_toc_template_present() -> None:
     """Содержание доступно как шаблон и содержит TOC-блок."""
     assert "toc" in _SECTION_TEMPLATES
