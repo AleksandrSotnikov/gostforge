@@ -104,7 +104,18 @@ class PageNumberingConfig:
 
 По умолчанию Word наследует колонтитулы предыдущей секции. У `gostforge` каждая `PageSection` имеет собственный набор header/footer-part, и ссылки указывают именно на них.
 
-В `python-docx` это `section.header.is_linked_to_previous = False`, но операция нестабильна — надёжнее работать с `sectPr` через lxml напрямую.
+В `python-docx` это `section.header.is_linked_to_previous = False`.
+
+> **Реализовано.** Экспортёр пишет несколько физических секций docx,
+> когда у модели больше одной `PageSection` (см.
+> `_export_multi_section` в `exporter/docx_exporter.py`): между секциями
+> вставляется разрыв «с новой страницы», у каждой свои поля, нумерация,
+> рамка и колонтитулы (с отвязкой от предыдущей). На этом построена
+> раскладка диплома СПО: титул+задание — секция без колонтитула,
+> содержание — `different_first_page` с полной основной надписью
+> (форма 2) на первом листе и сокращённой (форма 2а) на последующих.
+> Конструктор делит работу на frontmatter/основную секцию в
+> `_split_frontmatter_page_section` (`web/builder_editor.py`).
 
 ### Поле PAGE
 

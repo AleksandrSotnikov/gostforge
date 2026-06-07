@@ -1485,6 +1485,10 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
     # Используем экспорт напрямую, чтобы не зависеть от валидации в .save():
     # документ может быть «черновиком» с пустыми блоками — это нормально.
     document = builder.build()
+    # Титульный лист и задание (frontmatter) выносим в отдельную секцию
+    # вёрстки БЕЗ колонтитула; содержание и далее — со штампом (форма
+    # 2 на первом листе / 2а на последующих).
+    _split_frontmatter_page_section(document, state)
     # Phase 2.5: подменяем proxy source_id у Citation на реальные
     # BibliographyEntry.id, назначенные в build().
     _resolve_citation_proxies(document, state)
@@ -1502,6 +1506,64 @@ def _build_document_from_state(state: dict[str, Any]) -> bytes:
     profile = _apply_style_overrides(profile, overrides)
     export_docx(document, profile, out_path)
     return out_path.read_bytes()
+
+
+def _split_frontmatter_page_section(document: Document, state: dict[str, Any]) -> None:
+    """Вынести ведущие frontmatter-разделы в отдельную секцию вёрстки.
+
+    Разделы с ``frontmatter == True`` в начале работы (титульный лист,
+    задание) должны печататься БЕЗ колонтитула и без номера страницы, а
+    основная надпись (штамп ЕСКД) начинается с содержания. Билдер собирает
+    всё в одну ``PageSection``; здесь мы делим её на две:
+
+    1. frontmatter-секцию: ``footer = None``, ``header = None``, номер
+       страницы скрыт, штампа нет;
+    2. основную секцию: если задан штамп — ``different_first_page = True``
+       (содержание получает полную основную надпись, последующие листы —
+       форму 2а), а центральный ``{page}`` убирается (лист несёт штамп).
+
+    Делит контент по числу ведущих frontmatter-разделов: порядок
+    ``page_sections[0].content`` совпадает с порядком ``state["sections"]``.
+    Если основной части не осталось — деление не выполняется.
+    """
+    import copy
+
+    from gostforge.model import PageNumberingConfig, PageSection
+
+    sections = state.get("sections") or []
+    front_count = 0
+    for sec in sections:
+        if sec.get("frontmatter"):
+            front_count += 1
+        else:
+            break
+    if front_count <= 0 or not document.page_sections:
+        return
+    main_ps = document.page_sections[0]
+    content = main_ps.content
+    if front_count >= len(content):
+        # Нет основной части — оставляем один раздел (без штампа всё равно
+        # печатается без колонтитула благодаря номеру/футеру по профилю).
+        return
+
+    front_ps = PageSection(
+        id="frontmatter",
+        name="Титульный лист и задание",
+        type="title",
+        page=copy.deepcopy(main_ps.page),
+        header=None,
+        footer=None,  # без колонтитула
+        page_numbering=PageNumberingConfig(visible=False),  # без номера страницы
+        content=content[:front_count],
+        title_block=None,  # без штампа
+    )
+    main_ps.content = content[front_count:]
+    if main_ps.title_block is not None and main_ps.title_block.enabled:
+        # Содержание (первая страница основной секции) — полный штамп,
+        # последующие листы — форма 2а; центральный {page} не нужен.
+        main_ps.different_first_page = True
+        main_ps.footer = None
+    document.page_sections = [front_ps, main_ps]
 
 
 # --- Inline-конвертеры (Фаза 2.5) -------------------------------------------
@@ -2915,6 +2977,9 @@ def _spo_diploma_title_template() -> dict[str, Any]:
         # Титульник оформляется по форме учебного заведения и не должен
         # проверяться/исправляться нормоконтролем.
         "disabled_checks": ["*"],
+        # Идёт ДО содержания и печатается БЕЗ колонтитула (отдельная
+        # frontmatter-секция вёрстки) — см. _split_frontmatter_page_section.
+        "frontmatter": True,
     }
 
 
@@ -2993,6 +3058,8 @@ def _spo_diploma_task_template() -> dict[str, Any]:
         "blocks": blocks,
         "subsections": [],
         "disabled_checks": ["*"],
+        # Задание печатается ДО содержания и тоже БЕЗ колонтитула.
+        "frontmatter": True,
     }
 
 

@@ -22,12 +22,14 @@ import io
 import logging
 import re
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC
 from pathlib import Path
 from typing import Any, Literal
 
 import docx
 from docx.document import Document as DocxDocument
+from docx.enum.section import WD_SECTION
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -126,8 +128,8 @@ def _apply_page_geometry(doc: DocxDocument, profile: Profile) -> None:
         section.left_margin = Mm(margins["left"])
 
 
-def _apply_page_size(doc: DocxDocument, page_section: PageSection) -> None:
-    """Применить paper size и orientation из PageSection к первой docx-секции.
+def _apply_page_size(sect: Any, page_section: PageSection) -> None:
+    """Применить paper size и orientation из PageSection к docx-секции ``sect``.
 
     Если paper неизвестен — оставляем дефолт Word. Если orientation =
     landscape — width и height меняются местами относительно portrait.
@@ -140,9 +142,26 @@ def _apply_page_size(doc: DocxDocument, page_section: PageSection) -> None:
         width, height = long_, short
     else:
         width, height = short, long_
-    sect = doc.sections[0]
     sect.page_width = Mm(width)
     sect.page_height = Mm(height)
+
+
+def _apply_section_margins(sect: Any, page_section: PageSection) -> None:
+    """Применить поля страницы PageSection к docx-секции ``sect``.
+
+    Используется при мультисекционном экспорте, чтобы у каждой секции были
+    свои поля (например, у листов с рамкой ЕСКД левое поле шире). Поля,
+    отсутствующие в ``margins_mm``, не трогаем — секция наследует значение.
+    """
+    margins = page_section.page.margins_mm
+    if "top" in margins:
+        sect.top_margin = Mm(margins["top"])
+    if "right" in margins:
+        sect.right_margin = Mm(margins["right"])
+    if "bottom" in margins:
+        sect.bottom_margin = Mm(margins["bottom"])
+    if "left" in margins:
+        sect.left_margin = Mm(margins["left"])
 
 
 def _apply_normal_style(doc: DocxDocument, profile: Profile) -> None:
@@ -1502,16 +1521,14 @@ def _has_text(items: Sequence[InlineElement] | None) -> bool:
     return any(isinstance(el, TextRun) and el.text and el.text.strip() for el in items)
 
 
-def _write_footer(doc: DocxDocument, footer_template: ContentTemplate) -> None:
-    """Записать footer из ContentTemplate в первую docx-секцию.
+def _write_footer(footer: Any, footer_template: ContentTemplate) -> None:
+    """Записать footer из ContentTemplate в данный docx-footer ``footer``.
 
     Распределение по слотам left/center/right на Фазе 1 делаем через
     выравнивание единственного параграфа: если задан center — выравниваем
     по центру; right — вправо; иначе left. Если заполнены несколько слотов,
     добавляем отдельные параграфы под каждый.
     """
-    section = doc.sections[0]
-    footer = section.footer
     # Удалим параграфы-плейсхолдеры, которые python-docx создаёт по умолчанию
     # (один пустой <w:p/>).
     for p in list(footer.paragraphs):
@@ -1598,8 +1615,8 @@ def _sync_page_section_with_profile(page_section: PageSection, profile: Profile)
             page_section.page_numbering.start_value = int(f06.params["start_value"])
 
 
-def _apply_pgnumtype(doc: DocxDocument, page_section: PageSection) -> None:
-    """Прописать <w:pgNumType w:start="N" w:fmt="..."/> в sectPr.
+def _apply_pgnumtype(sect: Any, page_section: PageSection) -> None:
+    """Прописать <w:pgNumType w:start="N" w:fmt="..."/> в sectPr секции ``sect``.
 
     Атрибут `w:start` пишется только при `start_mode = "start_at"` и
     наличии `start_value`. Атрибут `w:fmt` пишется, если формат отличается
@@ -1611,7 +1628,6 @@ def _apply_pgnumtype(doc: DocxDocument, page_section: PageSection) -> None:
     needs_fmt = numbering.format != "arabic"
     if not needs_start and not needs_fmt:
         return
-    sect = doc.sections[0]
     sect_pr = getattr(sect, "_sectPr", None)
     if sect_pr is None:
         return
@@ -1625,8 +1641,8 @@ def _apply_pgnumtype(doc: DocxDocument, page_section: PageSection) -> None:
         pg.set(f"{{{W_NS}}}fmt", _PAGE_FMT_OOXML.get(numbering.format, "decimal"))
 
 
-def _apply_pg_borders(doc: DocxDocument, page_section: PageSection) -> None:
-    """Прописать <w:pgBorders> (рамка листа, ЕСКД) в sectPr.
+def _apply_pg_borders(sect: Any, page_section: PageSection) -> None:
+    """Прописать <w:pgBorders> (рамка листа, ЕСКД) в sectPr секции ``sect``.
 
     Пишется, только если ``page_section.page.border`` задан и
     ``enabled``. Все четыре стороны рамки получают одинаковые
@@ -1635,7 +1651,6 @@ def _apply_pg_borders(doc: DocxDocument, page_section: PageSection) -> None:
     border = page_section.page.border
     if border is None or not border.enabled:
         return
-    sect = doc.sections[0]
     sect_pr = getattr(sect, "_sectPr", None)
     if sect_pr is None:
         return
@@ -1695,6 +1710,87 @@ def _write_toc(doc: DocxDocument, toc: TableOfContents) -> None:
     inner_r = etree.SubElement(fld, f"{{{W_NS}}}r")
     inner_t = etree.SubElement(inner_r, f"{{{W_NS}}}t")
     inner_t.text = "Оглавление будет построено при открытии (F9 в Word)."
+
+
+def _configure_section_headers_footers(sect: Any, ps: PageSection, document: Document) -> None:
+    """Настроить колонтитулы и основную надпись одной физической секции docx.
+
+    Логика трёх случаев (как в дипломе СПО, ГОСТ 2.104):
+    * секция без колонтитула (``footer is None`` и штамп выключен) —
+      отвязываем footer от предыдущей секции и оставляем пустым, чтобы не
+      унаследовать чужой штамп/номер (титульный лист + задание);
+    * секция со штампом и ``different_first_page`` — на первой странице
+      (содержание) полная основная надпись (форма 1/2), на последующих
+      листах — сокращённая (форма 2а);
+    * обычная секция со штампом/footer — пишем один footer на все страницы.
+    """
+    from .title_block import write_title_block
+
+    tb = ps.title_block
+    different_first = ps.different_first_page
+    if different_first:
+        sect.different_first_page_header_footer = True
+
+    has_footer = (ps.footer is not None) or (tb is not None and tb.enabled)
+    if has_footer:
+        sect.footer.is_linked_to_previous = False
+        if different_first:
+            sect.first_page_footer.is_linked_to_previous = False
+        if ps.footer is not None:
+            _write_footer(sect.footer, ps.footer.default)
+            if different_first and ps.footer.first_page is not None:
+                _write_footer(sect.first_page_footer, ps.footer.first_page)
+        if tb is not None and tb.enabled:
+            if not tb.title and document.metadata.title:
+                tb = replace(tb, title=document.metadata.title)
+            if different_first:
+                # Первая страница секции (содержание) — полная основная
+                # надпись; последующие листы — сокращённая форма 2а.
+                write_title_block(sect.first_page_footer, replace(tb, form="form1"))
+                write_title_block(sect.footer, replace(tb, form="form2a"))
+            else:
+                write_title_block(sect.footer, tb)
+    else:
+        # Колонтитула нет: отвязываем от предыдущей секции и не заполняем.
+        sect.footer.is_linked_to_previous = False
+        if different_first:
+            sect.first_page_footer.is_linked_to_previous = False
+
+    if ps.header is not None:
+        sect.header.is_linked_to_previous = False
+        _write_header(sect.header, ps.header.default)
+        if different_first and ps.header.first_page is not None:
+            sect.first_page_header.is_linked_to_previous = False
+            _write_header(sect.first_page_header, ps.header.first_page)
+    else:
+        sect.header.is_linked_to_previous = False
+
+
+def _export_multi_section(doc: DocxDocument, document: Document, profile: Profile) -> None:
+    """Записать документ как несколько физических секций docx.
+
+    Каждая ``PageSection`` модели становится отдельной секцией .docx со
+    своими полями, нумерацией, рамкой и колонтитулами. Между секциями
+    вставляется разрыв «с новой страницы» (``WD_SECTION.NEW_PAGE``).
+
+    Сначала пишется контент всех секций (с разрывами), затем настраиваются
+    свойства каждой физической секции — порядок важен: на момент настройки
+    все ``doc.sections`` уже существуют.
+    """
+    page_sections = document.page_sections
+    for idx, ps in enumerate(page_sections):
+        if idx > 0:
+            doc.add_section(WD_SECTION.NEW_PAGE)
+        _write_items(doc, ps.content)
+
+    for idx, ps in enumerate(page_sections):
+        _sync_page_section_with_profile(ps, profile)
+        sect = doc.sections[idx]
+        _apply_section_margins(sect, ps)
+        _apply_page_size(sect, ps)
+        _apply_pgnumtype(sect, ps)
+        _apply_pg_borders(sect, ps)
+        _configure_section_headers_footers(sect, ps, document)
 
 
 def export_docx(
@@ -1768,20 +1864,26 @@ def export_docx(
 
             core.created = datetime(document.metadata.year, 1, 1, tzinfo=UTC)
 
-        if document.page_sections:
+        if len(document.page_sections) > 1:
+            # Мультисекционный экспорт: несколько физических секций docx с
+            # собственными колонтитулами (титул/задание без штампа →
+            # содержание с полной основной надписью → далее сокращённая).
+            _export_multi_section(doc, document, profile)
+        elif document.page_sections:
             first = document.page_sections[0]
             # Согласовать page_section с профилем перед записью: F.06
             # start_value, поля страницы. Builder ставит свои дефолты,
             # а профиль (особенно наследник base) может их переопределить.
             # Этот вызов — единое место синхронизации модели с профилем.
             _sync_page_section_with_profile(first, profile)
-            _apply_page_size(doc, first)
-            _apply_pgnumtype(doc, first)
-            _apply_pg_borders(doc, first)
+            sect = doc.sections[0]
+            _apply_page_size(sect, first)
+            _apply_pgnumtype(sect, first)
+            _apply_pg_borders(sect, first)
             if first.footer is not None:
-                _write_footer(doc, first.footer.default)
+                _write_footer(sect.footer, first.footer.default)
             if first.header is not None:
-                _write_header(doc, first.header.default)
+                _write_header(sect.header, first.header.default)
             if first.title_block is not None and first.title_block.enabled:
                 from .title_block import write_title_block
 
@@ -1789,10 +1891,9 @@ def export_docx(
                 # Наименование (графа 1) по умолчанию = заголовок работы.
                 if not tb.title and document.metadata.title:
                     tb.title = document.metadata.title
-                write_title_block(doc.sections[0].footer, tb)
+                write_title_block(sect.footer, tb)
 
-        for page_section in document.page_sections:
-            _write_items(doc, page_section.content)
+            _write_items(doc, first.content)
 
         doc.save(str(output_path))
     finally:
@@ -1859,10 +1960,8 @@ def _patch_settings_auto_hyphenation(docx_path: Path, value: bool) -> None:
     shutil.move(str(tmp_path), str(docx_path))
 
 
-def _write_header(doc: DocxDocument, header_template: ContentTemplate) -> None:
-    """Записать содержимое header первой секции (зеркально _write_footer)."""
-    section = doc.sections[0]
-    header = section.header
+def _write_header(header: Any, header_template: ContentTemplate) -> None:
+    """Записать содержимое в данный docx-header ``header`` (зеркально _write_footer)."""
     for p in list(header.paragraphs):
         p_xml = p._p
         if p_xml.getparent() is not None and not p.text and not list(p_xml):
