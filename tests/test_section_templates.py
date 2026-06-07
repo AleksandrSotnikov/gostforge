@@ -43,6 +43,27 @@ def test_spo_diploma_templates_registered_and_front() -> None:
     assert {"title_spo", "task_spo"} <= _FRONT_TEMPLATES
 
 
+def test_front_templates_preserve_insertion_order() -> None:
+    """Вставка титула затем задания сохраняет порядок (титул → задание),
+    а не переставляет их местами (front-вставка ПОСЛЕ существующих front)."""
+    sections: list[dict] = []
+
+    def insert_front(section: dict) -> None:
+        insert_at = 0
+        for existing in sections:
+            if existing.get("frontmatter"):
+                insert_at += 1
+            else:
+                break
+        sections.insert(insert_at, section)
+
+    insert_front(_SECTION_TEMPLATES["title_spo"][1]())
+    insert_front(_SECTION_TEMPLATES["task_spo"][1]())
+    headings = [s["heading"] for s in sections]
+    assert "Титульный" in headings[0]
+    assert "Задание" in headings[1]
+
+
 def test_spo_diploma_templates_not_normocontrolled() -> None:
     """Титульник/задание оформляются по форме учебного заведения и НЕ
     должны проверяться/исправляться нробором (disabled_checks=['*'])."""

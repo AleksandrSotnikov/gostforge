@@ -3083,6 +3083,8 @@ _SECTION_TEMPLATES: dict[str, tuple[str, Any]] = {
             ],
             # Титульник оформляется вручную и не обязан соответствовать ГОСТу.
             "disabled_checks": ["*"],
+            # Идёт до содержания и печатается без колонтитула.
+            "frontmatter": True,
         },
     ),
     "title_spo": (
@@ -3235,8 +3237,17 @@ def _render_section_templates_sidebar() -> None:
         if sel == "appendix":
             new_section["heading"] = f"Приложение {_next_appendix_letter(state['sections'])}"
         if sel in _FRONT_TEMPLATES:
-            state["sections"].insert(0, new_section)
-            state["active_section_index"] = 0
+            # Front-шаблоны (титул, задание) идут в начало, но ПОСЛЕ уже
+            # вставленных front-разделов — чтобы «Титульный лист» + «Задание»
+            # сохраняли порядок вставки, а не переставлялись местами.
+            insert_at = 0
+            for existing in state["sections"]:
+                if existing.get("frontmatter"):
+                    insert_at += 1
+                else:
+                    break
+            state["sections"].insert(insert_at, new_section)
+            state["active_section_index"] = insert_at
         else:
             state["sections"].append(new_section)
             state["active_section_index"] = len(state["sections"]) - 1
